@@ -39,7 +39,11 @@ impl Channel {
 #[serde(default)]
 pub struct Settings {
     /// Release channel to update from. Missing = follow the installed build.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<Channel>,
+    /// "mapper" or "seat" = skip the start screen and open that. Missing = start screen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_page: Option<String>,
 }
 
 impl Settings {
@@ -49,14 +53,27 @@ impl Settings {
     }
 }
 
+fn path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("settings.json"))
+}
+
 /// Reads the settings file. A missing or broken file gives the defaults, so a
 /// bad edit can never stop the app from starting.
 pub fn load(app: &AppHandle) -> Settings {
-    let Ok(dir) = app.path().app_config_dir() else {
-        return Settings::default();
-    };
-    std::fs::read_to_string(dir.join("settings.json"))
-        .ok()
+    path(app)
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), String> {
+    let p = path(app).ok_or("no config folder")?;
+    if let Some(dir) = p.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    std::fs::write(p, text).map_err(|e| e.to_string())
 }

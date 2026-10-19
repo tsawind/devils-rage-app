@@ -1,4 +1,5 @@
-//! Self-update. Checks a few seconds after start, then every few hours.
+//! Self-update. Checks a few seconds after start, then every few hours, and
+//! when someone picks "Check for updates" (menu or start screen).
 //! Each channel has its own manifest on the repo's `updates` branch, written by
 //! the release workflows. Builds are signed; the updater refuses anything not
 //! signed with our key (public half in tauri.conf.json).
@@ -19,7 +20,7 @@ pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK).await;
         loop {
-            if let Err(err) = check(&app).await {
+            if let Err(err) = check(&app, false).await {
                 // Offline, GitHub down, etc. Try again next round.
                 // (Phase 0.3 sends this to the log file / developer panel.)
                 eprintln!("update check failed: {err}");
@@ -29,7 +30,21 @@ pub fn start(app: AppHandle) {
     });
 }
 
-async fn check(app: &AppHandle) -> Result<(), String> {
+/// "Check for updates" clicked: same check, but always says what it found.
+pub fn check_now(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(err) = check(&app, true).await {
+            tell(
+                &app,
+                "Couldn't check for updates",
+                format!("{err}\n\nCheck your internet connection and try again."),
+                MessageDialogKind::Warning,
+            );
+        }
+    });
+}
+
+async fn check(app: &AppHandle, manual: bool) -> Result<(), String> {
     let channel = settings::load(app).channel(app);
     let manifest: Url = format!("{MANIFEST_BASE}/{}.json", channel.as_str())
         .parse()
@@ -41,7 +56,19 @@ async fn check(app: &AppHandle) -> Result<(), String> {
         .and_then(|b| b.build())
         .map_err(|e| e.to_string())?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
-        return Ok(()); // already up to date
+        if manual {
+            tell(
+                app,
+                "No update",
+                format!(
+                    "You have the newest version: {} ({} channel).",
+                    app.package_info().version,
+                    channel.as_str()
+                ),
+                MessageDialogKind::Info,
+            );
+        }
+        return Ok(());
     };
 
     let question = format!(
@@ -75,4 +102,12 @@ async fn ask(app: &AppHandle, question: String) -> bool {
             let _ = tx.send(yes);
         });
     rx.await.unwrap_or(false)
+}
+
+fn tell(app: &AppHandle, title: &str, text: String, kind: MessageDialogKind) {
+    app.dialog()
+        .message(text)
+        .title(title)
+        .kind(kind)
+        .show(|_| {});
 }
