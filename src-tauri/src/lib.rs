@@ -3,7 +3,9 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
+mod chatlog;
 mod commands;
+mod location;
 mod mainwindow;
 mod scanner;
 mod settings;
@@ -172,6 +174,7 @@ pub fn run() {
             mainwindow::remember(&handle, &main);
             let _ = main.show();
             mainwindow::follow_pages(handle.clone());
+            location::start(handle.clone());
 
             // "Skip this screen" ticked: go straight to the chosen site (your last map).
             if let Some(url) = s.start_page.as_deref().and_then(|site| site_url(&handle, site)) {

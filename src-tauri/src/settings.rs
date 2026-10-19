@@ -63,12 +63,19 @@ pub struct Settings {
     pub last_mapper_page: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seat_page: Option<String>,
+    /// Instant location from EVE's Local chat logs. Missing = on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_log_location: Option<bool>,
     /// Show the developer section in Settings.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub developer: bool,
 }
 
 impl Settings {
+    pub fn chat_log_location(&self) -> bool {
+        self.chat_log_location.unwrap_or(true)
+    }
+
     pub fn pop_out_on_top(&self) -> bool {
         self.pop_out_on_top.unwrap_or(true)
     }

@@ -87,6 +87,10 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: App tests (chat log reader and friends)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Stamp version ${{ needs.version.outputs.version }}
         shell: bash
         run: |

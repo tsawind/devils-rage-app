@@ -57,6 +57,9 @@ pub struct SettingsView {
     pop_out_on_top: bool,
     has_pop_out_position: bool,
     developer: bool,
+    chat_log_location: bool,
+    chat_log_folder: Option<String>,
+    chat_log_characters: usize,
     last_check_secs_ago: Option<u64>,
     last_check: Option<String>,
 }
@@ -84,6 +87,9 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
         pop_out_on_top: s.pop_out_on_top(),
         has_pop_out_position: s.scanner_bounds.is_some() || !s.scanner_bounds_by.is_empty(),
         developer: s.developer,
+        chat_log_location: s.chat_log_location(),
+        chat_log_folder: crate::location::status().0,
+        chat_log_characters: crate::location::status().1,
         last_check_secs_ago: last.as_ref().map(|(ago, _)| *ago),
         last_check: last.map(|(_, text)| text),
     }
@@ -115,6 +121,7 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
             crate::scanner::set_on_top(&app, on);
         }
         "developer" => s.developer = value.as_bool().unwrap_or(false),
+        "chat_log_location" => s.chat_log_location = Some(value.as_bool().unwrap_or(true)),
         "autostart" => {
             #[cfg(desktop)]
             {

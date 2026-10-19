@@ -77,6 +77,17 @@
   </section>
 
   <section>
+    <h2>Location</h2>
+    <div class="row">
+      <div class="l">Instant location from EVE's chat logs<small>Moves your characters on the map the moment they jump, before ESI catches up</small></div>
+      <button class="tg" data-key="chat_log_location" aria-label="Instant location from EVE's chat logs"></button>
+    </div>
+    <div class="row">
+      <div class="l"><span id="clWhat">…</span><small id="clWhere">Needs "Log Chat to File" on in EVE (it is by default)</small></div>
+    </div>
+  </section>
+
+  <section>
     <h2>Scanner pop-out</h2>
     <div class="row">
       <div class="l">Keep on top of EVE<small>Turn off to let other windows cover it</small></div>
@@ -151,6 +162,17 @@
     if (state.last_check_secs_ago != null) {
       $("lastWhen").textContent = `Last checked ${ago(state.last_check_secs_ago)}`;
       $("lastWhat").textContent = state.last_check;
+    }
+    if (!state.chat_log_location) {
+      $("clWhat").textContent = "Off";
+      $("clWhere").textContent = "Characters move when ESI reports them (a few seconds later)";
+    } else if (!state.chat_log_folder) {
+      $("clWhat").textContent = "EVE's chat log folder wasn't found";
+      $("clWhere").textContent = "Start EVE once, or check that \"Log Chat to File\" is on in EVE's settings";
+    } else {
+      const n = state.chat_log_characters;
+      $("clWhat").textContent = n ? `Following ${n} character${n === 1 ? "" : "s"}` : "Waiting for a character to log in";
+      $("clWhere").textContent = state.chat_log_folder;
     }
     $("posText").textContent = state.has_pop_out_position
       ? "Opens where you last left it"

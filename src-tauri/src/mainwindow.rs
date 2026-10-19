@@ -115,6 +115,14 @@ pub fn follow_pages(app: AppHandle) {
             }
             seen = url.to_string();
             let host = url.host_str().unwrap_or_default();
+            if host == crate::host_of(crate::MAPPER_URL) {
+                // A mapper page (re)opened: once it's listening, tell it where everyone is.
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    crate::location::resend_all(&app);
+                });
+            }
             if !worth_remembering(&url) {
                 continue;
             }
