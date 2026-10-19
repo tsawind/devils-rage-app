@@ -47,6 +47,9 @@ pub struct Settings {
     /// Where the scanner pop-out was last: [x, y, width, height] in screen pixels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scanner_bounds: Option<[i32; 4]>,
+    /// Each pop-out's spot, by the window it pops out of ("main", "pophost-<character>").
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub scanner_bounds_by: std::collections::BTreeMap<String, [i32; 4]>,
     /// Scanner pop-out stays on top of other windows (EVE). Missing = yes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pop_out_on_top: Option<bool>,

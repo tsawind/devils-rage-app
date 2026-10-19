@@ -1,6 +1,7 @@
 //! The scanner pop-out window: the mapper's Patch 39 pop-out, drawn by the mapper
 //! into an app window that sits on top of EVE, without a Windows title bar.
-//! It reopens where (and as big as) it was last time.
+//! It reopens where (and as big as) it was last time, per pop-out: the main
+//! window's pop-out and each extra character's pop-out keep their own spot.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -14,12 +15,34 @@ use crate::settings;
 
 static NEXT: AtomicUsize = AtomicUsize::new(1);
 
+/// (scanner window label, the window it was popped out from).
+static PARENTS: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// Brings up the pop-out that `parent` popped out (asking for a character's
+/// pop-out again shows the one already open).
+pub fn focus_for(app: &AppHandle, parent: &str) {
+    let scanners: Vec<String> = PARENTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, p)| p == parent)
+        .map(|(s, _)| s.clone())
+        .collect();
+    for label in scanners {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }
+}
+
 /// Opens the window the mapper's pop-out draws into (pip.js asked for about:blank).
 pub fn open(
     app: &AppHandle,
     marker: &str,
     url: Url,
     features: NewWindowFeatures,
+    parent: &str,
 ) -> Option<WebviewWindow> {
     let label = format!("scanner-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
@@ -38,10 +61,14 @@ pub fn open(
         .build()
         .map_err(|e| log::warn!("couldn't open the scanner window: {e}"))
         .ok()?;
-    log::info!("scanner pop-out opened ({label})");
+    log::info!("scanner pop-out opened ({label}, from {parent})");
+    PARENTS
+        .lock()
+        .unwrap()
+        .push((label.clone(), parent.to_string()));
 
-    restore_bounds(app, &window);
-    remember_bounds(app, &window);
+    restore_bounds(app, &window, parent);
+    remember_bounds(app, &window, parent);
     let _ = window.show();
     let _ = window.set_focus();
     Some(window)
@@ -96,8 +123,18 @@ fn query_number(url: &Url, key: &str) -> f64 {
 }
 
 /// Puts the window back where it was, if that spot is still on a screen.
-fn restore_bounds(app: &AppHandle, window: &WebviewWindow) {
-    let Some([x, y, w, h]) = settings::load(app).scanner_bounds else {
+fn restore_bounds(app: &AppHandle, window: &WebviewWindow, parent: &str) {
+    let s = settings::load(app);
+    let saved = s
+        .scanner_bounds_by
+        .get(parent)
+        .copied()
+        .or(if parent == "main" {
+            s.scanner_bounds
+        } else {
+            None
+        });
+    let Some([x, y, w, h]) = saved else {
         return;
     };
     let on_screen = window
@@ -120,9 +157,10 @@ fn restore_bounds(app: &AppHandle, window: &WebviewWindow) {
 }
 
 /// Keeps track of the window's place while it's open; saves it when it closes.
-fn remember_bounds(app: &AppHandle, window: &WebviewWindow) {
+fn remember_bounds(app: &AppHandle, window: &WebviewWindow, parent: &str) {
     let app = app.clone();
     let me = window.clone();
+    let parent = parent.to_string();
     let last = Mutex::new(None::<[i32; 4]>);
     window.on_window_event(move |event| match event {
         WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
@@ -135,8 +173,16 @@ fn remember_bounds(app: &AppHandle, window: &WebviewWindow) {
         WindowEvent::Destroyed => {
             if let Some(bounds) = *last.lock().unwrap() {
                 let mut s = settings::load(&app);
-                s.scanner_bounds = Some(bounds);
+                s.scanner_bounds_by.insert(parent.clone(), bounds);
                 let _ = settings::save(&app, &s);
+            }
+            let label = me.label().to_string();
+            PARENTS.lock().unwrap().retain(|(s, _)| *s != label);
+            // An extra pop-out's hidden window has no other job: close it too.
+            if parent.starts_with("pophost-") {
+                if let Some(host) = app.get_webview_window(&parent) {
+                    let _ = host.close();
+                }
             }
         }
         _ => {}

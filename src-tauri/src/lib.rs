@@ -224,7 +224,7 @@ fn new_window_handler(
         }
 
         if url.as_str() == "about:blank" {
-            return match scanner::open(&app, &marker, url, features) {
+            return match scanner::open(&app, &marker, url, features, &me) {
                 Some(window) => NewWindowResponse::Create { window },
                 None => NewWindowResponse::Deny,
             };
@@ -246,18 +246,32 @@ fn new_window_handler(
             .find(|(k, _)| k == "as")
             .map(|(_, v)| v.chars().filter(char::is_ascii_digit).collect())
             .unwrap_or_default();
-        let label = format!("solo-{character}");
+        // ?popout=1: the mapper opened this character's window only to host its own
+        // pop-out (a second, third... pop-out). The window stays hidden; the pop-out
+        // is what you see, and closing the pop-out closes it.
+        let host = url.query_pairs().any(|(k, v)| k == "popout" && v == "1");
+        let label = if host {
+            format!("pophost-{character}")
+        } else {
+            format!("solo-{character}")
+        };
 
         if let Some(existing) = app.get_webview_window(&label) {
-            let _ = existing.navigate(url);
-            let _ = existing.set_focus();
+            if host {
+                scanner::focus_for(&app, &label);
+            } else {
+                let _ = existing.navigate(url);
+                let _ = existing.set_focus();
+            }
             return NewWindowResponse::Deny;
         }
 
         match WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
             .window_features(features)
             .title("Devil's Rage")
-            .always_on_top(true)
+            .always_on_top(!host)
+            .visible(!host)
+            .skip_taskbar(host)
             .initialization_script(marker.clone())
             .on_new_window(new_window_handler(
                 app.clone(),

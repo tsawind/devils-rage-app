@@ -82,7 +82,7 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
         start_page: s.start_page.clone().unwrap_or_else(|| "home".into()),
         autostart,
         pop_out_on_top: s.pop_out_on_top(),
-        has_pop_out_position: s.scanner_bounds.is_some(),
+        has_pop_out_position: s.scanner_bounds.is_some() || !s.scanner_bounds_by.is_empty(),
         developer: s.developer,
         last_check_secs_ago: last.as_ref().map(|(ago, _)| *ago),
         last_check: last.map(|(_, text)| text),
@@ -139,6 +139,7 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
 pub fn reset_pop_out_position(app: AppHandle) -> Result<(), String> {
     let mut s = settings::load(&app);
     s.scanner_bounds = None;
+    s.scanner_bounds_by.clear();
     settings::save(&app, &s)
 }
 
