@@ -28,6 +28,8 @@ pub fn open(
         .decorations(false)
         .always_on_top(true)
         .min_inner_size(260.0, 160.0)
+        // Hidden until it's in its saved spot (no flash in the default corner).
+        .visible(false)
         .on_new_window(crate::new_window_handler(
             app.clone(),
             marker.to_string(),
@@ -38,6 +40,8 @@ pub fn open(
 
     restore_bounds(app, &window);
     remember_bounds(app, &window);
+    let _ = window.show();
+    let _ = window.set_focus();
     Some(window)
 }
 
@@ -60,14 +64,22 @@ pub fn signal(app: &AppHandle, me: &str, url: &Url) {
             });
         }
         // The mapper folding the map away / bringing it back (CSS pixels).
+        // The map is on the left, so the window grows and shrinks on its LEFT
+        // edge: the signature panel stays where it is on screen and the map
+        // folds into it.
         "/resize-by" => {
             let dx = query_number(url, "dx");
             let dy = query_number(url, "dy");
             let scale = window.scale_factor().unwrap_or(1.0);
-            if let Ok(size) = window.inner_size() {
+            if let (Ok(size), Ok(pos)) = (window.inner_size(), window.outer_position()) {
                 let width = (size.width as f64 + dx * scale).max(260.0 * scale);
                 let height = (size.height as f64 + dy * scale).max(160.0 * scale);
+                let moved_by = width - size.width as f64;
                 let _ = window.set_size(PhysicalSize::new(width as u32, height as u32));
+                let _ = window.set_position(PhysicalPosition::new(
+                    pos.x - moved_by.round() as i32,
+                    pos.y,
+                ));
             }
         }
         _ => {}
