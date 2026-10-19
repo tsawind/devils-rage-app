@@ -72,9 +72,19 @@ pub fn remember(app: &AppHandle, window: &WebviewWindow) {
     });
 }
 
-/// Pages that shouldn't be reopened next time (logins, logouts, callbacks).
+/// A remembered page that's still fine to reopen (older builds could remember
+/// a bad one).
+pub fn reopenable(page: &str) -> bool {
+    page.parse::<Url>().is_ok_and(|url| worth_remembering(&url))
+}
+
+/// Pages that shouldn't be reopened next time: logins, logouts, callbacks, the
+/// desktop app's own pages (admin), and /app/ (the server's websocket path).
 fn worth_remembering(url: &Url) -> bool {
     let path = url.path().to_ascii_lowercase();
+    if path.starts_with("/app/") || path.starts_with("/desktop-app/") {
+        return false;
+    }
     ![
         "login", "logout", "callback", "auth", "sso", "register", "password",
     ]
