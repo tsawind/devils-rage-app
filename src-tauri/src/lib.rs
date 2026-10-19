@@ -127,32 +127,23 @@ pub fn run() {
                 _ => format!("Devil's Rage — {version} ({})", channel.as_str()),
             };
 
-            let opener = handle.clone();
+            // Lets the mapper know it runs inside the app. Read-only marker, no
+            // powers. Also hides Chrome's Document Picture-in-Picture, which the
+            // app's browser can't show: the mapper then asks for a popup window
+            // (?solo=1) and the app turns that into a pinned scanner window.
+            let marker = format!(
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\
+                 try {{ delete Window.prototype.documentPictureInPicture; delete window.documentPictureInPicture; }} catch (e) {{}}",
+                channel.as_str()
+            );
+
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title(title)
                 .inner_size(1400.0, 900.0)
                 .min_inner_size(800.0, 500.0)
                 .center()
-                // Lets the mapper know it runs inside the app (for the native
-                // pop-out windows coming next). Read-only marker, no powers.
-                .initialization_script(format!(
-                    "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});",
-                    channel.as_str()
-                ))
-                // window.open / target=_blank: our sites and logins stay in the
-                // app, everything else (zKillboard, Dotlan, ...) opens in the
-                // normal browser.
-                .on_new_window(move |url, _features| {
-                    let ours = url
-                        .host_str()
-                        .is_some_and(|h| IN_APP_HOSTS.contains(&h));
-                    if ours {
-                        NewWindowResponse::Allow
-                    } else {
-                        let _ = opener.opener().open_url(url.as_str(), None::<&str>);
-                        NewWindowResponse::Deny
-                    }
-                });
+                .initialization_script(marker.clone())
+                .on_new_window(new_window_handler(handle.clone(), marker));
 
             #[cfg(desktop)]
             let builder = builder.menu(build_menu(&handle)?);
@@ -171,6 +162,54 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running the Devil's Rage app");
+}
+
+/// window.open / target=_blank from a page:
+/// - the mapper's scanner popup (?solo=1) becomes an always-on-top window, one
+///   per character (asking again just brings that window forward);
+/// - other pages on our sites and logins open as normal app windows;
+/// - everything else (zKillboard, Dotlan, ...) opens in the normal browser.
+fn new_window_handler(
+    app: AppHandle,
+    marker: String,
+) -> impl Fn(Url, tauri::webview::NewWindowFeatures) -> NewWindowResponse<tauri::Wry> + Send + 'static
+{
+    move |url, features| {
+        let ours = url.host_str().is_some_and(|h| IN_APP_HOSTS.contains(&h));
+        if !ours {
+            let _ = app.opener().open_url(url.as_str(), None::<&str>);
+            return NewWindowResponse::Deny;
+        }
+
+        let solo = url.query_pairs().any(|(k, v)| k == "solo" && v == "1");
+        if !solo {
+            return NewWindowResponse::Allow;
+        }
+
+        let character: String = url
+            .query_pairs()
+            .find(|(k, _)| k == "as")
+            .map(|(_, v)| v.chars().filter(char::is_ascii_digit).collect())
+            .unwrap_or_default();
+        let label = format!("scanner-{character}");
+
+        if let Some(existing) = app.get_webview_window(&label) {
+            let _ = existing.navigate(url);
+            let _ = existing.set_focus();
+            return NewWindowResponse::Deny;
+        }
+
+        match WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+            .window_features(features)
+            .title("Devil's Rage · scanner")
+            .always_on_top(true)
+            .initialization_script(marker.clone())
+            .build()
+        {
+            Ok(window) => NewWindowResponse::Create { window },
+            Err(_) => NewWindowResponse::Allow,
+        }
+    }
 }
 
 /// The slim menu bar above the page: always there, never covers the mapper.
