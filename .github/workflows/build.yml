@@ -91,7 +91,9 @@ jobs:
   channel:
     # Stable waits for the draft to be published (publish.yml).
     needs: [version, build]
-    if: needs.version.outputs.channel != 'stable'
+    # Still publish if one platform failed (e.g. GitHub had no free Mac runner):
+    # latest.json then lists only the platforms that built.
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.version.outputs.channel != 'stable' }}
     runs-on: ubuntu-latest
     concurrency: update-manifests
     env:
