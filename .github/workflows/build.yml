@@ -111,8 +111,15 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Point the ${{ needs.version.outputs.channel }} channel at ${{ needs.version.outputs.tag }}
         run: bash .github/scripts/publish-channel.sh "${{ needs.version.outputs.tag }}" "${{ needs.version.outputs.channel }}"
+      - name: Post the changes to Discord
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python3 .github/scripts/discord-post.py "${{ needs.version.outputs.tag }}" "${{ needs.version.outputs.channel }}"
       - name: Keep only the 5 newest dev releases
         if: needs.version.outputs.channel == 'dev'
         run: |

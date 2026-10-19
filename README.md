@@ -31,6 +31,10 @@ The app follows the channel of the build that was installed. To switch by hand, 
 `{"channel": "beta"}` (or `stable` / `dev`) in `%APPDATA%\com.tsawind.devilsrage\settings.json`.
 Channel manifests live on the `updates` branch; don't edit it by hand.
 
+Every published build (dev, beta, stable) is posted to Discord with its change notes, when the
+repo secret `DISCORD_WEBHOOK_URL` is set. The notes are the commit messages since the previous
+build of the same kind, so commit messages are written as plain-English change notes.
+
 Builds are signed with the key in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` and
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Tsa keeps the backup. Lose it and installed apps can't update.
 
