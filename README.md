@@ -9,15 +9,26 @@ Plan and decisions: `claude/desktop-app-plan.md` in the Devils Rage VPS project.
 
 ## Status
 - [x] Phase 0.1: one window that opens the mapper; login happens inside the app
-- [ ] Phase 0.2: self-update (signed builds, GitHub Releases, stable / beta / dev)
+- [x] Phase 0.2: self-update (signed builds, GitHub Releases, stable / beta / dev)
 - [ ] Phase 0.3: settings, developer panel, admin panel, server feature flags
 
-## Getting the app (testers)
-Every push to `main` builds Windows, macOS and Linux installers. Open the **Actions** tab,
-pick the latest **Build** run, and download `installers-windows-latest` from **Artifacts**.
-Run the `.exe` inside (Windows may warn that it is unsigned: More info → Run anyway).
+## Getting the app
+Download the `-setup.exe` from the **Releases** page (Windows may warn that it is unsigned:
+More info → Run anyway). After that the app updates itself.
 
-Pushing a tag such as `v0.1.0` builds the same installers into a draft GitHub Release.
+## Releases and update channels
+| Do this | You get | Who receives it |
+|---|---|---|
+| Push to `main` | `0.x.y-dev.N` pre-release | people on a dev build |
+| Push tag `v0.2.0-beta.1` | beta pre-release | people on a beta build |
+| Push tag `v0.2.0`, then **Publish** the draft on GitHub | stable release | everyone |
+
+The app follows the channel of the build that was installed. To switch by hand, put
+`{"channel": "beta"}` (or `stable` / `dev`) in `%APPDATA%\com.tsawind.devilsrage\settings.json`.
+Channel manifests live on the `updates` branch; don't edit it by hand.
+
+Builds are signed with the key in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Tsa keeps the backup. Lose it and installed apps can't update.
 
 ## Building it yourself (Windows)
 1. Install [Rust](https://rustup.rs), [Node.js 22](https://nodejs.org) and the

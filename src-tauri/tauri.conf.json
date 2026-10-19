@@ -40,7 +40,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg1RjJFOEM4OENDNzQwN0MKUldSOFFNZU15T2p5aGRjeXd4OVhuZDYyd0tld1pMa2drS3Y3clVjT0RsL1lIV2ppN01pVFdrYTkK",
       "endpoints": [
         "https://raw.githubusercontent.com/tsawind/devils-rage-app/updates/stable.json"
       ],
