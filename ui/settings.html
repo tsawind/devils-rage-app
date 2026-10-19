@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devil's Rage · Settings</title>
+<style>
+  :root { --bg:#0d0d10; --card:#131317; --line:#26262c; --line2:#1e1e24; --text:#e6e6ea; --muted:#8a8a92;
+          --red:#a8181f; --red-hi:#d6242c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 22px 20px 40px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  header h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  header .ver { margin-left: auto; color: #6a6a72; font-size: 12px; }
+  .back { background: none; border: 0; color: var(--red-hi); font-size: 20px; cursor: pointer; padding: 0 4px; }
+  section { border: 1px solid var(--line); border-radius: 10px; padding: 6px 16px; margin-bottom: 14px; background: var(--card); }
+  section h2 { font-size: 13px; font-weight: 600; margin: 10px 0 4px; color: #cfcfd5; letter-spacing: .2px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line2); }
+  section h2 + .row { border-top: 0; }
+  .l { flex: 1; min-width: 0; }
+  .l small { display: block; color: var(--muted); font-size: 12px; }
+  .seg { display: flex; border: 1px solid #34343c; border-radius: 7px; overflow: hidden; flex-shrink: 0; }
+  .seg button { background: none; border: 0; color: #a8a8b0; padding: 5px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid #34343c; }
+  .seg button.on { background: var(--red); color: #fff; }
+  .tg { width: 36px; height: 20px; border-radius: 11px; background: #34343c; position: relative; border: 0; cursor: pointer; flex-shrink: 0; }
+  .tg::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #bbb; transition: left .12s; }
+  .tg.on { background: var(--red); }
+  .tg.on::after { left: 19px; background: #fff; }
+  .b { background: none; border: 1px solid #3a3a42; border-radius: 7px; padding: 5px 12px; color: #d0d0d6; font: inherit; font-size: 13px; cursor: pointer; flex-shrink: 0; }
+  .b:hover { border-color: #5a5a64; color: #fff; }
+  .b.danger { border-color: #7a1a1f; color: #f08a8f; }
+  .b.danger:hover { border-color: var(--red-hi); }
+  .locked { opacity: .55; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #1d1d23; border: 1px solid #34343c;
+           padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <button class="back" id="back" title="Back">←</button>
+    <h1>Settings</h1>
+    <span class="ver" id="ver">…</span>
+  </header>
+
+  <section>
+    <h2>Starting the app</h2>
+    <div class="row">
+      <div class="l">Open with<small>Where the app goes when it starts</small></div>
+      <div class="seg" data-key="start_page">
+        <button data-v="home">Start screen</button><button data-v="mapper">Mapper</button><button data-v="seat">SeAT</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="l">Start with Windows<small>Opens the app when you log in to Windows</small></div>
+      <button class="tg" data-key="autostart" aria-label="Start with Windows"></button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Updates</h2>
+    <div class="row">
+      <div class="l">Update channel<small>Beta and Dev get new things sooner and can break. Takes effect at the next update check.</small></div>
+      <div class="seg" data-key="channel">
+        <button data-v="stable">Stable</button><button data-v="beta">Beta</button><button data-v="dev">Dev</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="l"><span id="lastWhen">Not checked yet</span><small id="lastWhat">The app checks a few seconds after it starts, then every 4 hours</small></div>
+      <button class="b" id="checkNow">Check now</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Scanner pop-out</h2>
+    <div class="row">
+      <div class="l">Keep on top of EVE<small>Turn off to let other windows cover it</small></div>
+      <button class="tg" data-key="pop_out_on_top" aria-label="Keep on top of EVE"></button>
+    </div>
+    <div class="row">
+      <div class="l">Position<small id="posText">Opens where you last left it</small></div>
+      <button class="b" id="resetPos">Reset position</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Developer</h2>
+    <div class="row">
+      <div class="l">Developer tools<small>Show the extra tools below (handy for bug reports)</small></div>
+      <button class="tg" data-key="developer" aria-label="Developer tools"></button>
+    </div>
+    <div class="row dev">
+      <div class="l">App log<small>What the app did, for bug reports</small></div>
+      <button class="b" id="openLog">Open log</button>
+      <button class="b" id="copyLog">Copy</button>
+    </div>
+    <div class="row dev">
+      <div class="l">Browser dev tools<small>Inspect the page in the main window</small></div>
+      <button class="b" id="devtools">Open</button>
+    </div>
+    <div class="row dev">
+      <div class="l">Reset the app<small>Logs you out, clears settings and the saved pop-out spot, then restarts</small></div>
+      <button class="b danger" id="reset">Reset…</button>
+    </div>
+  </section>
+
+  <section class="locked">
+    <h2>Admin · directors only</h2>
+    <div class="row">
+      <div class="l">Feature switches, minimum version, message of the day<small>Coming with the next mapper patch</small></div>
+      <span aria-hidden="true">🔒</span>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  let state = {};
+
+  function toast(text) {
+    const t = $("toast");
+    t.textContent = text;
+    t.classList.add("show");
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => t.classList.remove("show"), 1800);
+  }
+
+  function ago(secs) {
+    if (secs < 60) return "just now";
+    const m = Math.round(secs / 60);
+    if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+    const h = Math.round(m / 60);
+    return `${h} hour${h === 1 ? "" : "s"} ago`;
+  }
+
+  function render() {
+    $("ver").textContent = `${state.version} · ${state.channel}`;
+    document.querySelectorAll(".seg").forEach(seg => {
+      const value = state[seg.dataset.key];
+      seg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === value));
+    });
+    document.querySelectorAll(".tg").forEach(t => t.classList.toggle("on", !!state[t.dataset.key]));
+    document.querySelectorAll(".dev").forEach(r => r.hidden = !state.developer);
+    if (state.last_check_secs_ago != null) {
+      $("lastWhen").textContent = `Last checked ${ago(state.last_check_secs_ago)}`;
+      $("lastWhat").textContent = state.last_check;
+    }
+    $("posText").textContent = state.has_pop_out_position
+      ? "Opens where you last left it"
+      : "Not saved yet: it opens where Windows puts it";
+  }
+
+  async function load() {
+    try { state = await invoke("get_settings"); render(); } catch (e) { toast(String(e)); }
+  }
+
+  async function set(key, value) {
+    try {
+      await invoke("set_setting", { key, value });
+      state[key] = value;
+      render();
+      toast("Saved");
+    } catch (e) {
+      toast(String(e));
+      load();
+    }
+  }
+
+  document.querySelectorAll(".seg").forEach(seg => seg.addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (b) set(seg.dataset.key, b.dataset.v);
+  }));
+  document.querySelectorAll(".tg").forEach(t => t.addEventListener("click", () => set(t.dataset.key, !state[t.dataset.key])));
+
+  $("checkNow").addEventListener("click", () => {
+    invoke("check_updates");
+    toast("Checking…");
+    setTimeout(load, 4000);
+  });
+  $("resetPos").addEventListener("click", async () => {
+    await invoke("reset_pop_out_position");
+    state.has_pop_out_position = false;
+    render();
+    toast("Pop-out position reset");
+  });
+  $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
+  $("copyLog").addEventListener("click", async () => {
+    try {
+      const text = await invoke("read_log");
+      await navigator.clipboard.writeText(text || "(the log is empty)");
+      toast("Log copied: paste it into Discord or a file");
+    } catch (e) { toast(String(e)); }
+  });
+  $("devtools").addEventListener("click", () => invoke("open_devtools"));
+  $("reset").addEventListener("click", () => {
+    if (confirm("Reset the app?\n\nYou'll be logged out of the mapper and SeAT in the app, all app settings are cleared, and the app restarts.")) {
+      invoke("reset_app");
+    }
+  });
+  $("back").addEventListener("click", () => {
+    if (history.length > 1) history.back(); else location.href = "index.html";
+  });
+
+  load();
+  setInterval(load, 60000);
+</script>
+</body>
+</html>

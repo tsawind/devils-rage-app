@@ -4,7 +4,8 @@
 //! the release workflows. Builds are signed; the updater refuses anything not
 //! signed with our key (public half in tauri.conf.json).
 
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 
 use tauri::{AppHandle, Url};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -16,6 +17,23 @@ const MANIFEST_BASE: &str = "https://raw.githubusercontent.com/tsawind/devils-ra
 const FIRST_CHECK: Duration = Duration::from_secs(10);
 const CHECK_EVERY: Duration = Duration::from_secs(4 * 60 * 60);
 
+/// When the last check ran and what it found (shown in Settings).
+static LAST: Mutex<Option<(SystemTime, String)>> = Mutex::new(None);
+
+fn record(outcome: impl Into<String>) {
+    let outcome = outcome.into();
+    log::info!("update check: {outcome}");
+    *LAST.lock().unwrap() = Some((SystemTime::now(), outcome));
+}
+
+/// (seconds ago, what it found), or None before the first check.
+pub fn last_check() -> Option<(u64, String)> {
+    LAST.lock().unwrap().as_ref().map(|(when, text)| {
+        let ago = when.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+        (ago, text.clone())
+    })
+}
+
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_CHECK).await;
@@ -23,7 +41,7 @@ pub fn start(app: AppHandle) {
             if let Err(err) = check(&app, false).await {
                 // Offline, GitHub down, etc. Try again next round.
                 // (Phase 0.3 sends this to the log file / developer panel.)
-                eprintln!("update check failed: {err}");
+                record(format!("Couldn't check: {err}"));
             }
             tokio::time::sleep(CHECK_EVERY).await;
         }
@@ -34,6 +52,7 @@ pub fn start(app: AppHandle) {
 pub fn check_now(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         if let Err(err) = check(&app, true).await {
+            record(format!("Couldn't check: {err}"));
             tell(
                 &app,
                 "Couldn't check for updates",
@@ -56,6 +75,7 @@ async fn check(app: &AppHandle, manual: bool) -> Result<(), String> {
         .and_then(|b| b.build())
         .map_err(|e| e.to_string())?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        record("You have the newest version");
         if manual {
             tell(
                 app,
@@ -71,6 +91,7 @@ async fn check(app: &AppHandle, manual: bool) -> Result<(), String> {
         return Ok(());
     };
 
+    record(format!("Version {} is ready", update.version));
     let question = format!(
         "Devil's Rage {} is ready ({} channel). You have {}.\n\nInstall it and restart now?",
         update.version,
@@ -81,6 +102,7 @@ async fn check(app: &AppHandle, manual: bool) -> Result<(), String> {
         return Ok(()); // "Later": ask again at the next check
     }
 
+    log::info!("installing {}", update.version);
     update
         .download_and_install(|_, _| {}, || {})
         .await

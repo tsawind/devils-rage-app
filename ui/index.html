@@ -68,6 +68,7 @@
   <span class="hint">Back here any time: Home in the menu bar (Ctrl+Shift+H)</span>
   <span class="grow"></span>
   <button id="upd">Check for updates</button>
+  <button id="set">Settings</button>
 </footer>
 
 <script>
@@ -86,6 +87,7 @@
   });
 
   document.getElementById("upd").addEventListener("click", () => invoke("check_updates"));
+  document.getElementById("set").addEventListener("click", () => { location.href = "settings.html"; });
 </script>
 </body>
 </html>

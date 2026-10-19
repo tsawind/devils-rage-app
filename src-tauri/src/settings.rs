@@ -47,9 +47,19 @@ pub struct Settings {
     /// Where the scanner pop-out was last: [x, y, width, height] in screen pixels.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scanner_bounds: Option<[i32; 4]>,
+    /// Scanner pop-out stays on top of other windows (EVE). Missing = yes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pop_out_on_top: Option<bool>,
+    /// Show the developer section in Settings.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub developer: bool,
 }
 
 impl Settings {
+    pub fn pop_out_on_top(&self) -> bool {
+        self.pop_out_on_top.unwrap_or(true)
+    }
+
     pub fn channel(&self, app: &AppHandle) -> Channel {
         self.channel
             .unwrap_or_else(|| Channel::from_version(&app.package_info().version.to_string()))
@@ -70,6 +80,13 @@ pub fn load(app: &AppHandle) -> Settings {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+/// Deletes the settings file (Settings → Reset the app).
+pub fn delete(app: &AppHandle) {
+    if let Some(p) = path(app) {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 pub fn save(app: &AppHandle, settings: &Settings) -> Result<(), String> {

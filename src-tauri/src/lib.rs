@@ -1,9 +1,9 @@
-use serde::Serialize;
 use tauri::{
     webview::NewWindowResponse, AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_opener::OpenerExt;
 
+mod commands;
 mod scanner;
 mod settings;
 #[cfg(desktop)]
@@ -22,13 +22,22 @@ const IN_APP_HOSTS: &[&str] = &[
     "discord.com",
 ];
 
-/// The start screen bundled with the app (ui/index.html).
-fn home_url() -> Url {
+/// Name of the log file in the app's log folder
+/// (Windows: %LOCALAPPDATA%\com.tsawind.devilsrage\logs\devils-rage.log).
+pub const LOG_NAME: &str = "devils-rage";
+
+/// A page bundled with the app (ui/...).
+fn app_url(page: &str) -> Url {
     #[cfg(windows)]
-    let url = "http://tauri.localhost/index.html";
+    let base = "http://tauri.localhost/";
     #[cfg(not(windows))]
-    let url = "tauri://localhost/index.html";
-    url.parse().expect("valid home url")
+    let base = "tauri://localhost/";
+    format!("{base}{page}").parse().expect("valid app url")
+}
+
+/// The start screen (ui/index.html).
+fn home_url() -> Url {
+    app_url("index.html")
 }
 
 fn site_url(site: &str) -> Option<Url> {
@@ -46,66 +55,55 @@ fn go(app: &AppHandle, url: Url) {
     }
 }
 
-#[derive(Serialize)]
-struct AppInfo {
-    version: String,
-    channel: &'static str,
-    start_page: Option<String>,
-}
-
-// ---- Commands for the start screen. Only the app's own pages can call these:
-// ---- remote pages (mapper, SeAT) get no IPC access unless a capability says so.
-
-#[tauri::command]
-fn app_info(app: AppHandle) -> AppInfo {
-    let s = settings::load(&app);
-    AppInfo {
-        version: app.package_info().version.to_string(),
-        channel: s.channel(&app).as_str(),
-        start_page: s.start_page,
-    }
-}
-
-#[tauri::command]
-fn open_site(app: AppHandle, site: String, remember: bool) -> Result<(), String> {
-    let url = site_url(&site).ok_or("unknown site")?;
-    let mut s = settings::load(&app);
-    let wanted = remember.then(|| site.clone());
-    if s.start_page != wanted {
-        s.start_page = wanted;
-        settings::save(&app, &s)?;
-    }
-    go(&app, url);
-    Ok(())
-}
-
-#[tauri::command]
-fn check_updates(app: AppHandle) {
-    #[cfg(desktop)]
-    updates::check_now(app);
-    #[cfg(not(desktop))]
-    let _ = app;
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let mut builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .max_file_size(2_000_000)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some(LOG_NAME.into()),
+                    }),
+                ])
+                .build(),
+        )
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(desktop)]
     {
         builder = builder
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_dialog::init())
-            .plugin(tauri_plugin_process::init());
+            .plugin(tauri_plugin_process::init())
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ));
     }
 
     builder
-        .invoke_handler(tauri::generate_handler![app_info, open_site, check_updates])
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::open_site,
+            commands::check_updates,
+            commands::get_settings,
+            commands::set_setting,
+            commands::reset_pop_out_position,
+            commands::read_log,
+            commands::open_log,
+            commands::open_devtools,
+            commands::reset_app,
+        ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             "home" => go(app, home_url()),
             "mapper" => go(app, MAPPER_URL.parse().unwrap()),
             "seat" => go(app, SEAT_URL.parse().unwrap()),
+            "settings" => go(app, app_url("settings.html")),
             "reload" => {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.eval("location.reload()");
@@ -119,6 +117,7 @@ pub fn run() {
             let handle = app.handle().clone();
             let s = settings::load(&handle);
             let version = app.package_info().version.to_string();
+            log::info!("Devil's Rage {version} starting");
             let channel = s.channel(&handle);
 
             // Stable builds show just the name; test builds show which build it
@@ -260,7 +259,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let home = MenuItem::with_id(app, "home", "Home", true, None::<&str>)?;
     let mapper = MenuItem::with_id(app, "mapper", "Mapper", true, None::<&str>)?;
     let seat = MenuItem::with_id(app, "seat", "SeAT", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let updates = MenuItem::with_id(app, "updates", "Check for updates", true, None::<&str>)?;
-    Menu::with_items(app, &[&home, &mapper, &seat, &reload, &updates])
+    Menu::with_items(app, &[&home, &mapper, &seat, &settings, &reload, &updates])
 }

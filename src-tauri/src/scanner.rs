@@ -26,7 +26,7 @@ pub fn open(
         .window_features(features)
         .title("Devil's Rage · scanner")
         .decorations(false)
-        .always_on_top(true)
+        .always_on_top(settings::load(app).pop_out_on_top())
         .min_inner_size(260.0, 160.0)
         // Hidden until it's in its saved spot (no flash in the default corner).
         .visible(false)
@@ -36,7 +36,9 @@ pub fn open(
             label.clone(),
         ))
         .build()
+        .map_err(|e| log::warn!("couldn't open the scanner window: {e}"))
         .ok()?;
+    log::info!("scanner pop-out opened ({label})");
 
     restore_bounds(app, &window);
     remember_bounds(app, &window);
@@ -139,4 +141,13 @@ fn remember_bounds(app: &AppHandle, window: &WebviewWindow) {
         }
         _ => {}
     });
+}
+
+/// Settings → "Keep on top of EVE": applies to scanner windows already open too.
+pub fn set_on_top(app: &AppHandle, on_top: bool) {
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("scanner-") || label.starts_with("solo-") {
+            let _ = window.set_always_on_top(on_top);
+        }
+    }
 }
