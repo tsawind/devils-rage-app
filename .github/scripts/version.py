@@ -2,6 +2,7 @@
 
 Tag  v0.2.0          -> stable 0.2.0, draft release (Tsa publishes it by hand)
 Tag  v0.2.0-beta.1   -> beta, published pre-release
+"Run workflow" with a version typed in -> same as pushing that tag
 Push to main         -> dev, version = next patch after the newest version so far,
                         e.g. 0.2.1-dev.37 (37 = the workflow run number)
 
@@ -23,6 +24,10 @@ def core(version):
 
 ref_type = os.environ.get("GITHUB_REF_TYPE", "")
 ref_name = os.environ.get("GITHUB_REF_NAME", "")
+release = os.environ.get("RELEASE", "").strip()
+if release:
+    # "Run workflow" with a version typed in: same as pushing that tag.
+    ref_type, ref_name = "tag", "v" + release.lstrip("v")
 run_number = os.environ.get("GITHUB_RUN_NUMBER", "0")
 
 if ref_type == "tag":

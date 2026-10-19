@@ -23,6 +23,10 @@ More info → Run anyway). After that the app updates itself.
 | Push tag `v0.2.0-beta.1` | beta pre-release | people on a beta build |
 | Push tag `v0.2.0`, then **Publish** the draft on GitHub | stable release | stable and beta users |
 
+Easiest way to release without git: **Actions → Build → Run workflow**, type the version
+(`0.2.0`, or `0.2.0-beta.1` for a beta) and press the green button. A stable build lands as a
+**draft** on the Releases page; open it and click **Publish release** to ship it.
+
 The app follows the channel of the build that was installed. To switch by hand, put
 `{"channel": "beta"}` (or `stable` / `dev`) in `%APPDATA%\com.tsawind.devilsrage\settings.json`.
 Channel manifests live on the `updates` branch; don't edit it by hand.

@@ -4,12 +4,19 @@ name: Build
 # Tag v1.2.3-beta.1  -> beta build, published as a pre-release, beta channel updated
 # Tag v1.2.3         -> stable build as a DRAFT release; publishing the draft on
 #                       GitHub updates the stable channel (see publish.yml)
-# Manual             -> "Run workflow" on the Actions tab (same as a push to main)
+# Manual             -> Actions tab -> Build -> "Run workflow". Leave the box empty
+#                       for a dev build, or type a version (0.2.0 or 0.2.0-beta.1)
+#                       to make that release, exactly like pushing the tag.
 on:
   push:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Version to release, e.g. 0.2.0 (stable) or 0.2.0-beta.1. Empty = dev build.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -28,6 +35,8 @@ jobs:
         with:
           fetch-depth: 0
       - id: v
+        env:
+          RELEASE: ${{ inputs.release }}
         run: python3 .github/scripts/version.py | tee -a "$GITHUB_OUTPUT"
 
   build:
