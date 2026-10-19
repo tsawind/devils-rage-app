@@ -1,0 +1,47 @@
+name: Announce
+
+# Posts a short note to the app's Discord channel(s), e.g. "please test the new
+# pop-out". Actions tab -> Announce -> Run workflow. Silent unless "ping" is on.
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'What to post'
+        required: true
+      where:
+        description: 'Which channel'
+        type: choice
+        options: [testing, main]
+        default: testing
+      ping:
+        description: 'Make it a normal message that notifies people (otherwise silent)'
+        type: boolean
+        default: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          MAIN: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TESTING: ${{ secrets.DISCORD_WEBHOOK_URL_TESTING }}
+          MESSAGE: ${{ inputs.message }}
+          WHERE: ${{ inputs.where }}
+          PING: ${{ inputs.ping }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          hook = os.environ["TESTING"] if os.environ["WHERE"] == "testing" and os.environ["TESTING"] else os.environ["MAIN"]
+          if not hook:
+              raise SystemExit("no webhook secret set")
+          payload = {"username": "Devil's Rage app", "content": os.environ["MESSAGE"][:1900]}
+          if os.environ["PING"] != "true":
+              payload["flags"] = 4096
+              payload["allowed_mentions"] = {"parse": []}
+          else:
+              payload["allowed_mentions"] = {"parse": ["roles", "everyone"]}
+          req = urllib.request.Request(hook, data=json.dumps(payload).encode(),
+                                       headers={"Content-Type": "application/json", "User-Agent": "devils-rage-app-ci"})
+          print(urllib.request.urlopen(req).status)
+          PY

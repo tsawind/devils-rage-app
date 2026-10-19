@@ -11,6 +11,12 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # Docs and Discord-only changes don't need a new app build.
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/announce.yml'
+      - '.github/workflows/publish.yml'
+      - '.github/scripts/discord-post.py'
   workflow_dispatch:
     inputs:
       release:
