@@ -132,8 +132,9 @@ pub fn run() {
             // powers), and gives it a stand-in for Chrome's picture-in-picture so
             // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\n{}",
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\n{}\n{}",
                 channel.as_str(),
+                SHORTCUTS,
                 include_str!("pip.js")
             );
 
@@ -164,8 +165,18 @@ pub fn run() {
         .expect("error while running the Devil's Rage app");
 }
 
-/// Fake address the pop-out uses to ask the app for things (see pip.js).
+/// Fake address pages use to ask the app for things (see pip.js).
 const SIGNAL_HOST: &str = "dr-app.invalid";
+
+/// Keyboard shortcuts in every app page: Ctrl+Shift+H = back to the start screen.
+const SHORTCUTS: &str = r#"
+window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'H' || e.key === 'h')) {
+        e.preventDefault();
+        try { window.open('https://dr-app.invalid/home', '_blank'); } catch (err) {}
+    }
+}, true);
+"#;
 
 /// window.open / target=_blank from a page (`me` = the window asking):
 /// - `about:blank` from the mapper's pop-out (pip.js) becomes the scanner
@@ -182,7 +193,11 @@ fn new_window_handler(
 {
     move |url, features| {
         if url.host_str() == Some(SIGNAL_HOST) {
-            scanner::signal(&app, &me, &url);
+            if url.path() == "/home" {
+                go(&app, home_url());
+            } else {
+                scanner::signal(&app, &me, &url);
+            }
             return NewWindowResponse::Deny;
         }
 
@@ -239,10 +254,13 @@ fn new_window_handler(
 #[cfg(desktop)]
 fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem};
-    let home = MenuItem::with_id(app, "home", "Home", true, Some("CmdOrCtrl+Shift+H"))?;
+    // No shortcuts on the items themselves: Windows prints them next to the
+    // name in a top-level menu bar ("HomeCtrl+Shift+H"). Ctrl+Shift+H for Home
+    // comes from the page instead (SHORTCUTS); Ctrl+R / F5 reload on their own.
+    let home = MenuItem::with_id(app, "home", "Home", true, None::<&str>)?;
     let mapper = MenuItem::with_id(app, "mapper", "Mapper", true, None::<&str>)?;
     let seat = MenuItem::with_id(app, "seat", "SeAT", true, None::<&str>)?;
-    let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
+    let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
     let updates = MenuItem::with_id(app, "updates", "Check for updates", true, None::<&str>)?;
     Menu::with_items(app, &[&home, &mapper, &seat, &reload, &updates])
 }
