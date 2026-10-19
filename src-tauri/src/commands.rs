@@ -27,7 +27,7 @@ pub fn app_info(app: AppHandle) -> AppInfo {
 
 #[tauri::command]
 pub fn open_site(app: AppHandle, site: String, remember: bool) -> Result<(), String> {
-    let url = crate::site_url(&site).ok_or("unknown site")?;
+    let url = crate::site_url(&app, &site).ok_or("unknown site")?;
     let mut s = settings::load(&app);
     let wanted = remember.then(|| site.clone());
     if s.start_page != wanted {

@@ -50,6 +50,16 @@ pub struct Settings {
     /// Scanner pop-out stays on top of other windows (EVE). Missing = yes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pop_out_on_top: Option<bool>,
+    /// Main window: [x, y, width, height] in screen pixels, and maximised or not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_bounds: Option<[i32; 4]>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub main_maximized: bool,
+    /// The last mapper / SeAT page you were on (Mapper and SeAT reopen it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_mapper_page: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seat_page: Option<String>,
     /// Show the developer section in Settings.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub developer: bool,

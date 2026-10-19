@@ -4,6 +4,7 @@ use tauri::{
 use tauri_plugin_opener::OpenerExt;
 
 mod commands;
+mod mainwindow;
 mod scanner;
 mod settings;
 #[cfg(desktop)]
@@ -40,12 +41,25 @@ fn home_url() -> Url {
     app_url("index.html")
 }
 
-fn site_url(site: &str) -> Option<Url> {
-    match site {
-        "mapper" => MAPPER_URL.parse().ok(),
-        "seat" => SEAT_URL.parse().ok(),
-        _ => None,
-    }
+fn host_of(url: &str) -> &str {
+    url.trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or(url)
+}
+
+/// Where "Mapper" / "SeAT" go: the page you were last on there (your map),
+/// or the site's front page the first time.
+fn site_url(app: &AppHandle, site: &str) -> Option<Url> {
+    let s = settings::load(app);
+    let (root, last) = match site {
+        "mapper" => (MAPPER_URL, s.last_mapper_page),
+        "seat" => (SEAT_URL, s.last_seat_page),
+        _ => return None,
+    };
+    last.and_then(|page| page.parse::<Url>().ok())
+        .filter(|url| url.host_str() == Some(host_of(root)))
+        .or_else(|| root.parse().ok())
 }
 
 fn go(app: &AppHandle, url: Url) {
@@ -101,8 +115,11 @@ pub fn run() {
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             "home" => go(app, home_url()),
-            "mapper" => go(app, MAPPER_URL.parse().unwrap()),
-            "seat" => go(app, SEAT_URL.parse().unwrap()),
+            "mapper" | "seat" => {
+                if let Some(url) = site_url(app, event.id().as_ref()) {
+                    go(app, url);
+                }
+            }
             "settings" => go(app, app_url("settings.html")),
             "reload" => {
                 if let Some(win) = app.get_webview_window("main") {
@@ -142,16 +159,22 @@ pub fn run() {
                 .inner_size(1400.0, 900.0)
                 .min_inner_size(800.0, 500.0)
                 .center()
+                // Hidden until it's back in its saved place (no jump on screen).
+                .visible(false)
                 .initialization_script(marker.clone())
                 .on_new_window(new_window_handler(handle.clone(), marker, "main".into()));
 
             #[cfg(desktop)]
             let builder = builder.menu(build_menu(&handle)?);
 
-            builder.build()?;
+            let main = builder.build()?;
+            mainwindow::restore(&handle, &main);
+            mainwindow::remember(&handle, &main);
+            let _ = main.show();
+            mainwindow::follow_pages(handle.clone());
 
-            // "Skip this screen" ticked: go straight to the chosen site.
-            if let Some(url) = s.start_page.as_deref().and_then(site_url) {
+            // "Skip this screen" ticked: go straight to the chosen site (your last map).
+            if let Some(url) = s.start_page.as_deref().and_then(|site| site_url(&handle, site)) {
                 go(&handle, url);
             }
 
