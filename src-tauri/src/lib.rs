@@ -60,7 +60,8 @@ fn site_url(app: &AppHandle, site: &str) -> Option<Url> {
         "seat" => (SEAT_URL, s.last_seat_page),
         _ => return None,
     };
-    last.and_then(|page| page.parse::<Url>().ok())
+    last.filter(|page| mainwindow::reopenable(page))
+        .and_then(|page| page.parse::<Url>().ok())
         .filter(|url| url.host_str() == Some(host_of(root)))
         .or_else(|| root.parse().ok())
 }
@@ -125,7 +126,7 @@ pub fn run() {
                 }
             }
             "settings" => go(app, app_url("settings.html")),
-            "admin" => go(app, format!("{MAPPER_URL}/app/admin").parse().unwrap()),
+            "admin" => go(app, format!("{MAPPER_URL}/desktop-app/admin").parse().unwrap()),
             "reload" => {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.eval("location.reload()");

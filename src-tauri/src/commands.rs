@@ -198,7 +198,7 @@ pub fn open_log(app: AppHandle) -> Result<(), String> {
 /// Settings → Admin: the mapper's App admin page (the mapper checks who may open it).
 #[tauri::command]
 pub fn open_admin(app: AppHandle) {
-    if let Ok(url) = format!("{}/app/admin", crate::MAPPER_URL).parse() {
+    if let Ok(url) = format!("{}/desktop-app/admin", crate::MAPPER_URL).parse() {
         crate::go(&app, url);
     }
 }

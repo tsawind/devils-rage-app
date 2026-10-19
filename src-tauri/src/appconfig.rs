@@ -1,5 +1,5 @@
 //! The app's settings for everyone, set by directors on the mapper's App admin page
-//! (mapper Patch 46). Read from MAPPER_URL/app/config at start and every 30 minutes;
+//! (mapper Patch 46). Read from MAPPER_URL/desktop-app/config at start and every 30 minutes;
 //! nothing in it is secret, so no login is needed.
 //!
 //! - motd: shown on the start screen
@@ -61,7 +61,7 @@ pub fn start(app: AppHandle) {
 }
 
 async fn fetch() -> Result<AppConfig, String> {
-    let url = format!("{}/app/config", crate::MAPPER_URL);
+    let url = format!("{}/desktop-app/config", crate::MAPPER_URL);
     let response = reqwest::Client::new()
         .get(url)
         .header("Accept", "application/json")
