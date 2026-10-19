@@ -29,4 +29,5 @@ jobs:
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL_TESTING: ${{ secrets.DISCORD_WEBHOOK_URL_TESTING }}
         run: python3 .github/scripts/discord-post.py "${{ github.event.release.tag_name }}" stable

@@ -2,6 +2,7 @@
 
 usage: discord-post.py <tag> <channel>
 needs: DISCORD_WEBHOOK_URL (repo secret; nothing is posted without it),
+       DISCORD_WEBHOOK_URL_TESTING (optional: dev/beta builds go there instead),
        GITHUB_REPOSITORY, a checkout with tags (fetch-depth: 0)
 
 "What changed" = the commit messages since the previous release of the same kind
@@ -18,6 +19,9 @@ import urllib.request
 
 tag, channel = sys.argv[1], sys.argv[2]
 hook = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+testing_hook = os.environ.get("DISCORD_WEBHOOK_URL_TESTING", "").strip()
+if channel != "stable" and testing_hook:
+    hook = testing_hook
 repo = os.environ.get("GITHUB_REPOSITORY", "tsawind/devils-rage-app")
 if not hook:
     print("no DISCORD_WEBHOOK_URL secret: not posting")
@@ -63,6 +67,10 @@ if len(description) > 3800:
 
 payload = {
     "username": "Devil's Rage app",
+    # Silent: no sound or popup for anyone (the channel just shows as unread).
+    "flags": 4096,
+    # Never ping anyone from a build post.
+    "allowed_mentions": {"parse": []},
     "embeds": [
         {
             "title": f"Devil's Rage {version}",

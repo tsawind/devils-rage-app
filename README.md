@@ -32,7 +32,9 @@ The app follows the channel of the build that was installed. To switch by hand, 
 Channel manifests live on the `updates` branch; don't edit it by hand.
 
 Every published build (dev, beta, stable) is posted to Discord with its change notes, when the
-repo secret `DISCORD_WEBHOOK_URL` is set. The notes are the commit messages since the previous
+repo secret `DISCORD_WEBHOOK_URL` is set. Posts are silent (no sound or popup). With the optional
+secret `DISCORD_WEBHOOK_URL_TESTING`, dev and beta builds go to that channel instead and only stable
+releases go to the main one. The notes are the commit messages since the previous
 build of the same kind, so commit messages are written as plain-English change notes.
 
 Builds are signed with the key in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` and
