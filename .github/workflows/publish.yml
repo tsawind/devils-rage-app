@@ -1,0 +1,23 @@
+name: Publish stable
+
+# Runs when a draft release is published on GitHub (the "ship it" button).
+# A stable release supersedes everything, so all three channels point at it.
+# (The app never downgrades, so dev/beta users who are already newer stay put.)
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  stable:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    concurrency: update-manifests
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Point all channels at ${{ github.event.release.tag_name }}
+        run: bash .github/scripts/publish-channel.sh "${{ github.event.release.tag_name }}" stable beta dev

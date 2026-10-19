@@ -14,7 +14,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "appimage",
+      "deb"
+    ],
     "publisher": "Tsawind",
     "shortDescription": "Devil's Rage corp mapper",
     "category": "Utility",
@@ -28,6 +34,18 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_PUBLIC_KEY",
+      "endpoints": [
+        "https://raw.githubusercontent.com/tsawind/devils-rage-app/updates/stable.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

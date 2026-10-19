@@ -1,11 +1,26 @@
 use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
 
+mod settings;
+#[cfg(desktop)]
+mod updates;
+
 /// The live mapper. Phase 0 step 3 turns this into a setting (live / test).
 pub const DEFAULT_SERVER: &str = "https://devilsrage.duckdns.org";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_dialog::init())
+            .plugin(tauri_plugin_process::init());
+    }
+
+    builder
         .setup(|app| {
             let server: Url = DEFAULT_SERVER.parse()?;
 
@@ -20,6 +35,9 @@ pub fn run() {
                 .min_inner_size(800.0, 500.0)
                 .center()
                 .build()?;
+
+            #[cfg(desktop)]
+            updates::start(app.handle().clone());
 
             Ok(())
         })
