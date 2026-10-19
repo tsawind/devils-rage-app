@@ -28,7 +28,10 @@ pub fn start(app: AppHandle) {
         let mut watcher: Option<Watcher> = None;
         loop {
             std::thread::sleep(Duration::from_secs(1));
-            if !settings::load(&app).chat_log_location() {
+            // Off in Settings, or switched off for everyone by the directors.
+            let wanted = settings::load(&app).chat_log_location()
+                && crate::appconfig::feature_on("chat_log_location");
+            if !wanted {
                 watcher = None;
                 *STATUS.lock().unwrap() = Some((None, 0));
                 continue;

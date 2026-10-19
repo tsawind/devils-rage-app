@@ -13,6 +13,7 @@ pub struct AppInfo {
     version: String,
     channel: &'static str,
     start_page: Option<String>,
+    motd: Option<String>,
 }
 
 #[tauri::command]
@@ -22,6 +23,7 @@ pub fn app_info(app: AppHandle) -> AppInfo {
         version: app.package_info().version.to_string(),
         channel: s.channel(&app).as_str(),
         start_page: s.start_page,
+        motd: crate::appconfig::current().and_then(|c| c.motd),
     }
 }
 
@@ -58,6 +60,7 @@ pub struct SettingsView {
     has_pop_out_position: bool,
     developer: bool,
     chat_log_location: bool,
+    chat_log_switched_off: bool,
     chat_log_folder: Option<String>,
     chat_log_characters: usize,
     last_check_secs_ago: Option<u64>,
@@ -88,6 +91,7 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
         has_pop_out_position: s.scanner_bounds.is_some() || !s.scanner_bounds_by.is_empty(),
         developer: s.developer,
         chat_log_location: s.chat_log_location(),
+        chat_log_switched_off: !crate::appconfig::feature_on("chat_log_location"),
         chat_log_folder: crate::location::status().0,
         chat_log_characters: crate::location::status().1,
         last_check_secs_ago: last.as_ref().map(|(ago, _)| *ago),
@@ -189,6 +193,14 @@ pub fn open_log(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(target.to_string_lossy(), None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+/// Settings → Admin: the mapper's App admin page (the mapper checks who may open it).
+#[tauri::command]
+pub fn open_admin(app: AppHandle) {
+    if let Ok(url) = format!("{}/app/admin", crate::MAPPER_URL).parse() {
+        crate::go(&app, url);
+    }
 }
 
 #[tauri::command]

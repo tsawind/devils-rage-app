@@ -120,11 +120,11 @@
     </div>
   </section>
 
-  <section class="locked">
+  <section>
     <h2>Admin · directors only</h2>
     <div class="row">
-      <div class="l">Feature switches, minimum version, message of the day<small>Coming with the next mapper patch</small></div>
-      <span aria-hidden="true">🔒</span>
+      <div class="l">App settings for everyone<small>Message of the day, minimum version, switching features off. Opens in the mapper; only the app admins set there can change anything.</small></div>
+      <button class="b" id="admin">Open admin page</button>
     </div>
   </section>
 </main>
@@ -163,7 +163,10 @@
       $("lastWhen").textContent = `Last checked ${ago(state.last_check_secs_ago)}`;
       $("lastWhat").textContent = state.last_check;
     }
-    if (!state.chat_log_location) {
+    if (state.chat_log_switched_off) {
+      $("clWhat").textContent = "Switched off by your directors";
+      $("clWhere").textContent = "It comes back on when they switch it on in the app admin page";
+    } else if (!state.chat_log_location) {
       $("clWhat").textContent = "Off";
       $("clWhere").textContent = "Characters move when ESI reports them (a few seconds later)";
     } else if (!state.chat_log_folder) {
@@ -221,6 +224,7 @@
     } catch (e) { toast(String(e)); }
   });
   $("devtools").addEventListener("click", () => invoke("open_devtools"));
+  $("admin").addEventListener("click", () => invoke("open_admin"));
   $("reset").addEventListener("click", () => {
     if (confirm("Reset the app?\n\nYou'll be logged out of the mapper and SeAT in the app, all app settings are cleared, and the app restarts.")) {
       invoke("reset_app");

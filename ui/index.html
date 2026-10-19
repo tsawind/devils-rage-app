@@ -37,6 +37,9 @@
   footer button:hover { color: var(--text); }
   .grow { flex: 1; }
   .hint { color: #55555c; }
+  .motd { max-width: 478px; margin: 0 0 22px; padding: 10px 14px; border: 1px solid #5a2a14; border-radius: 10px;
+          background: #1c120d; color: #f0c9a8; font-size: 14px; white-space: pre-wrap; text-align: center; }
+  .motd b { display: block; font-size: 11px; letter-spacing: .6px; color: #c98a5a; margin-bottom: 2px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -44,6 +47,7 @@
   <div class="logo">DR</div>
   <h1>Devil's Rage</h1>
   <p class="sub">Where to?</p>
+  <div class="motd" id="motd" hidden><b>MESSAGE OF THE DAY</b><span id="motdText"></span></div>
 
   <div class="sites">
     <button class="site" data-site="mapper" autofocus>
@@ -77,6 +81,10 @@
   invoke("app_info").then(info => {
     document.getElementById("ver").textContent = `${info.version} · ${info.channel}`;
     document.getElementById("skip").checked = !!info.start_page;
+    if (info.motd) {
+      document.getElementById("motdText").textContent = info.motd;
+      document.getElementById("motd").hidden = false;
+    }
   }).catch(() => {});
 
   document.querySelectorAll("button.site").forEach(btn => {

@@ -3,6 +3,7 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
+mod appconfig;
 mod chatlog;
 mod commands;
 mod location;
@@ -113,6 +114,7 @@ pub fn run() {
             commands::read_log,
             commands::open_log,
             commands::open_devtools,
+            commands::open_admin,
             commands::reset_app,
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -123,6 +125,7 @@ pub fn run() {
                 }
             }
             "settings" => go(app, app_url("settings.html")),
+            "admin" => go(app, format!("{MAPPER_URL}/app/admin").parse().unwrap()),
             "reload" => {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.eval("location.reload()");
@@ -175,6 +178,7 @@ pub fn run() {
             let _ = main.show();
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
+            appconfig::start(handle.clone());
 
             // "Skip this screen" ticked: go straight to the chosen site (your last map).
             if let Some(url) = s.start_page.as_deref().and_then(|site| site_url(&handle, site)) {
@@ -224,6 +228,11 @@ fn new_window_handler(
                 scanner::signal(&app, &me, &url);
             }
             return NewWindowResponse::Deny;
+        }
+
+        // Directors switched the app-window pop-out off: a plain window instead.
+        if url.as_str() == "about:blank" && !appconfig::feature_on("scanner_pop_out") {
+            return NewWindowResponse::Allow;
         }
 
         if url.as_str() == "about:blank" {
