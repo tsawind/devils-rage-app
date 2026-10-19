@@ -4,6 +4,7 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
+mod scanner;
 mod settings;
 #[cfg(desktop)]
 mod updates;
@@ -127,14 +128,13 @@ pub fn run() {
                 _ => format!("Devil's Rage — {version} ({})", channel.as_str()),
             };
 
-            // Lets the mapper know it runs inside the app. Read-only marker, no
-            // powers. Also hides Chrome's Document Picture-in-Picture, which the
-            // app's browser can't show: the mapper then asks for a popup window
-            // (?solo=1) and the app turns that into a pinned scanner window.
+            // Lets the mapper know it runs inside the app (read-only marker, no
+            // powers), and gives it a stand-in for Chrome's picture-in-picture so
+            // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\
-                 try {{ delete Window.prototype.documentPictureInPicture; delete window.documentPictureInPicture; }} catch (e) {{}}",
-                channel.as_str()
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\n{}",
+                channel.as_str(),
+                include_str!("pip.js")
             );
 
             let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -143,7 +143,7 @@ pub fn run() {
                 .min_inner_size(800.0, 500.0)
                 .center()
                 .initialization_script(marker.clone())
-                .on_new_window(new_window_handler(handle.clone(), marker));
+                .on_new_window(new_window_handler(handle.clone(), marker, "main".into()));
 
             #[cfg(desktop)]
             let builder = builder.menu(build_menu(&handle)?);
@@ -164,17 +164,35 @@ pub fn run() {
         .expect("error while running the Devil's Rage app");
 }
 
-/// window.open / target=_blank from a page:
-/// - the mapper's scanner popup (?solo=1) becomes an always-on-top window, one
-///   per character (asking again just brings that window forward);
+/// Fake address the pop-out uses to ask the app for things (see pip.js).
+const SIGNAL_HOST: &str = "dr-app.invalid";
+
+/// window.open / target=_blank from a page (`me` = the window asking):
+/// - `about:blank` from the mapper's pop-out (pip.js) becomes the scanner
+///   window: pinned on top, no title bar, where you left it last time;
+/// - https://dr-app.invalid/... = the scanner asking to drag, close or resize;
+/// - the mapper's own fallback popup (?solo=1) becomes a pinned window too;
 /// - other pages on our sites and logins open as normal app windows;
 /// - everything else (zKillboard, Dotlan, ...) opens in the normal browser.
 fn new_window_handler(
     app: AppHandle,
     marker: String,
+    me: String,
 ) -> impl Fn(Url, tauri::webview::NewWindowFeatures) -> NewWindowResponse<tauri::Wry> + Send + 'static
 {
     move |url, features| {
+        if url.host_str() == Some(SIGNAL_HOST) {
+            scanner::signal(&app, &me, &url);
+            return NewWindowResponse::Deny;
+        }
+
+        if url.as_str() == "about:blank" {
+            return match scanner::open(&app, &marker, url, features) {
+                Some(window) => NewWindowResponse::Create { window },
+                None => NewWindowResponse::Deny,
+            };
+        }
+
         let ours = url.host_str().is_some_and(|h| IN_APP_HOSTS.contains(&h));
         if !ours {
             let _ = app.opener().open_url(url.as_str(), None::<&str>);
@@ -191,7 +209,7 @@ fn new_window_handler(
             .find(|(k, _)| k == "as")
             .map(|(_, v)| v.chars().filter(char::is_ascii_digit).collect())
             .unwrap_or_default();
-        let label = format!("scanner-{character}");
+        let label = format!("solo-{character}");
 
         if let Some(existing) = app.get_webview_window(&label) {
             let _ = existing.navigate(url);
@@ -201,9 +219,14 @@ fn new_window_handler(
 
         match WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
             .window_features(features)
-            .title("Devil's Rage · scanner")
+            .title("Devil's Rage")
             .always_on_top(true)
             .initialization_script(marker.clone())
+            .on_new_window(new_window_handler(
+                app.clone(),
+                marker.clone(),
+                label.clone(),
+            ))
             .build()
         {
             Ok(window) => NewWindowResponse::Create { window },

@@ -44,6 +44,9 @@ pub struct Settings {
     /// "mapper" or "seat" = skip the start screen and open that. Missing = start screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_page: Option<String>,
+    /// Where the scanner pop-out was last: [x, y, width, height] in screen pixels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scanner_bounds: Option<[i32; 4]>,
 }
 
 impl Settings {
