@@ -40,6 +40,9 @@
                 }
             };
 
+            // Links to other websites in the pop-out open in the normal browser too.
+            if (typeof window.__DR_LINKS__ === 'function') window.__DR_LINKS__(doc, win);
+
             // Drag the window by the pop-out's top bar (anywhere that isn't a button).
             doc.addEventListener(
                 'mousedown',

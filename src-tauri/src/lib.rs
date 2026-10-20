@@ -341,6 +341,47 @@ window.addEventListener('keydown', (e) => {
         try { window.open('https://dr-app.invalid/home', '_blank'); } catch (err) {}
     }
 }, true);
+
+// Links to other websites (zKillboard, Dotlan, ...) go to the normal browser. Some of them
+// sit in menus that close on the press, so the browser's own "new window" never comes;
+// the app is asked directly instead (once per press). __DR_LINKS__ lets pip.js do the
+// same in the scanner pop-out's document.
+(() => {
+    const OURS = /(^|\.)(devilsrage\.duckdns\.org|seatdevilsrage\.duckdns\.org|eveonline\.com|discord\.com|discordapp\.com)$/i;
+    let last = { href: '', at: 0 };
+    const external = (target) => {
+        const a = target && typeof target.closest === 'function' ? target.closest('a[href]') : null;
+        if (!a) return null;
+        let url;
+        try { url = new URL(a.getAttribute('href'), a.ownerDocument.baseURI); } catch (e) { return null; }
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+        if (OURS.test(url.hostname)) return null;
+        return url.href;
+    };
+    const open = (href, win) => {
+        const now = Date.now();
+        if (last.href === href && now - last.at < 1500) return;
+        last = { href, at: now };
+        try { (win || window).open('https://dr-app.invalid/open?url=' + encodeURIComponent(href), '_blank'); } catch (e) {}
+    };
+    const watch = (doc, win) => {
+        let pressed = null;
+        doc.addEventListener('pointerdown', (e) => { pressed = external(e.target); }, true);
+        const handle = (e) => {
+            if (e.button !== 0 && e.button !== 1) return;
+            const href = external(e.target);
+            if (!href) return;
+            if (e.type === 'pointerup' && pressed !== href) return;
+            if (e.type !== 'pointerup') e.preventDefault();
+            open(href, win);
+        };
+        doc.addEventListener('pointerup', handle, true);
+        doc.addEventListener('click', handle, true);
+        doc.addEventListener('auxclick', handle, true);
+    };
+    watch(document, window);
+    window.__DR_LINKS__ = watch;
+})();
 "#;
 
 /// Patch 48: a mapper or SeAT page that loaded as the proxy's error ("404 page not found",
@@ -385,6 +426,12 @@ fn new_window_handler(
         if url.host_str() == Some(SIGNAL_HOST) {
             match url.path() {
                 "/home" => go(&app, home_url()),
+                // A page's link to another website (see SHORTCUTS).
+                "/open" => {
+                    if let Some(target) = url.query_pairs().find(|(k, _)| k == "url").map(|(_, v)| v.into_owned()) {
+                        open_in_browser(&app, &me, &target);
+                    }
+                }
                 "/clipboard" | "/attention" if from_mapper(&app, &me) => page_signal(&app, &me, &url),
                 "/clipboard" | "/attention" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),
                 // Patch 50: "Connect to my EVE PC" on the PI screen (a SeAT page).
