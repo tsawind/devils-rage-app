@@ -8,9 +8,9 @@ watching, client previews, hotkeys).
 Plan and decisions: `claude/desktop-app-plan.md` in the Devils Rage VPS project.
 
 ## Status
-- [x] Phase 0.1: one window that opens the mapper; login happens inside the app
-- [x] Phase 0.2: self-update (signed builds, GitHub Releases, stable / beta / dev)
-- [ ] Phase 0.3: settings, developer panel, admin panel, server feature flags
+- [x] Phase 0: window around the mapper and SeAT, self-update (stable / beta / dev), settings, developer and admin panels
+- [x] Phase 1 so far: scanner pop-out on top of EVE, instant location from EVE's chat logs, probe scans pasted from the clipboard, the jump prompt over EVE
+- [ ] Next: your accounts overview, PI, client previews, hotkeys, tray
 
 ## Getting the app
 Download the `-setup.exe` from the **Releases** page (Windows may warn that it is unsigned:
@@ -48,3 +48,22 @@ Builds are signed with the key in the repo secrets `TAURI_SIGNING_PRIVATE_KEY` a
 ## CCP rules we follow
 The app only reads EVE's chat/combat log files, the clipboard and ESI. It never sends input to
 the EVE client and never reads game memory.
+
+## Privacy
+What the app reads, what it sends and how to switch it off: [PRIVACY.md](PRIVACY.md). The installer shows the
+same summary before installing.
+
+## Code signing policy
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Only release builds made by this repository's GitHub Actions from this repository's source are signed.
+- Every signing request is approved by hand.
+- Team: Tsawind — author, reviewer and approver. Changes from anyone outside the team are reviewed by Tsawind
+  before they are merged.
+- Privacy policy: [PRIVACY.md](PRIVACY.md).
+
+Signing is being set up; until it is, Windows may show an "unknown publisher" warning (More info → Run anyway).
+
+## License
+[MIT](LICENSE). Third-party code and its licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

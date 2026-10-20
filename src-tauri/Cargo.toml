@@ -3,6 +3,8 @@ name = "devils-rage-app"
 version = "0.1.0"
 description = "Devil's Rage desktop app: the corp mapper with native extras"
 authors = ["Tsawind"]
+license = "MIT"
+repository = "https://github.com/tsawind/devils-rage-app"
 edition = "2021"
 rust-version = "1.77"
 
