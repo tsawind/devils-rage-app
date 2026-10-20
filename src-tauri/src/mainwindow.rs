@@ -4,12 +4,12 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Url, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, PhysicalPosition, PhysicalSize, Url, Window, WindowEvent};
 
 use crate::settings;
 
 /// Puts the window back where it was, if that spot is still on a screen.
-pub fn restore(app: &AppHandle, window: &WebviewWindow) {
+pub fn restore(app: &AppHandle, window: &Window) {
     let s = settings::load(app);
     if let Some([x, y, w, h]) = s.main_bounds {
         if on_a_screen(window, x, y) {
@@ -22,7 +22,7 @@ pub fn restore(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-fn on_a_screen(window: &WebviewWindow, x: i32, y: i32) -> bool {
+fn on_a_screen(window: &Window, x: i32, y: i32) -> bool {
     window
         .available_monitors()
         .map(|monitors| {
@@ -38,7 +38,7 @@ fn on_a_screen(window: &WebviewWindow, x: i32, y: i32) -> bool {
 
 /// Follows moves and resizes; saves when the window closes. While maximised it
 /// keeps the size from before, so un-maximising next time goes back to it.
-pub fn remember(app: &AppHandle, window: &WebviewWindow) {
+pub fn remember(app: &AppHandle, window: &Window) {
     let app = app.clone();
     let me = window.clone();
     let last = Mutex::new((None::<[i32; 4]>, false));
@@ -116,7 +116,7 @@ pub fn follow_pages(app: AppHandle) {
         let mut seen = String::new();
         loop {
             tokio::time::sleep(Duration::from_secs(4)).await;
-            let Some(win) = app.get_webview_window("main") else {
+            let Some(win) = crate::main_view(&app) else {
                 continue;
             };
             let Ok(url) = win.url() else { continue };

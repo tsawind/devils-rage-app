@@ -1,7 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Base permissions for the app's own (local) pages. The remote mapper page is not listed here, so it cannot call native commands.",
-  "windows": ["main"],
+  "description": "Base permissions for the app's own (local) pages: the slim bar and the start / settings pages. Remote pages (mapper, SeAT) are not listed here, so they cannot call native commands.",
+  "windows": ["app"],
+  "webviews": ["main", "bar"],
   "permissions": ["core:default"]
 }

@@ -1,9 +1,13 @@
 use tauri::{
-    webview::NewWindowResponse, AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder,
+    webview::{Color, NewWindowResponse, WebviewBuilder},
+    window::WindowBuilder,
+    AppHandle, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl, Window,
+    WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 
 mod appconfig;
+mod bar;
 mod chatlog;
 mod clipboard;
 mod commands;
@@ -67,10 +71,101 @@ fn site_url(app: &AppHandle, site: &str) -> Option<Url> {
         .or_else(|| root.parse().ok())
 }
 
+/// The main window (label "app"): the slim bar on top, the page below.
+pub const MAIN_WINDOW: &str = "app";
+/// Height of the slim bar, in logical pixels.
+const BAR_HEIGHT: f64 = 30.0;
+
+/// The page part of the main window (start screen, mapper, SeAT, settings).
+pub fn main_view(app: &AppHandle) -> Option<Webview> {
+    app.get_webview("main")
+}
+
+/// The window a page (webview) is in: the main window for "main" and "bar",
+/// its own window for pop-outs.
+pub fn window_of(app: &AppHandle, label: &str) -> Option<Window> {
+    app.get_webview(label).map(|view| view.window())
+}
+
 fn go(app: &AppHandle, url: Url) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.navigate(url);
-        let _ = win.set_focus();
+    if let Some(view) = main_view(app) {
+        let _ = view.navigate(url);
+        let _ = view.set_focus();
+    }
+}
+
+/// Lays the bar and the page out in the main window (after every resize).
+fn layout(window: &Window) {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let Ok(size) = window.inner_size() else { return };
+    let size = size.to_logical::<f64>(scale);
+    if size.width <= 0.0 || size.height <= 0.0 {
+        return;
+    }
+    let app = window.app_handle();
+    if let Some(bar) = app.get_webview("bar") {
+        let _ = bar.set_position(LogicalPosition::new(0.0, 0.0));
+        let _ = bar.set_size(LogicalSize::new(size.width, BAR_HEIGHT));
+    }
+    if let Some(page) = app.get_webview("main") {
+        let _ = page.set_position(LogicalPosition::new(0.0, BAR_HEIGHT));
+        let _ = page.set_size(LogicalSize::new(size.width, (size.height - BAR_HEIGHT).max(0.0)));
+    }
+}
+
+/// What the slim bar's buttons do (bar.html calls the bar_action command).
+pub fn bar_action(app: &AppHandle, action: &str) {
+    let window = app.get_window(MAIN_WINDOW);
+    match action {
+        "home" => go(app, home_url()),
+        "mapper" | "seat" => {
+            if let Some(url) = site_url(app, action) {
+                go(app, url);
+            }
+        }
+        "accounts" => {
+            if let Ok(url) = format!("{SEAT_URL}/devilsrage/accounts").parse() {
+                go(app, url);
+            }
+        }
+        "settings" => go(app, app_url("settings.html")),
+        "admin" => {
+            if let Ok(url) = format!("{MAPPER_URL}/desktop-app/admin").parse() {
+                go(app, url);
+            }
+        }
+        "reload" => {
+            if let Some(view) = main_view(app) {
+                let _ = view.eval("location.reload()");
+            }
+        }
+        #[cfg(desktop)]
+        "updates" => updates::check_now(app.clone()),
+        "minimize" => {
+            if let Some(w) = window {
+                let _ = w.minimize();
+            }
+        }
+        "maximize" => {
+            if let Some(w) = window {
+                if w.is_maximized().unwrap_or(false) {
+                    let _ = w.unmaximize();
+                } else {
+                    let _ = w.maximize();
+                }
+            }
+        }
+        "close" => {
+            if let Some(w) = window {
+                let _ = w.close();
+            }
+        }
+        "drag" => {
+            if let Some(w) = window {
+                let _ = w.start_dragging();
+            }
+        }
+        _ => {}
     }
 }
 
@@ -118,25 +213,9 @@ pub fn run() {
             commands::open_devtools,
             commands::open_admin,
             commands::reset_app,
+            bar::bar_action,
+            bar::bar_state,
         ])
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "home" => go(app, home_url()),
-            "mapper" | "seat" => {
-                if let Some(url) = site_url(app, event.id().as_ref()) {
-                    go(app, url);
-                }
-            }
-            "settings" => go(app, app_url("settings.html")),
-            "admin" => go(app, format!("{MAPPER_URL}/desktop-app/admin").parse().unwrap()),
-            "reload" => {
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.eval("location.reload()");
-                }
-            }
-            #[cfg(desktop)]
-            "updates" => updates::check_now(app.clone()),
-            _ => {}
-        })
         .setup(|app| {
             let handle = app.handle().clone();
             let s = settings::load(&handle);
@@ -162,23 +241,47 @@ pub fn run() {
                 include_str!("pip.js")
             );
 
-            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            // The main window: no Windows title bar; our slim dark bar on top (bar.html,
+            // the app's own page) and the page below it (start screen, mapper, SeAT).
+            let window = WindowBuilder::new(app, MAIN_WINDOW)
                 .title(title)
                 .inner_size(1400.0, 900.0)
                 .min_inner_size(800.0, 500.0)
                 .center()
+                .decorations(false)
+                .shadow(true)
                 // Hidden until it's back in its saved place (no jump on screen).
                 .visible(false)
-                .initialization_script(marker.clone())
-                .on_new_window(new_window_handler(handle.clone(), marker, "main".into()));
+                .build()?;
+            let scale = window.scale_factor().unwrap_or(1.0);
+            let inner = window.inner_size()?.to_logical::<f64>(scale);
+            window.add_child(
+                WebviewBuilder::new("bar", WebviewUrl::App("bar.html".into()))
+                    .background_color(Color(10, 10, 12, 255)),
+                LogicalPosition::new(0.0, 0.0),
+                LogicalSize::new(inner.width, BAR_HEIGHT),
+            )?;
+            window.add_child(
+                WebviewBuilder::new("main", WebviewUrl::App("index.html".into()))
+                    .background_color(Color(13, 13, 16, 255))
+                    .initialization_script(marker.clone())
+                    .on_new_window(new_window_handler(handle.clone(), marker, "main".into())),
+                LogicalPosition::new(0.0, BAR_HEIGHT),
+                LogicalSize::new(inner.width, (inner.height - BAR_HEIGHT).max(0.0)),
+            )?;
+            {
+                let me = window.clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
+                        layout(&me);
+                    }
+                });
+            }
 
-            #[cfg(desktop)]
-            let builder = builder.menu(build_menu(&handle)?);
-
-            let main = builder.build()?;
-            mainwindow::restore(&handle, &main);
-            mainwindow::remember(&handle, &main);
-            let _ = main.show();
+            mainwindow::restore(&handle, &window);
+            mainwindow::remember(&handle, &window);
+            layout(&window);
+            let _ = window.show();
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
             clipboard::start(handle.clone());
@@ -330,7 +433,7 @@ fn new_window_handler(
 
 /// Whether window `me` shows a mapper page (only those may write the clipboard or ask for attention).
 fn from_mapper(app: &AppHandle, me: &str) -> bool {
-    app.get_webview_window(me)
+    app.get_webview(me)
         .and_then(|w| w.url().ok())
         .is_some_and(|u| u.host_str() == Some(host_of(MAPPER_URL)))
 }
@@ -360,7 +463,7 @@ fn page_signal(app: &AppHandle, me: &str, url: &Url) {
             }
         }
         "/attention" => {
-            let Some(window) = app.get_webview_window(me) else { return };
+            let Some(window) = window_of(app, me) else { return };
             let on = param("on").as_deref() == Some("1") && appconfig::feature_on("jump_attention");
             let mut raised = RAISED.lock().unwrap();
             if on {
@@ -385,18 +488,3 @@ fn page_signal(app: &AppHandle, me: &str, url: &Url) {
     }
 }
 
-/// The slim menu bar above the page: always there, never covers the mapper.
-#[cfg(desktop)]
-fn build_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{Menu, MenuItem};
-    // No shortcuts on the items themselves: Windows prints them next to the
-    // name in a top-level menu bar ("HomeCtrl+Shift+H"). Ctrl+Shift+H for Home
-    // comes from the page instead (SHORTCUTS); Ctrl+R / F5 reload on their own.
-    let home = MenuItem::with_id(app, "home", "Home", true, None::<&str>)?;
-    let mapper = MenuItem::with_id(app, "mapper", "Mapper", true, None::<&str>)?;
-    let seat = MenuItem::with_id(app, "seat", "SeAT", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-    let reload = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
-    let updates = MenuItem::with_id(app, "updates", "Check for updates", true, None::<&str>)?;
-    Menu::with_items(app, &[&home, &mapper, &seat, &settings, &reload, &updates])
-}

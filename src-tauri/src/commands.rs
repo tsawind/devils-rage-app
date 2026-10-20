@@ -214,8 +214,8 @@ pub fn open_admin(app: AppHandle) {
 
 #[tauri::command]
 pub fn open_devtools(app: AppHandle) {
-    if let Some(win) = app.get_webview_window("main") {
-        win.open_devtools();
+    if let Some(view) = crate::main_view(&app) {
+        view.open_devtools();
     }
 }
 
@@ -223,8 +223,8 @@ pub fn open_devtools(app: AppHandle) {
 #[tauri::command]
 pub fn reset_app(app: AppHandle) -> Result<(), String> {
     log::warn!("resetting the app");
-    for (_, window) in app.webview_windows() {
-        let _ = window.clear_all_browsing_data();
+    for (_, view) in app.webviews() {
+        let _ = view.clear_all_browsing_data();
     }
     settings::delete(&app);
     #[cfg(desktop)]

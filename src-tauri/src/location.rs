@@ -142,9 +142,9 @@ fn deliver(app: &AppHandle, changes: &[(i64, String)]) {
 pub fn send_to_mapper(app: &AppHandle, js: &str) {
     let mapper_host = crate::host_of(crate::MAPPER_URL);
     let mut windows: Vec<_> = app
-        .webview_windows()
+        .webviews()
         .into_iter()
-        .filter(|(label, _)| !label.starts_with("scanner-"))
+        .filter(|(label, _)| !label.starts_with("scanner-") && label != "bar")
         .filter_map(|(label, w)| {
             let url = w.url().ok()?;
             (url.host_str() == Some(mapper_host)).then(|| (label, url.path().starts_with("/maps/"), w))

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bar</title>
+<style>
+  :root { --bg:#0a0a0c; --line:#1e1e24; --text:#c9c9d0; --muted:#6a6a72; --hi:#fff; --red:#b3262a; --red-hi:#d6242c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font: 12.5px/1 "Segoe UI", system-ui, sans-serif;
+         display: flex; align-items: stretch; user-select: none; border-bottom: 1px solid var(--line); }
+  .logo { display: flex; align-items: center; padding: 0 8px 0 10px; }
+  .logo span { border: 1.5px solid var(--red); border-radius: 4px; color: var(--red-hi); font-size: 9px;
+               font-weight: 700; padding: 1px 3px; letter-spacing: .5px; }
+  button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+  .tab { padding: 0 10px; display: flex; align-items: center; border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--hi); background: #15151a; }
+  .tab.on { color: var(--hi); border-bottom-color: var(--red-hi); }
+  .drag { flex: 1; }
+  .ver { color: var(--muted); font-size: 11px; display: flex; align-items: center; padding: 0 10px; }
+  .win { width: 42px; display: flex; align-items: center; justify-content: center; color: var(--text); }
+  .win:hover { background: #222228; color: var(--hi); }
+  .win.x:hover { background: #c42b1c; color: #fff; }
+  .win svg { width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 1; }
+</style>
+</head>
+<body>
+  <div class="logo" data-drag><span>DR</span></div>
+  <button class="tab" data-act="home">Home</button>
+  <button class="tab" data-act="mapper">Mapper</button>
+  <button class="tab" data-act="seat">SeAT</button>
+  <button class="tab" data-act="accounts">Your accounts</button>
+  <button class="tab" data-act="settings">Settings</button>
+  <button class="tab" data-act="reload" title="Reload this page (F5)">Reload</button>
+  <button class="tab" data-act="updates">Check for updates</button>
+  <div class="drag" data-drag></div>
+  <div class="ver" data-drag id="ver"></div>
+  <button class="win" data-act="minimize" title="Minimise" aria-label="Minimise"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
+  <button class="win" data-act="maximize" id="max" title="Maximise" aria-label="Maximise"><svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
+  <button class="win x" data-act="close" title="Close" aria-label="Close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></button>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const act = (action) => invoke("bar_action", { action }).catch(() => {});
+
+  document.querySelectorAll("[data-act]").forEach((el) => {
+    el.addEventListener("click", () => act(el.dataset.act));
+  });
+
+  // Empty parts of the bar move the window; a double-click maximises / restores it.
+  document.querySelectorAll("[data-drag]").forEach((el) => {
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      if (e.detail === 2) { act("maximize"); return; }
+      act("drag");
+    });
+  });
+
+  const MAX = '<svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9"/></svg>';
+  const RESTORE = '<svg viewBox="0 0 10 10"><rect x=".5" y="2.5" width="7" height="7"/><path d="M2.5 2.5v-2h7v7h-2"/></svg>';
+  let last = "";
+  async function refresh() {
+    try {
+      const st = await invoke("bar_state");
+      const key = JSON.stringify(st);
+      if (key !== last) {
+        last = key;
+        document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.act === st.page));
+        const max = document.getElementById("max");
+        max.innerHTML = st.maximized ? RESTORE : MAX;
+        max.title = st.maximized ? "Restore" : "Maximise";
+        document.getElementById("ver").textContent = st.channel === "stable" ? st.version : `${st.version} · ${st.channel}`;
+      }
+    } catch (e) { /* app busy: try again */ }
+  }
+  refresh();
+  setInterval(refresh, 700);
+</script>
+</body>
+</html>
