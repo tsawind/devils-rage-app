@@ -300,10 +300,16 @@ pub fn run() {
             )?;
             {
                 let me = window.clone();
-                window.on_window_event(move |event| {
-                    if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
-                        layout(&me);
+                let app = handle.clone();
+                window.on_window_event(move |event| match event {
+                    WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => layout(&me),
+                    // Closing the main window closes the app: pop-outs and character windows
+                    // are drawn by its page, so they'd stay open but dead.
+                    WindowEvent::Destroyed => {
+                        log::info!("main window closed: closing the app");
+                        app.exit(0);
                     }
+                    _ => {}
                 });
             }
 
