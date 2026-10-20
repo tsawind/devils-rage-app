@@ -124,7 +124,7 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         "accounts" => {
-            if let Ok(url) = format!("{SEAT_URL}/devilsrage/accounts").parse() {
+            if let Ok(url) = format!("{SEAT_URL}/devilsrage/your-accounts").parse() {
                 go(app, url);
             }
         }
