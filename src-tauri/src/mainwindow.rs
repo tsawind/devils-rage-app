@@ -139,6 +139,7 @@ pub fn follow_pages(app: AppHandle) {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(3)).await;
                     crate::location::resend_all(&app);
+                    crate::scanner::announce(&app);
                 });
             }
             if !worth_remembering(&url) {

@@ -290,6 +290,9 @@ pub fn run() {
                 WebviewBuilder::new("main", WebviewUrl::App("index.html".into()))
                     .background_color(Color(13, 13, 16, 255))
                     .initialization_script(marker.clone())
+                    // Windows' file drag-and-drop handler swallows the page's own drag and drop
+                    // (dragging tabs, accounts); we never take dropped files.
+                    .disable_drag_drop_handler()
                     .on_navigation({
                         let app = handle.clone();
                         move |url| main_view_may_go(&app, url)
@@ -439,6 +442,24 @@ fn new_window_handler(
                     }
                 }
                 "/clipboard" | "/attention" if from_mapper(&app, &me) => page_signal(&app, &me, &url),
+                // Patch 51b: the character tabs close / bring up a character's pop-out.
+                "/popout-focus" if from_mapper(&app, &me) && url.query_pairs().any(|(k, v)| k == "own" && v == "1") => {
+                    scanner::focus_for(&app, &me);
+                }
+                "/popout-close" | "/popout-focus" if from_mapper(&app, &me) => {
+                    let character: String = url
+                        .query_pairs()
+                        .find(|(k, _)| k == "character")
+                        .map(|(_, v)| v.chars().filter(char::is_ascii_digit).collect())
+                        .unwrap_or_default();
+                    if !character.is_empty() {
+                        if url.path() == "/popout-close" {
+                            scanner::close_for_character(&app, &character);
+                        } else {
+                            scanner::focus_for_character(&app, &character);
+                        }
+                    }
+                }
                 "/clipboard" | "/attention" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),
                 // Patch 50: "Connect to my EVE PC" on the PI screen (a SeAT page).
                 "/parsec" if from_seat(&app, &me) => parsec::connect(&app),
@@ -497,6 +518,7 @@ fn new_window_handler(
         }
 
         match WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+            .disable_drag_drop_handler()
             .window_features(features)
             .title("Devil's Rage")
             .always_on_top(!host)

@@ -36,6 +36,67 @@ pub fn focus_for(app: &AppHandle, parent: &str) {
     }
 }
 
+/// Patch 51b: the characters whose pop-outs live in windows of their own (a character's hidden
+/// host or own window), for the main page's character tabs. The main page's own pop-out it
+/// knows about itself.
+pub fn hosted_characters() -> Vec<i64> {
+    let mut ids: Vec<i64> = PARENTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(_, parent)| {
+            parent
+                .strip_prefix("pophost-")
+                .or_else(|| parent.strip_prefix("solo-"))
+                .and_then(|id| id.parse().ok())
+        })
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// Tells the main page which characters have a pop-out in a window of their own.
+pub fn announce(app: &AppHandle) {
+    let ids = serde_json::to_string(&hosted_characters()).unwrap_or_else(|_| "[]".into());
+    if let Some(view) = crate::main_view(app) {
+        let _ = view.eval(format!(
+            "window.dispatchEvent(new CustomEvent('devils-rage-app:popouts', {{ detail: {{ characters: {ids} }} }}));"
+        ));
+    }
+}
+
+fn scanners_of_character(character: &str) -> Vec<String> {
+    let host = format!("pophost-{character}");
+    let solo = format!("solo-{character}");
+    PARENTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, parent)| *parent == host || *parent == solo)
+        .map(|(scanner, _)| scanner.clone())
+        .collect()
+}
+
+/// Closes a character's pop-out (its hidden host window goes with it).
+pub fn close_for_character(app: &AppHandle, character: &str) {
+    for label in scanners_of_character(character) {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+/// Brings a character's pop-out to the front.
+pub fn focus_for_character(app: &AppHandle, character: &str) {
+    for label in scanners_of_character(character) {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }
+}
+
 /// Opens the window the mapper's pop-out draws into (pip.js asked for about:blank).
 pub fn open(
     app: &AppHandle,
@@ -47,6 +108,7 @@ pub fn open(
     let label = format!("scanner-{}", NEXT.fetch_add(1, Ordering::Relaxed));
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .window_features(features)
+        .disable_drag_drop_handler()
         .title("Devil's Rage · scanner")
         .decorations(false)
         .always_on_top(settings::load(app).pop_out_on_top())
@@ -71,6 +133,7 @@ pub fn open(
     remember_bounds(app, &window, parent);
     let _ = window.show();
     let _ = window.set_focus();
+    announce(app);
     Some(window)
 }
 
@@ -178,6 +241,7 @@ fn remember_bounds(app: &AppHandle, window: &WebviewWindow, parent: &str) {
             }
             let label = me.label().to_string();
             PARENTS.lock().unwrap().retain(|(s, _)| *s != label);
+            announce(&app);
             // An extra pop-out's hidden window has no other job: close it too.
             if parent.starts_with("pophost-") {
                 if let Some(host) = app.get_webview_window(&parent) {
