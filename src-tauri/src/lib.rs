@@ -155,9 +155,10 @@ pub fn run() {
             // powers), and gives it a stand-in for Chrome's picture-in-picture so
             // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\n{}\n{}",
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\n{}\n{}\n{}",
                 channel.as_str(),
                 SHORTCUTS,
+                RECONNECT,
                 include_str!("pip.js")
             );
 
@@ -208,6 +209,31 @@ window.addEventListener('keydown', (e) => {
         try { window.open('https://dr-app.invalid/home', '_blank'); } catch (err) {}
     }
 }, true);
+"#;
+
+/// Patch 48: a mapper or SeAT page that loaded as the proxy's error ("404 page not found",
+/// 502/503/504) while the server restarts (deploys, EVE downtime, reboots) says it's reconnecting
+/// and reloads by itself once the page answers again. Pages that loaded fine run nothing.
+const RECONNECT: &str = r#"
+(() => {
+    if (!['devilsrage.duckdns.org', 'seatdevilsrage.duckdns.org'].includes(location.host)) return;
+    const check = () => {
+        const body = document.body;
+        if (!body || document.querySelector('#app, script[data-page]')) return;
+        const text = (body.innerText || '').trim().toLowerCase();
+        const down = text === '404 page not found' || /^(50[234] )?(bad gateway|service unavailable|gateway time-?out)/.test(text);
+        if (!down) return;
+        const started = Date.now();
+        document.title = 'Reconnecting…';
+        body.innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#bbb;font:15px system-ui,sans-serif">The server is restarting. This page reloads by itself when it is back…</div>';
+        const again = () => setTimeout(retry, Date.now() - started < 120000 ? 5000 : 15000);
+        const retry = () => fetch(location.href, { cache: 'no-store', credentials: 'same-origin' })
+            .then((r) => (r.ok ? location.reload() : again()), again);
+        again();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', check);
+    else check();
+})();
 "#;
 
 /// window.open / target=_blank from a page (`me` = the window asking):
