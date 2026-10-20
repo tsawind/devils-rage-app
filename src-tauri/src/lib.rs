@@ -5,6 +5,7 @@ use tauri_plugin_opener::OpenerExt;
 
 mod appconfig;
 mod chatlog;
+mod clipboard;
 mod commands;
 mod location;
 mod mainwindow;
@@ -179,6 +180,7 @@ pub fn run() {
             let _ = main.show();
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
+            clipboard::start(handle.clone());
             appconfig::start(handle.clone());
 
             // "Skip this screen" ticked: go straight to the chosen site (your last map).
@@ -223,10 +225,11 @@ fn new_window_handler(
 {
     move |url, features| {
         if url.host_str() == Some(SIGNAL_HOST) {
-            if url.path() == "/home" {
-                go(&app, home_url());
-            } else {
-                scanner::signal(&app, &me, &url);
+            match url.path() {
+                "/home" => go(&app, home_url()),
+                "/clipboard" | "/attention" if from_mapper(&app, &me) => page_signal(&app, &me, &url),
+                "/clipboard" | "/attention" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),
+                _ => scanner::signal(&app, &me, &url),
             }
             return NewWindowResponse::Deny;
         }
@@ -296,6 +299,63 @@ fn new_window_handler(
             Ok(window) => NewWindowResponse::Create { window },
             Err(_) => NewWindowResponse::Allow,
         }
+    }
+}
+
+/// Whether window `me` shows a mapper page (only those may write the clipboard or ask for attention).
+fn from_mapper(app: &AppHandle, me: &str) -> bool {
+    app.get_webview_window(me)
+        .and_then(|w| w.url().ok())
+        .is_some_and(|u| u.host_str() == Some(host_of(MAPPER_URL)))
+}
+
+/// Windows the mapper put on top of EVE while a jump prompt waits (Patch 47), to put back after.
+static RAISED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// A mapper page asking for something only the app can do (Patch 47):
+/// - /clipboard?text=... : put the text on the clipboard (works while EVE has focus);
+/// - /attention?on=1|0   : keep this window on top of EVE, without taking focus, while the
+///   jump prompt waits for you (no scanner pop-out open to answer it in), then put it back.
+fn page_signal(app: &AppHandle, me: &str, url: &Url) {
+    let param = |key: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.into_owned())
+    };
+    match url.path() {
+        "/clipboard" => {
+            let text = param("text").unwrap_or_default();
+            if text.is_empty() || text.len() > 4000 {
+                return;
+            }
+            match clipboard::write(&text) {
+                Ok(()) => log::info!("copied for the mapper: {}", text.trim()),
+                Err(err) => log::warn!("couldn't write the clipboard: {err}"),
+            }
+        }
+        "/attention" => {
+            let Some(window) = app.get_webview_window(me) else { return };
+            let on = param("on").as_deref() == Some("1") && appconfig::feature_on("jump_attention");
+            let mut raised = RAISED.lock().unwrap();
+            if on {
+                if raised.iter().any(|l| l == me) {
+                    return;
+                }
+                // Already pinned (a character's own window): nothing to do or undo.
+                if window.is_always_on_top().unwrap_or(false) {
+                    return;
+                }
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_always_on_top(true);
+                raised.push(me.to_string());
+                log::info!("{me} kept on top of EVE while the jump prompt waits");
+            } else if let Some(i) = raised.iter().position(|l| l == me) {
+                raised.remove(i);
+                let _ = window.set_always_on_top(false);
+            }
+        }
+        _ => {}
     }
 }
 

@@ -66,6 +66,9 @@ pub struct Settings {
     /// Instant location from EVE's Local chat logs. Missing = on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_log_location: Option<bool>,
+    /// Paste probe scans copied in EVE into the right character's system. Missing = on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clipboard_scans: Option<bool>,
     /// Show the developer section in Settings.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub developer: bool,
@@ -74,6 +77,10 @@ pub struct Settings {
 impl Settings {
     pub fn chat_log_location(&self) -> bool {
         self.chat_log_location.unwrap_or(true)
+    }
+
+    pub fn clipboard_scans(&self) -> bool {
+        self.clipboard_scans.unwrap_or(true)
     }
 
     pub fn pop_out_on_top(&self) -> bool {

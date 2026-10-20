@@ -63,6 +63,10 @@ pub struct SettingsView {
     chat_log_switched_off: bool,
     chat_log_folder: Option<String>,
     chat_log_characters: usize,
+    clipboard_scans: bool,
+    clipboard_switched_off: bool,
+    clipboard_last_scan: Option<String>,
+    clipboard_windows_only: bool,
     last_check_secs_ago: Option<u64>,
     last_check: Option<String>,
 }
@@ -94,6 +98,10 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
         chat_log_switched_off: !crate::appconfig::feature_on("chat_log_location"),
         chat_log_folder: crate::location::status().0,
         chat_log_characters: crate::location::status().1,
+        clipboard_scans: s.clipboard_scans(),
+        clipboard_switched_off: !crate::appconfig::feature_on("clipboard_scans"),
+        clipboard_last_scan: crate::clipboard::last_scan(),
+        clipboard_windows_only: !cfg!(windows),
         last_check_secs_ago: last.as_ref().map(|(ago, _)| *ago),
         last_check: last.map(|(_, text)| text),
     }
@@ -126,6 +134,7 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
         }
         "developer" => s.developer = value.as_bool().unwrap_or(false),
         "chat_log_location" => s.chat_log_location = Some(value.as_bool().unwrap_or(true)),
+        "clipboard_scans" => s.clipboard_scans = Some(value.as_bool().unwrap_or(true)),
         "autostart" => {
             #[cfg(desktop)]
             {
