@@ -32,6 +32,32 @@ const IN_APP_HOSTS: &[&str] = &[
     "discord.com",
 ];
 
+/// Our sites and the logins they use stay in the app; EVE's login can hop between
+/// eveonline.com addresses, and Discord's between discord.com / discordapp.com.
+fn in_app_host(host: &str) -> bool {
+    IN_APP_HOSTS.contains(&host)
+        || host.ends_with(".eveonline.com")
+        || host == "discordapp.com"
+        || host.ends_with(".discord.com")
+}
+
+/// Where the main page may go. The app's own pages, our sites and logins stay in the
+/// app; a plain link to anywhere else (no "new tab") opens in the normal browser
+/// instead of replacing the mapper in the app, where there's no Back button.
+fn main_view_may_go(app: &AppHandle, url: &Url) -> bool {
+    match url.scheme() {
+        "http" | "https" => {}
+        // tauri://, about:blank, data:, blob: ... the app's own and the page's own.
+        _ => return true,
+    }
+    let host = url.host_str().unwrap_or_default();
+    if host == "tauri.localhost" || host == "localhost" || in_app_host(host) {
+        return true;
+    }
+    open_in_browser(app, "main", url.as_str());
+    false
+}
+
 /// Name of the log file in the app's log folder
 /// (Windows: %LOCALAPPDATA%\com.tsawind.devilsrage\logs\devils-rage.log).
 pub const LOG_NAME: &str = "devils-rage";
@@ -264,6 +290,10 @@ pub fn run() {
                 WebviewBuilder::new("main", WebviewUrl::App("index.html".into()))
                     .background_color(Color(13, 13, 16, 255))
                     .initialization_script(marker.clone())
+                    .on_navigation({
+                        let app = handle.clone();
+                        move |url| main_view_may_go(&app, url)
+                    })
                     .on_new_window(new_window_handler(handle.clone(), marker, "main".into())),
                 LogicalPosition::new(0.0, BAR_HEIGHT),
                 LogicalSize::new(inner.width, (inner.height - BAR_HEIGHT).max(0.0)),
@@ -377,9 +407,9 @@ fn new_window_handler(
             };
         }
 
-        let ours = url.host_str().is_some_and(|h| IN_APP_HOSTS.contains(&h));
+        let ours = url.host_str().is_some_and(in_app_host);
         if !ours {
-            let _ = app.opener().open_url(url.as_str(), None::<&str>);
+            open_in_browser(&app, &me, url.as_str());
             return NewWindowResponse::Deny;
         }
 
@@ -431,6 +461,23 @@ fn new_window_handler(
             Err(_) => NewWindowResponse::Allow,
         }
     }
+}
+
+/// A link to another site (zKillboard, Dotlan, ...): the normal browser opens it. Off the
+/// window's own thread, and logged, so a link that doesn't open shows up in the app log.
+fn open_in_browser(app: &AppHandle, from: &str, url: &str) {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        log::warn!("not opening {url} from {from}: not a web address");
+        return;
+    }
+    log::info!("opening in the browser (from {from}): {url}");
+    let app = app.clone();
+    let url = url.to_string();
+    std::thread::spawn(move || {
+        if let Err(err) = app.opener().open_url(&url, None::<&str>) {
+            log::warn!("couldn't open {url} in the browser: {err}");
+        }
+    });
 }
 
 /// Whether window `me` shows a mapper page (only those may write the clipboard or ask for attention).
