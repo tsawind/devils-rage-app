@@ -7,6 +7,7 @@ Reads on your PC:
 - The clipboard, only to notice a probe scan you copied in EVE. Anything else you copy is ignored.
 - The title of the window in front ("EVE - <name>"), only to know whose probe scan was copied.
 It never reads EVE's memory and never sends keys or clicks to EVE.
+Optional: the PI screen can start Parsec on this PC when you press its button; your Parsec ID stays on this PC.
 
 Sends:
 - Your characters' current system, to our mapper (turn off: Settings > Location).

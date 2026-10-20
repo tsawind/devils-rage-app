@@ -85,9 +85,12 @@ fn worth_remembering(url: &Url) -> bool {
     if path.starts_with("/app/") || path.starts_with("/desktop-app/") {
         return false;
     }
-    // Your accounts has its own tab: SeAT reopens your last real SeAT page, not this one
+    // Your accounts and PI have their own tabs: SeAT reopens your last real SeAT page, not these
     // (nor the login steps it runs).
-    if path.starts_with("/devilsrage/your-accounts") || path.starts_with("/devilsrage/accounts/login") {
+    if path.starts_with("/devilsrage/your-accounts")
+        || path.starts_with("/devilsrage/accounts/login")
+        || path.starts_with("/devilsrage/pi")
+    {
         return false;
     }
     ![

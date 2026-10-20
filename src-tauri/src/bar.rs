@@ -6,14 +6,14 @@ use tauri::{AppHandle, Manager};
 
 #[derive(Serialize)]
 pub struct BarState {
-    /// Which tab is showing: home, mapper, seat, accounts, settings, or other.
+    /// Which tab is showing: home, mapper, seat, accounts, pi, settings, or other.
     page: &'static str,
     maximized: bool,
     version: String,
     channel: &'static str,
 }
 
-/// A bar button was pressed (home, mapper, seat, accounts, settings, admin, reload,
+/// A bar button was pressed (home, mapper, seat, accounts, pi, settings, admin, reload,
 /// updates, minimize, maximize, close, drag).
 #[tauri::command]
 pub fn bar_action(app: AppHandle, action: String) {
@@ -34,6 +34,8 @@ pub fn bar_state(app: AppHandle) -> BarState {
             } else if host == crate::host_of(crate::SEAT_URL) {
                 if path.starts_with("/devilsrage/accounts") || path.starts_with("/devilsrage/your-accounts") {
                     "accounts"
+                } else if path.starts_with("/devilsrage/pi") {
+                    "pi"
                 } else {
                     "seat"
                 }

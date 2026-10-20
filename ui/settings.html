@@ -37,6 +37,7 @@
   .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #1d1d23; border: 1px solid #34343c;
            padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
+  .in { background: #101014; border: 1px solid #34343c; border-radius: 7px; padding: 5px 8px; color: inherit; font: inherit; font-size: 13px; width: 170px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -53,7 +54,7 @@
     <div class="row">
       <div class="l">Open with<small>Where the app goes when it starts</small></div>
       <div class="seg" data-key="start_page">
-        <button data-v="home">Start screen</button><button data-v="mapper">Mapper</button><button data-v="seat">SeAT</button><button data-v="accounts">Your accounts</button>
+        <button data-v="home">Start screen</button><button data-v="mapper">Mapper</button><button data-v="seat">SeAT</button><button data-v="accounts">Your accounts</button><button data-v="pi">PI</button>
       </div>
     </div>
     <div class="row">
@@ -107,6 +108,19 @@
     <div class="row">
       <div class="l">Position<small id="posText">Opens where you last left it</small></div>
       <button class="b" id="resetPos">Reset position</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Parsec</h2>
+    <div class="row">
+      <div class="l">Connect to my EVE PC<small id="psWhat">The PI screen's button opens Parsec on this PC. You still do everything in EVE yourself.</small></div>
+      <button class="b" id="psOpen">Open Parsec</button>
+    </div>
+    <div class="row">
+      <div class="l">Your EVE computer's Parsec ID (optional)<small>With it, Parsec connects straight away. Without it, Parsec opens and you pick the computer. Only kept on this PC.</small></div>
+      <input id="psId" class="in" maxlength="64" spellcheck="false" autocomplete="off" placeholder="Parsec ID">
+      <button class="b" id="psSave">Save</button>
     </div>
   </section>
 
@@ -197,6 +211,10 @@
     } else {
       $("cbWhat").textContent = state.clipboard_last_scan ? `Last scan: ${state.clipboard_last_scan}` : "Watching the clipboard";
     }
+    if (document.activeElement !== $("psId")) $("psId").value = state.parsec_peer_id || "";
+    $("psWhat").textContent = state.parsec_installed
+      ? "The PI screen's button opens Parsec on this PC. You still do everything in EVE yourself."
+      : "Parsec isn't installed on this PC: the button opens Parsec's download page.";
     $("posText").textContent = state.has_pop_out_position
       ? "Opens where you last left it"
       : "Not saved yet: it opens where Windows puts it";
@@ -235,6 +253,8 @@
     render();
     toast("Pop-out position reset");
   });
+  $("psOpen").addEventListener("click", () => { invoke("open_parsec"); toast("Opening Parsec…"); });
+  $("psSave").addEventListener("click", () => set("parsec_peer_id", $("psId").value.trim()));
   $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
   $("copyLog").addEventListener("click", async () => {
     try {

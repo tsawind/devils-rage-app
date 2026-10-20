@@ -9,6 +9,9 @@ The Devil's Rage app is a window around our corp's own sites: the mapper (devils
 
 It never reads EVE's memory and never sends keys or clicks to EVE.
 
+## Parsec (optional)
+The PI screen's "Connect to my EVE PC" button starts the Parsec app on this PC (if you have it), connecting to the computer whose Parsec ID you saved in Settings → Parsec. The ID stays in the app's settings on this PC; the app sends it nowhere. Parsec is a separate program with its own rules; you still do everything in EVE yourself.
+
 ## What it sends, and where
 | What | Where to | When | Turn it off |
 |---|---|---|---|

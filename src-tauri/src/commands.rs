@@ -67,6 +67,8 @@ pub struct SettingsView {
     clipboard_switched_off: bool,
     clipboard_last_scan: Option<String>,
     clipboard_windows_only: bool,
+    parsec_peer_id: String,
+    parsec_installed: bool,
     last_check_secs_ago: Option<u64>,
     last_check: Option<String>,
 }
@@ -102,6 +104,8 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
         clipboard_switched_off: !crate::appconfig::feature_on("clipboard_scans"),
         clipboard_last_scan: crate::clipboard::last_scan(),
         clipboard_windows_only: !cfg!(windows),
+        parsec_peer_id: s.parsec_peer_id.clone().unwrap_or_default(),
+        parsec_installed: crate::parsec::installed().is_some(),
         last_check_secs_ago: last.as_ref().map(|(ago, _)| *ago),
         last_check: last.map(|(_, text)| text),
     }
@@ -117,6 +121,7 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
                 Some("mapper") => Some("mapper".into()),
                 Some("seat") => Some("seat".into()),
                 Some("accounts") => Some("accounts".into()),
+                Some("pi") => Some("pi".into()),
                 _ => None,
             }
         }
@@ -134,6 +139,10 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
             crate::scanner::set_on_top(&app, on);
         }
         "developer" => s.developer = value.as_bool().unwrap_or(false),
+        "parsec_peer_id" => {
+            let id = crate::parsec::clean_id(value.as_str().unwrap_or(""));
+            s.parsec_peer_id = (!id.is_empty()).then_some(id);
+        }
         "chat_log_location" => s.chat_log_location = Some(value.as_bool().unwrap_or(true)),
         "clipboard_scans" => s.clipboard_scans = Some(value.as_bool().unwrap_or(true)),
         "autostart" => {
@@ -154,6 +163,12 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
     }
     log::info!("setting changed: {key} = {value}");
     settings::save(&app, &s)
+}
+
+/// Settings → Parsec → "Open Parsec": try it out.
+#[tauri::command]
+pub fn open_parsec(app: AppHandle) {
+    crate::parsec::connect(&app);
 }
 
 #[tauri::command]

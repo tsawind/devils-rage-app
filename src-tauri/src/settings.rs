@@ -41,7 +41,7 @@ pub struct Settings {
     /// Release channel to update from. Missing = follow the installed build.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel: Option<Channel>,
-    /// "mapper" or "seat" = skip the start screen and open that. Missing = start screen.
+    /// "mapper", "seat", "accounts" or "pi" = skip the start screen and open that. Missing = start screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_page: Option<String>,
     /// Where the scanner pop-out was last: [x, y, width, height] in screen pixels.
@@ -69,6 +69,10 @@ pub struct Settings {
     /// Paste probe scans copied in EVE into the right character's system. Missing = on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard_scans: Option<bool>,
+    /// Patch 50: the pilot's EVE computer in Parsec (its ID), for "Connect to my EVE PC" on
+    /// the PI screen. Missing = Parsec just opens and you pick the computer there.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parsec_peer_id: Option<String>,
     /// Show the developer section in Settings.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub developer: bool,

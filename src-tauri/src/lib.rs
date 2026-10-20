@@ -13,6 +13,7 @@ mod clipboard;
 mod commands;
 mod location;
 mod mainwindow;
+mod parsec;
 mod scanner;
 mod settings;
 #[cfg(desktop)]
@@ -64,6 +65,7 @@ fn site_url(app: &AppHandle, site: &str) -> Option<Url> {
         "mapper" => (MAPPER_URL, s.last_mapper_page),
         "seat" => (SEAT_URL, s.last_seat_page),
         "accounts" => return format!("{SEAT_URL}/devilsrage/your-accounts").parse().ok(),
+        "pi" => return format!("{SEAT_URL}/devilsrage/pi").parse().ok(),
         _ => return None,
     };
     last.filter(|page| mainwindow::reopenable(page))
@@ -119,7 +121,7 @@ pub fn bar_action(app: &AppHandle, action: &str) {
     let window = app.get_window(MAIN_WINDOW);
     match action {
         "home" => go(app, home_url()),
-        "mapper" | "seat" | "accounts" => {
+        "mapper" | "seat" | "accounts" | "pi" => {
             if let Some(url) = site_url(app, action) {
                 go(app, url);
             }
@@ -204,6 +206,7 @@ pub fn run() {
             commands::get_settings,
             commands::set_setting,
             commands::reset_pop_out_position,
+            commands::open_parsec,
             commands::read_log,
             commands::open_log,
             commands::open_devtools,
@@ -230,7 +233,7 @@ pub fn run() {
             // powers), and gives it a stand-in for Chrome's picture-in-picture so
             // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?} }});\n{}\n{}\n{}",
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true }});\n{}\n{}\n{}",
                 channel.as_str(),
                 SHORTCUTS,
                 RECONNECT,
@@ -354,6 +357,9 @@ fn new_window_handler(
                 "/home" => go(&app, home_url()),
                 "/clipboard" | "/attention" if from_mapper(&app, &me) => page_signal(&app, &me, &url),
                 "/clipboard" | "/attention" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),
+                // Patch 50: "Connect to my EVE PC" on the PI screen (a SeAT page).
+                "/parsec" if from_seat(&app, &me) => parsec::connect(&app),
+                "/parsec" => log::warn!("ignored /parsec from a non-SeAT window ({me})"),
                 _ => scanner::signal(&app, &me, &url),
             }
             return NewWindowResponse::Deny;
@@ -432,6 +438,13 @@ fn from_mapper(app: &AppHandle, me: &str) -> bool {
     app.get_webview(me)
         .and_then(|w| w.url().ok())
         .is_some_and(|u| u.host_str() == Some(host_of(MAPPER_URL)))
+}
+
+/// Whether window `me` shows a SeAT page (the PI screen's Parsec button).
+fn from_seat(app: &AppHandle, me: &str) -> bool {
+    app.get_webview(me)
+        .and_then(|w| w.url().ok())
+        .is_some_and(|u| u.host_str() == Some(host_of(SEAT_URL)))
 }
 
 /// Windows the mapper put on top of EVE while a jump prompt waits (Patch 47), to put back after.
