@@ -63,6 +63,7 @@ fn site_url(app: &AppHandle, site: &str) -> Option<Url> {
     let (root, last) = match site {
         "mapper" => (MAPPER_URL, s.last_mapper_page),
         "seat" => (SEAT_URL, s.last_seat_page),
+        "accounts" => return format!("{SEAT_URL}/devilsrage/your-accounts").parse().ok(),
         _ => return None,
     };
     last.filter(|page| mainwindow::reopenable(page))
@@ -118,13 +119,8 @@ pub fn bar_action(app: &AppHandle, action: &str) {
     let window = app.get_window(MAIN_WINDOW);
     match action {
         "home" => go(app, home_url()),
-        "mapper" | "seat" => {
+        "mapper" | "seat" | "accounts" => {
             if let Some(url) = site_url(app, action) {
-                go(app, url);
-            }
-        }
-        "accounts" => {
-            if let Ok(url) = format!("{SEAT_URL}/devilsrage/your-accounts").parse() {
                 go(app, url);
             }
         }

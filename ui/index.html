@@ -17,7 +17,8 @@
           font-size: 44px; font-weight: 700; letter-spacing: 1px; }
   h1 { font-size: 24px; font-weight: 600; margin: 14px 0 2px; }
   .sub { color: var(--muted); margin: 0 0 28px; }
-  .sites { display: grid; grid-template-columns: repeat(2, 230px); gap: 18px; }
+  .sites { display: grid; grid-template-columns: repeat(3, 230px); gap: 18px; }
+  @media (max-width: 800px) { .sites { grid-template-columns: repeat(2, 230px); } }
   button.site { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
                 color: var(--text); padding: 26px 16px; cursor: pointer; font: inherit;
                 display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -61,6 +62,11 @@
         <circle cx="17" cy="9" r="2.4"/><path d="M15.8 14.2c2.4-.3 4.3 1.1 4.8 4"/></svg>
       <b>SeAT</b><span>Characters, skills, FC tools</span>
     </button>
+    <button class="site" data-site="accounts">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/>
+        <path d="M5.8 16.5c.6-1.8 1.8-2.7 3.2-2.7s2.6.9 3.2 2.7M14.5 10h3.5M14.5 13.5h3.5"/></svg>
+      <b>Your accounts</b><span>Logins, alts, order</span>
+    </button>
   </div>
 
   <label class="skip"><input type="checkbox" id="skip">
@@ -69,7 +75,7 @@
 
 <footer>
   <span id="ver">…</span>
-  <span class="hint">Back here any time: Home in the menu bar (Ctrl+Shift+H)</span>
+  <span class="hint">Back here any time: Home in the top bar (Ctrl+Shift+H)</span>
   <span class="grow"></span>
   <button id="upd">Check for updates</button>
   <button id="set">Settings</button>

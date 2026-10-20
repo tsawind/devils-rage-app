@@ -116,6 +116,7 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
             s.start_page = match value.as_str() {
                 Some("mapper") => Some("mapper".into()),
                 Some("seat") => Some("seat".into()),
+                Some("accounts") => Some("accounts".into()),
                 _ => None,
             }
         }
