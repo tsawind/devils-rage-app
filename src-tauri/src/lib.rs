@@ -41,20 +41,43 @@ fn in_app_host(host: &str) -> bool {
         || host.ends_with(".discord.com")
 }
 
-/// Where the main page may go. The app's own pages, our sites and logins stay in the
-/// app; a plain link to anywhere else (no "new tab") opens in the normal browser
-/// instead of replacing the mapper in the app, where there's no Back button.
-fn main_view_may_go(app: &AppHandle, url: &Url) -> bool {
+/// Whether `url` belongs in the mapper's own page ("main"): any mapper page except the
+/// app's admin page, which opens with the app's other pages.
+fn is_mapper_page(url: &Url) -> bool {
+    url.host_str() == Some(host_of(MAPPER_URL)) && !url.path().starts_with("/desktop-app/")
+}
+
+/// Where a page in the main window may go (`me` = "main" or "pages"). The mapper stays in
+/// "main" and everything else of ours in "pages": a link from one to the other goes to the
+/// other page (shown), so the mapper is never unloaded by a trip to SeAT or Settings. Logins
+/// stay where they started. A plain link to anywhere else opens in the normal browser
+/// instead of replacing the page in the app, where there's no Back button.
+fn main_view_may_go(app: &AppHandle, me: &str, url: &Url) -> bool {
     match url.scheme() {
         "http" | "https" => {}
         // tauri://, about:blank, data:, blob: ... the app's own and the page's own.
         _ => return true,
     }
     let host = url.host_str().unwrap_or_default();
-    if host == "tauri.localhost" || host == "localhost" || in_app_host(host) {
+    let ours = host == "tauri.localhost" || host == "localhost" || in_app_host(host);
+    if !ours {
+        open_in_browser(app, me, url.as_str());
+        return false;
+    }
+    let belongs = if is_mapper_page(url) {
+        MAPPER_VIEW
+    } else if host == host_of(SEAT_URL) || host == "tauri.localhost" || host == "localhost" || host == host_of(MAPPER_URL) {
+        PAGES_VIEW
+    } else {
+        // EVE / Discord logins: wherever they were started.
+        return true;
+    };
+    if belongs == me {
         return true;
     }
-    open_in_browser(app, "main", url.as_str());
+    let app = app.clone();
+    let url = url.clone();
+    tauri::async_runtime::spawn(async move { go(&app, url) });
     false
 }
 
@@ -105,9 +128,37 @@ pub const MAIN_WINDOW: &str = "app";
 /// Height of the slim bar, in logical pixels.
 const BAR_HEIGHT: f64 = 30.0;
 
-/// The page part of the main window (start screen, mapper, SeAT, settings).
+/// The main window holds two pages under the bar, one shown at a time like browser tabs:
+/// the mapper ("main", only ever a mapper page, so it stays loaded while you're elsewhere and
+/// its pop-outs keep working) and the app's other pages ("pages": start screen, settings,
+/// SeAT, Your accounts, PI, admin).
+pub const MAPPER_VIEW: &str = "main";
+pub const PAGES_VIEW: &str = "pages";
+
+/// Which of the two is showing.
+static SHOWN: std::sync::Mutex<&'static str> = std::sync::Mutex::new(PAGES_VIEW);
+
+/// The mapper's page in the main window (live location, scans and pop-outs go here).
 pub fn main_view(app: &AppHandle) -> Option<Webview> {
-    app.get_webview("main")
+    app.get_webview(MAPPER_VIEW)
+}
+
+/// The page you're looking at in the main window.
+pub fn shown_view(app: &AppHandle) -> Option<Webview> {
+    app.get_webview(*SHOWN.lock().unwrap())
+}
+
+/// Shows one of the main window's two pages and hides the other.
+fn show_view(app: &AppHandle, label: &'static str) {
+    *SHOWN.lock().unwrap() = label;
+    let other = if label == MAPPER_VIEW { PAGES_VIEW } else { MAPPER_VIEW };
+    if let Some(view) = app.get_webview(label) {
+        let _ = view.show();
+        let _ = view.set_focus();
+    }
+    if let Some(view) = app.get_webview(other) {
+        let _ = view.hide();
+    }
 }
 
 /// The window a page (webview) is in: the main window for "main" and "bar",
@@ -116,10 +167,24 @@ pub fn window_of(app: &AppHandle, label: &str) -> Option<Window> {
     app.get_webview(label).map(|view| view.window())
 }
 
-fn go(app: &AppHandle, url: Url) {
-    if let Some(view) = main_view(app) {
+/// Opens `url` in the main window: mapper pages in the mapper's page, the rest in the other.
+pub(crate) fn go(app: &AppHandle, url: Url) {
+    let label = if is_mapper_page(&url) { MAPPER_VIEW } else { PAGES_VIEW };
+    if let Some(view) = app.get_webview(label) {
         let _ = view.navigate(url);
-        let _ = view.set_focus();
+    }
+    show_view(app, label);
+}
+
+/// The Mapper tab: the mapper as you left it (no reload); loads it if it isn't there yet.
+pub(crate) fn show_mapper(app: &AppHandle) {
+    let loaded = main_view(app)
+        .and_then(|view| view.url().ok())
+        .is_some_and(|url| url.host_str() == Some(host_of(MAPPER_URL)));
+    if loaded {
+        show_view(app, MAPPER_VIEW);
+    } else if let Some(url) = site_url(app, "mapper") {
+        go(app, url);
     }
 }
 
@@ -136,9 +201,11 @@ fn layout(window: &Window) {
         let _ = bar.set_position(LogicalPosition::new(0.0, 0.0));
         let _ = bar.set_size(LogicalSize::new(size.width, BAR_HEIGHT));
     }
-    if let Some(page) = app.get_webview("main") {
-        let _ = page.set_position(LogicalPosition::new(0.0, BAR_HEIGHT));
-        let _ = page.set_size(LogicalSize::new(size.width, (size.height - BAR_HEIGHT).max(0.0)));
+    for label in [MAPPER_VIEW, PAGES_VIEW] {
+        if let Some(page) = app.get_webview(label) {
+            let _ = page.set_position(LogicalPosition::new(0.0, BAR_HEIGHT));
+            let _ = page.set_size(LogicalSize::new(size.width, (size.height - BAR_HEIGHT).max(0.0)));
+        }
     }
 }
 
@@ -147,7 +214,8 @@ pub fn bar_action(app: &AppHandle, action: &str) {
     let window = app.get_window(MAIN_WINDOW);
     match action {
         "home" => go(app, home_url()),
-        "mapper" | "seat" | "accounts" | "pi" => {
+        "mapper" => show_mapper(app),
+        "seat" | "accounts" | "pi" => {
             if let Some(url) = site_url(app, action) {
                 go(app, url);
             }
@@ -159,7 +227,7 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         "reload" => {
-            if let Some(view) = main_view(app) {
+            if let Some(view) = shown_view(app) {
                 let _ = view.eval("location.reload()");
             }
         }
@@ -286,29 +354,37 @@ pub fn run() {
                 LogicalPosition::new(0.0, 0.0),
                 LogicalSize::new(inner.width, BAR_HEIGHT),
             )?;
-            window.add_child(
-                WebviewBuilder::new("main", WebviewUrl::App("index.html".into()))
-                    .background_color(Color(13, 13, 16, 255))
-                    .initialization_script(marker.clone())
-                    // Windows' file drag-and-drop handler swallows the page's own drag and drop
-                    // (dragging tabs, accounts); we never take dropped files.
-                    .disable_drag_drop_handler()
-                    .on_navigation({
-                        let app = handle.clone();
-                        move |url| main_view_may_go(&app, url)
-                    })
-                    .on_page_load({
-                        let app = handle.clone();
-                        move |_, payload| {
-                            if matches!(payload.event(), PageLoadEvent::Started) {
-                                scanner::close_for_parent(&app, "main");
+            // The mapper's page starts loading straight away (hidden until you open it), so
+            // it's ready, and live location and scans have somewhere to go.
+            let mapper_start = site_url(&handle, "mapper").map(WebviewUrl::External).unwrap_or(WebviewUrl::App("index.html".into()));
+            for (label, start) in [(MAPPER_VIEW, mapper_start), (PAGES_VIEW, WebviewUrl::App("index.html".into()))] {
+                let view = window.add_child(
+                    WebviewBuilder::new(label, start)
+                        .background_color(Color(13, 13, 16, 255))
+                        .initialization_script(marker.clone())
+                        // Windows' file drag-and-drop handler swallows the page's own drag and drop
+                        // (dragging tabs, accounts); we never take dropped files.
+                        .disable_drag_drop_handler()
+                        .on_navigation({
+                            let app = handle.clone();
+                            move |url| main_view_may_go(&app, label, url)
+                        })
+                        .on_page_load({
+                            let app = handle.clone();
+                            move |_, payload| {
+                                if matches!(payload.event(), PageLoadEvent::Started) {
+                                    scanner::close_for_parent(&app, label);
+                                }
                             }
-                        }
-                    })
-                    .on_new_window(new_window_handler(handle.clone(), marker, "main".into())),
-                LogicalPosition::new(0.0, BAR_HEIGHT),
-                LogicalSize::new(inner.width, (inner.height - BAR_HEIGHT).max(0.0)),
-            )?;
+                        })
+                        .on_new_window(new_window_handler(handle.clone(), marker.clone(), label.into())),
+                    LogicalPosition::new(0.0, BAR_HEIGHT),
+                    LogicalSize::new(inner.width, (inner.height - BAR_HEIGHT).max(0.0)),
+                )?;
+                if label == MAPPER_VIEW {
+                    let _ = view.hide();
+                }
+            }
             {
                 let me = window.clone();
                 let app = handle.clone();
@@ -334,8 +410,14 @@ pub fn run() {
             appconfig::start(handle.clone());
 
             // "Skip this screen" ticked: go straight to the chosen site (your last map).
-            if let Some(url) = s.start_page.as_deref().and_then(|site| site_url(&handle, site)) {
-                go(&handle, url);
+            match s.start_page.as_deref() {
+                Some("mapper") => show_view(&handle, MAPPER_VIEW),
+                Some(site) => {
+                    if let Some(url) = site_url(&handle, site) {
+                        go(&handle, url);
+                    }
+                }
+                None => {}
             }
 
             #[cfg(desktop)]

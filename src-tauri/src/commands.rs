@@ -36,7 +36,11 @@ pub fn open_site(app: AppHandle, site: String, remember: bool) -> Result<(), Str
         s.start_page = wanted;
         settings::save(&app, &s)?;
     }
-    crate::go(&app, url);
+    if site == "mapper" {
+        crate::show_mapper(&app);
+    } else {
+        crate::go(&app, url);
+    }
     Ok(())
 }
 
@@ -230,7 +234,7 @@ pub fn open_admin(app: AppHandle) {
 
 #[tauri::command]
 pub fn open_devtools(app: AppHandle) {
-    if let Some(view) = crate::main_view(&app) {
+    if let Some(view) = crate::shown_view(&app) {
         view.open_devtools();
     }
 }

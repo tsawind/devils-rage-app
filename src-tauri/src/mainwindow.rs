@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, PhysicalPosition, PhysicalSize, Url, Window, WindowEvent};
+use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Url, Window, WindowEvent};
 
 use crate::settings;
 
@@ -136,40 +136,49 @@ fn clean(url: &Url) -> String {
 /// mapper / SeAT page in settings.
 pub fn follow_pages(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let mut seen = String::new();
+        // What each of the main window's two pages (mapper, other pages) showed last time.
+        let mut seen = [String::new(), String::new()];
         loop {
             tokio::time::sleep(Duration::from_secs(4)).await;
-            let Some(win) = crate::main_view(&app) else {
-                continue;
-            };
-            let Ok(url) = win.url() else { continue };
-            if url.as_str() == seen {
-                continue;
+            for (i, label) in [crate::MAPPER_VIEW, crate::PAGES_VIEW].into_iter().enumerate() {
+                let Some(win) = app.get_webview(label) else {
+                    continue;
+                };
+                let Ok(url) = win.url() else { continue };
+                if url.as_str() == seen[i] {
+                    continue;
+                }
+                seen[i] = url.to_string();
+                note_page(&app, &url);
             }
-            seen = url.to_string();
-            let host = url.host_str().unwrap_or_default();
-            if host == crate::host_of(crate::MAPPER_URL) {
-                // A mapper page (re)opened: once it's listening, tell it where everyone is.
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
-                    crate::location::resend_all(&app);
-                    crate::scanner::announce(&app);
-                });
-            }
-            if !worth_remembering(&url) {
-                continue;
-            }
-            let mut s = settings::load(&app);
-            let page = Some(clean(&url));
-            if host == crate::host_of(crate::MAPPER_URL) && s.last_mapper_page != page {
-                s.last_mapper_page = page;
-            } else if host == crate::host_of(crate::SEAT_URL) && s.last_seat_page != page {
-                s.last_seat_page = page;
-            } else {
-                continue;
-            }
-            let _ = settings::save(&app, &s);
         }
     });
+}
+
+/// A page in the main window changed: a mapper page gets everyone's location; real
+/// mapper / SeAT pages are remembered for next time.
+fn note_page(app: &AppHandle, url: &Url) {
+    let host = url.host_str().unwrap_or_default();
+    if host == crate::host_of(crate::MAPPER_URL) {
+        // A mapper page (re)opened: once it's listening, tell it where everyone is.
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            crate::location::resend_all(&app);
+            crate::scanner::announce(&app);
+        });
+    }
+    if !worth_remembering(url) {
+        return;
+    }
+    let mut s = settings::load(app);
+    let page = Some(clean(url));
+    if host == crate::host_of(crate::MAPPER_URL) && s.last_mapper_page != page {
+        s.last_mapper_page = page;
+    } else if host == crate::host_of(crate::SEAT_URL) && s.last_seat_page != page {
+        s.last_seat_page = page;
+    } else {
+        return;
+    }
+    let _ = settings::save(app, &s);
 }

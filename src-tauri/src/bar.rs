@@ -23,7 +23,7 @@ pub fn bar_action(app: AppHandle, action: String) {
 /// What the bar shows; it asks about once a second.
 #[tauri::command]
 pub fn bar_state(app: AppHandle) -> BarState {
-    let url = crate::main_view(&app).and_then(|view| view.url().ok());
+    let url = crate::shown_view(&app).and_then(|view| view.url().ok());
     let page = match url.as_ref() {
         None => "other",
         Some(url) => {
