@@ -87,6 +87,25 @@ pub fn close_for_character(app: &AppHandle, character: &str) {
     }
 }
 
+/// The page in window `parent` is loading another page (Settings, SeAT, Home, Reload...): the
+/// pop-outs it drew would stay on screen as a frozen picture that can't be moved or closed,
+/// since the page that drew them is gone. They close instead (their spot is remembered).
+pub fn close_for_parent(app: &AppHandle, parent: &str) {
+    let scanners: Vec<String> = PARENTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, p)| p == parent)
+        .map(|(s, _)| s.clone())
+        .collect();
+    for label in scanners {
+        if let Some(window) = app.get_webview_window(&label) {
+            log::info!("{parent} is loading another page: closing its pop-out {label}");
+            let _ = window.close();
+        }
+    }
+}
+
 /// Brings a character's pop-out to the front.
 pub fn focus_for_character(app: &AppHandle, character: &str) {
     for label in scanners_of_character(character) {

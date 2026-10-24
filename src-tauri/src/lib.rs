@@ -1,5 +1,5 @@
 use tauri::{
-    webview::{Color, NewWindowResponse, WebviewBuilder},
+    webview::{Color, NewWindowResponse, PageLoadEvent, WebviewBuilder},
     window::WindowBuilder,
     AppHandle, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl, Window,
     WebviewWindowBuilder, WindowEvent,
@@ -297,6 +297,14 @@ pub fn run() {
                         let app = handle.clone();
                         move |url| main_view_may_go(&app, url)
                     })
+                    .on_page_load({
+                        let app = handle.clone();
+                        move |_, payload| {
+                            if matches!(payload.event(), PageLoadEvent::Started) {
+                                scanner::close_for_parent(&app, "main");
+                            }
+                        }
+                    })
                     .on_new_window(new_window_handler(handle.clone(), marker, "main".into())),
                 LogicalPosition::new(0.0, BAR_HEIGHT),
                 LogicalSize::new(inner.width, (inner.height - BAR_HEIGHT).max(0.0)),
@@ -525,6 +533,15 @@ fn new_window_handler(
             .visible(!host)
             .skip_taskbar(host)
             .initialization_script(marker.clone())
+            .on_page_load({
+                let app = app.clone();
+                let label = label.clone();
+                move |_, payload| {
+                    if matches!(payload.event(), PageLoadEvent::Started) {
+                        scanner::close_for_parent(&app, &label);
+                    }
+                }
+            })
             .on_new_window(new_window_handler(
                 app.clone(),
                 marker.clone(),
