@@ -85,6 +85,21 @@ fn worth_remembering(url: &Url) -> bool {
     if path.starts_with("/app/") || path.starts_with("/desktop-app/") {
         return false;
     }
+    // The mapper: only real pages are worth reopening (your map, the map list, settings…),
+    // never an address the mapper only answers with data, like /map-solarsystems: a page
+    // left there by a failed request showed "405 Method Not Allowed" on every start.
+    if url.host_str() == Some(crate::host_of(crate::MAPPER_URL)) {
+        let segments: Vec<&str> = path.trim_matches('/').split('/').filter(|s| !s.is_empty()).collect();
+        let page = match segments.as_slice() {
+            [] => true,
+            ["maps"] | ["maps", _] => true,
+            [one] => ["settings", "documentation"].contains(one),
+            _ => false,
+        };
+        if !page {
+            return false;
+        }
+    }
     // Your accounts and PI have their own tabs: SeAT reopens your last real SeAT page, not these
     // (nor the login steps it runs).
     if path.starts_with("/devilsrage/your-accounts")
