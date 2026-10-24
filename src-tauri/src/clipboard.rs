@@ -85,11 +85,12 @@ pub fn start(app: AppHandle) {
                 log::info!("probe scan copied, but not from an EVE window in front: left for Ctrl+V");
                 continue;
             };
-            let Some(id) = crate::location::character_id(&name) else {
-                log::info!("probe scan copied by {name}, whose character id isn't known yet (no chat log): left for Ctrl+V");
-                continue;
-            };
-            log::info!("probe scan copied by {name}: {count} signatures, handed to the mapper");
+            // Patch 52: chat logs off (no id) is fine: the mapper page matches the name.
+            let id = crate::location::character_id(&name);
+            log::info!(
+                "probe scan copied by {name}: {count} signatures, handed to the mapper{}",
+                if id.is_none() { " (by name: no chat log)" } else { "" }
+            );
             *LAST_SCAN.lock().unwrap() = Some(format!(
                 "{name}, {count} signature{}",
                 if count == 1 { "" } else { "s" }
@@ -99,7 +100,7 @@ pub fn start(app: AppHandle) {
     });
 }
 
-fn deliver(app: &AppHandle, character_id: i64, name: &str, text: &str) {
+fn deliver(app: &AppHandle, character_id: Option<i64>, name: &str, text: &str) {
     let detail = serde_json::json!({
         "character_id": character_id,
         "character_name": name,
