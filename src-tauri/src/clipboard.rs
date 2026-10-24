@@ -171,6 +171,46 @@ pub fn foreground_eve_character() -> Option<String> {
     None
 }
 
+/// Patch 54: the characters of every EVE client open on this PC (the "EVE - <name>" windows).
+#[cfg(windows)]
+pub fn open_eve_characters() -> Vec<String> {
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
+
+    unsafe extern "system" fn each(hwnd: HWND, found: LPARAM) -> BOOL {
+        // SAFETY: `found` is the &mut Vec<String> passed to EnumWindows below, alive for the call.
+        let names = unsafe { &mut *(found as *mut Vec<String>) };
+        let mut buf = [0u16; 256];
+        // SAFETY: plain Win32 calls on a window handle EnumWindows gave us and a stack buffer.
+        let len = unsafe {
+            if IsWindowVisible(hwnd) == 0 {
+                return 1;
+            }
+            GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32)
+        };
+        if len > 0 {
+            if let Some(name) = eve_character_from_title(&String::from_utf16_lossy(&buf[..len as usize])) {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+        1
+    }
+
+    let mut names: Vec<String> = Vec::new();
+    // SAFETY: the callback only touches `names` through the pointer, during this call.
+    unsafe {
+        EnumWindows(Some(each), &mut names as *mut Vec<String> as LPARAM);
+    }
+    names
+}
+
+#[cfg(not(windows))]
+pub fn open_eve_characters() -> Vec<String> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -90,14 +90,17 @@ pub fn close_for_character(app: &AppHandle, character: &str) {
 /// The page in window `parent` is loading another page (Settings, SeAT, Home, Reload...): the
 /// pop-outs it drew would stay on screen as a frozen picture that can't be moved or closed,
 /// since the page that drew them is gone. They close instead (their spot is remembered).
+///
+/// Patch 54: a character's hidden pop-out window that reloads (after a deploy) pops its character
+/// out again by itself, so it must stay open: the pop-outs are taken off the list first, which
+/// tells their Destroyed handler not to close the window that hosted them.
 pub fn close_for_parent(app: &AppHandle, parent: &str) {
-    let scanners: Vec<String> = PARENTS
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(_, p)| p == parent)
-        .map(|(s, _)| s.clone())
-        .collect();
+    let scanners: Vec<String> = {
+        let mut parents = PARENTS.lock().unwrap();
+        let mine: Vec<String> = parents.iter().filter(|(_, p)| p == parent).map(|(s, _)| s.clone()).collect();
+        parents.retain(|(_, p)| p != parent);
+        mine
+    };
     for label in scanners {
         if let Some(window) = app.get_webview_window(&label) {
             log::info!("{parent} is loading another page: closing its pop-out {label}");
@@ -259,10 +262,16 @@ fn remember_bounds(app: &AppHandle, window: &WebviewWindow, parent: &str) {
                 let _ = settings::save(&app, &s);
             }
             let label = me.label().to_string();
-            PARENTS.lock().unwrap().retain(|(s, _)| *s != label);
+            // Still listed = you closed it (not its page reloading, see close_for_parent).
+            let closed_by_you = {
+                let mut parents = PARENTS.lock().unwrap();
+                let listed = parents.iter().any(|(s, _)| *s == label);
+                parents.retain(|(s, _)| *s != label);
+                listed
+            };
             announce(&app);
-            // An extra pop-out's hidden window has no other job: close it too.
-            if parent.starts_with("pophost-") {
+            // A pop-out's hidden window has no other job: close it too.
+            if closed_by_you && parent.starts_with("pophost-") {
                 if let Some(host) = app.get_webview_window(&parent) {
                     let _ = host.close();
                 }
