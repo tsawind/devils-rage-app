@@ -49,6 +49,8 @@ pub fn start(app: AppHandle) {
         // Patch 54: when each open EVE window was first seen, and when we last looked.
         let mut windows_seen: HashMap<String, Instant> = HashMap::new();
         let mut windows_checked = Instant::now() - Duration::from_secs(60);
+        // Patch 54: how many Local logs were found last time (logged when it changes).
+        let mut last_found: Option<usize> = None;
         loop {
             std::thread::sleep(Duration::from_secs(1));
             // Off in Settings, or switched off for everyone by the directors.
@@ -83,6 +85,14 @@ pub fn start(app: AppHandle) {
                 }
             };
 
+            if last_found != Some(w.found()) {
+                last_found = Some(w.found());
+                log::info!(
+                    "chat logs: {} Local log(s) from the last day in {} (and its subfolders)",
+                    w.found(),
+                    w.dir().display()
+                );
+            }
             for event in &events {
                 if let ChatEvent::Jumped { character, to, .. } = event {
                     log::info!("{character} jumped to {to}");

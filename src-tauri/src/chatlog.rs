@@ -162,7 +162,14 @@ impl LogFile {
 /// Follows every recent Local log in one folder.
 pub struct Watcher {
     dir: PathBuf,
-    files: HashMap<PathBuf, LogFile>,
+    /// Patch 54: by file name, not path, so a log moved into a subfolder (Chatlogs\old, by EVE or
+    /// a log tool) carries on where it was instead of being read again from the start.
+    files: HashMap<std::ffi::OsString, LogFile>,
+    /// The Local logs found in subfolders at the last look (looked at every 10 s, not every poll).
+    nested: Vec<PathBuf>,
+    nested_checked: Option<std::time::Instant>,
+    /// How many recent Local logs the last poll found (for the app log).
+    found: usize,
     /// Each character's current system, by the name in the log header.
     location: HashMap<String, String>,
     /// Character ids, from the file names, for portraits.
@@ -176,6 +183,9 @@ impl Watcher {
         Watcher {
             dir,
             files: HashMap::new(),
+            nested: Vec::new(),
+            nested_checked: None,
+            found: 0,
             location: HashMap::new(),
             ids: HashMap::new(),
             primed: false,
@@ -184,6 +194,11 @@ impl Watcher {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// How many Local logs from the last day the last poll found (top folder and one level down).
+    pub fn found(&self) -> usize {
+        self.found
     }
 
     /// The characters seen so far, where they are, and their id when the file name had it.
@@ -196,31 +211,54 @@ impl Watcher {
     /// Read whatever the logs gained since the last call.
     pub fn poll(&mut self) -> std::io::Result<Vec<ChatEvent>> {
         let now = SystemTime::now();
-        let mut found = Vec::new();
-        for entry in std::fs::read_dir(&self.dir)? {
-            let Ok(entry) = entry else { continue };
-            let path = entry.path();
-            if !is_local_log(&path) {
-                continue;
+        let recent = |path: &Path| -> Option<SystemTime> {
+            if !is_local_log(path) {
+                return None;
             }
-            let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
-                continue;
-            };
-            if now.duration_since(modified).unwrap_or_default() > STALE {
-                continue;
+            let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+            (now.duration_since(modified).unwrap_or_default() <= STALE).then_some(modified)
+        };
+        // Patch 54: Local logs can also sit one folder down (Chatlogs\old): looked for every 10 s.
+        if self.nested_checked.is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(10)) {
+            self.nested_checked = Some(std::time::Instant::now());
+            self.nested.clear();
+            for sub in std::fs::read_dir(&self.dir)?.flatten() {
+                if !sub.file_type().is_ok_and(|t| t.is_dir()) {
+                    continue;
+                }
+                let Ok(entries) = std::fs::read_dir(sub.path()) else { continue };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if recent(&path).is_some() {
+                        self.nested.push(path);
+                    }
+                }
             }
-            found.push((path, modified));
         }
+        let mut found: Vec<(PathBuf, SystemTime)> = Vec::new();
+        let top = std::fs::read_dir(&self.dir)?.flatten().map(|entry| entry.path());
+        for path in top.chain(self.nested.iter().cloned()) {
+            if let Some(modified) = recent(&path) {
+                found.push((path, modified));
+            }
+        }
+        // The same log in two places (being moved): the newer copy.
+        found.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
+        let mut seen_names = std::collections::HashSet::new();
+        found.retain(|(path, _)| path.file_name().is_some_and(|name| seen_names.insert(name.to_os_string())));
         // Oldest first, so a character's newer session wins.
         found.sort_by_key(|(_, modified)| *modified);
 
+        self.found = found.len();
+        let live: std::collections::HashSet<std::ffi::OsString> = found.iter().filter_map(|(path, _)| path.file_name().map(|n| n.to_os_string())).collect();
         let mut events = Vec::new();
         for (path, _) in found {
             // A log that was already there is history: it says where everyone is, not that
             // they just jumped. Told by the first poll rather than by timestamps, which some
             // filesystems keep coarser than the clock.
-            let history = !self.primed && !self.files.contains_key(&path);
-            let file = self.files.entry(path.clone()).or_default();
+            let Some(name) = path.file_name().map(|n| n.to_os_string()) else { continue };
+            let history = !self.primed && !self.files.contains_key(&name);
+            let file = self.files.entry(name).or_default();
             let Ok(lines) = file.read_lines(&path) else {
                 continue;
             };
@@ -258,7 +296,7 @@ impl Watcher {
         }
         self.primed = true;
         // Forget files that went stale, so the map does not grow forever.
-        self.files.retain(|path, _| path.exists());
+        self.files.retain(|name, _| live.contains(name));
         Ok(events)
     }
 }
@@ -323,6 +361,48 @@ mod tests {
         let lines = log.decode(&rest);
         assert_eq!(lines.len(), 1);
         assert_eq!(parse_change(&lines[0]), Some("Rens"));
+    }
+
+    #[test]
+    fn reads_logs_in_a_subfolder_and_follows_a_log_moved_there() {
+        // Patch 54: EVE's chat logs ended up in Chatlogs\old on Tsa's PC.
+        let dir = tempfile::tempdir().unwrap();
+        let old_dir = dir.path().join("old");
+        std::fs::create_dir(&old_dir).unwrap();
+        let nested = old_dir.join("Local_20261024_175053_90000003.txt");
+        append(&nested, &(header("LuigiSquirrel") + &line("J165648")));
+        let moving = dir.path().join("Local_20261024_175054_90000004.txt");
+        append(&moving, &(header("Tsawind") + &line("J152722")));
+
+        let mut watcher = Watcher::new(dir.path().to_path_buf());
+        let first = watcher.poll().unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(watcher.found(), 2);
+
+        append(&nested, &line("J155650"));
+        assert_eq!(
+            watcher.poll().unwrap(),
+            vec![ChatEvent::Jumped {
+                character: "LuigiSquirrel".into(),
+                from: "J165648".into(),
+                to: "J155650".into()
+            }]
+        );
+
+        // Moved into old mid-session: carries on, no replay of its first system.
+        std::fs::rename(&moving, old_dir.join("Local_20261024_175054_90000004.txt")).unwrap();
+        watcher.nested_checked = None;
+        assert!(watcher.poll().unwrap().is_empty());
+        append(&old_dir.join("Local_20261024_175054_90000004.txt"), &line("Jita"));
+        watcher.nested_checked = None;
+        assert_eq!(
+            watcher.poll().unwrap(),
+            vec![ChatEvent::Jumped {
+                character: "Tsawind".into(),
+                from: "J152722".into(),
+                to: "Jita".into()
+            }]
+        );
     }
 
     #[test]
