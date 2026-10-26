@@ -78,6 +78,18 @@ pub fn start(app: AppHandle) {
 
             let count = probe_scan_lines(&text);
             if count == 0 {
+                // Patch 57: a D-scan or overview rows with structures go into the pilot's system intel.
+                let structures = structure_lines(&text);
+                if structures == 0 {
+                    continue;
+                }
+                let Some(name) = foreground_eve_character() else {
+                    log::info!("structures copied, but not from an EVE window in front: left for Ctrl+V");
+                    continue;
+                };
+                let id = crate::location::character_id(&name);
+                log::info!("{structures} structure line(s) copied by {name}, handed to the mapper's intel");
+                deliver_event(&app, "devils-rage-app:intel", id, &name, &text);
                 continue;
             }
             // Whose scan: the EVE window in front when it was copied.
@@ -101,6 +113,10 @@ pub fn start(app: AppHandle) {
 }
 
 fn deliver(app: &AppHandle, character_id: Option<i64>, name: &str, text: &str) {
+    deliver_event(app, "devils-rage-app:scan", character_id, name, text);
+}
+
+fn deliver_event(app: &AppHandle, event: &str, character_id: Option<i64>, name: &str, text: &str) {
     let detail = serde_json::json!({
         "character_id": character_id,
         "character_name": name,
@@ -108,7 +124,7 @@ fn deliver(app: &AppHandle, character_id: Option<i64>, name: &str, text: &str) {
     });
     crate::location::send_to_mapper(
         app,
-        &format!("window.dispatchEvent(new CustomEvent('devils-rage-app:scan', {{ detail: {detail} }}));"),
+        &format!("window.dispatchEvent(new CustomEvent('{event}', {{ detail: {detail} }}));"),
     );
 }
 
@@ -138,6 +154,48 @@ fn is_scan_row(line: &str) -> bool {
         && b[4..].iter().all(u8::is_ascii_digit);
     // Rows have the group ("Cosmic Signature", "Cosmic Anomaly", ...) and more columns.
     id_ok && fields.count() >= 3
+}
+
+/// Patch 57: structure type names (lower case) the mapper's intel keeps; POS towers are any
+/// "... Control Tower ...". Kept in step with the mapper's StructureScan.
+const STRUCTURE_TYPES: [&str; 14] = [
+    "astrahus",
+    "fortizar",
+    "'moreau' fortizar",
+    "'draccous' fortizar",
+    "'horizon' fortizar",
+    "'marginis' fortizar",
+    "'prometheus' fortizar",
+    "keepstar",
+    "upwell palatine keepstar",
+    "raitaru",
+    "azbel",
+    "sotiyo",
+    "athanor",
+    "tatara",
+];
+
+fn is_structure_type(column: &str) -> bool {
+    let lower = column.trim().to_lowercase();
+    STRUCTURE_TYPES.contains(&lower.as_str()) || lower.contains("control tower")
+}
+
+/// Patch 57: how many lines of a D-scan or overview copy are structures we track, or 0 when it
+/// isn't one (most lines must be tab-separated rows, so a chat line naming a Fortizar isn't).
+pub fn structure_lines(text: &str) -> usize {
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if lines.is_empty() || lines.len() > 2000 {
+        return 0;
+    }
+    let rows: Vec<Vec<&str>> = lines
+        .iter()
+        .map(|line| line.split('\t').collect::<Vec<_>>())
+        .filter(|columns| columns.len() >= 3)
+        .collect();
+    if rows.len() * 10 < lines.len() * 8 {
+        return 0;
+    }
+    rows.iter().filter(|columns| columns.iter().any(|c| is_structure_type(c))).count()
 }
 
 /// The character name from an EVE client window title ("EVE - Tsawind").
@@ -218,6 +276,17 @@ mod tests {
     const SCAN: &str = "ABC-123\tCosmic Signature\tWormhole\tUnstable Wormhole\t100.0%\t4.32 AU\n\
                         DEF-456\tCosmic Signature\t\t\t12.5%\t9.10 AU\n\
                         GHI-789\tCosmic Anomaly\tCombat Site\tPerimeter Ambush Point\t100.0%\t2.01 AU\n";
+
+    #[test]
+    fn counts_structures_in_dscan_and_overview_copies() {
+        let dscan = "35833\tJ145735 - Old-Daisy\tFortizar\t27.7 AU\n12011\tA Legion\tLegion\t3.1 AU\n16213\tTower\tAmarr Control Tower Large\t4 AU";
+        assert_eq!(structure_lines(dscan), 2);
+        assert_eq!(structure_lines("27.7 AU\tJ145735 - Old-Daisy\tFortizar\t-\t-\t\t[TDVS]"), 1);
+        assert_eq!(structure_lines("3.3 AU\tJ145735 - Star\tSun G5 (Pink)\t-"), 0);
+        assert_eq!(structure_lines("anyone seen the Fortizar?"), 0);
+        assert_eq!(structure_lines(SCAN), 0);
+        assert_eq!(structure_lines(""), 0);
+    }
 
     #[test]
     fn counts_probe_scan_rows() {
