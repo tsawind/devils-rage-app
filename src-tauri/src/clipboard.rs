@@ -81,6 +81,14 @@ pub fn start(app: AppHandle) {
                 // Patch 57: a D-scan or overview rows with structures go into the pilot's system intel.
                 let structures = structure_lines(&text);
                 if structures == 0 {
+                    // Patch 58: a short copy from EVE (a structure's name from Show Info or a chat
+                    // link) goes to the mapper too; only an open intel window uses it (asks the type).
+                    if is_short_copy(&text) {
+                        if let Some(name) = foreground_eve_character() {
+                            let id = crate::location::character_id(&name);
+                            deliver_event(&app, "devils-rage-app:copy", id, &name, &text);
+                        }
+                    }
                     continue;
                 }
                 let Some(name) = foreground_eve_character() else {
@@ -198,6 +206,13 @@ pub fn structure_lines(text: &str) -> usize {
     rows.iter().filter(|columns| columns.iter().any(|c| is_structure_type(c))).count()
 }
 
+/// Patch 58: a name-sized copy (one or two short lines, no table rows).
+pub fn is_short_copy(text: &str) -> bool {
+    let trimmed = text.trim();
+    let lines = trimmed.lines().filter(|l| !l.trim().is_empty()).count();
+    !trimmed.is_empty() && trimmed.chars().count() <= 200 && lines <= 2 && !trimmed.contains('\t')
+}
+
 /// The character name from an EVE client window title ("EVE - Tsawind").
 pub fn eve_character_from_title(title: &str) -> Option<String> {
     let name = title.trim().strip_prefix("EVE - ")?.trim();
@@ -286,6 +301,14 @@ mod tests {
         assert_eq!(structure_lines("anyone seen the Fortizar?"), 0);
         assert_eq!(structure_lines(SCAN), 0);
         assert_eq!(structure_lines(""), 0);
+    }
+
+    #[test]
+    fn knows_a_short_copy() {
+        assert!(is_short_copy("J170845 - Main Barracks (E85 Holding Services)"));
+        assert!(!is_short_copy(""));
+        assert!(!is_short_copy("a\tb\tc"));
+        assert!(!is_short_copy("one\ntwo\nthree"));
     }
 
     #[test]
