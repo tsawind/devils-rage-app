@@ -578,6 +578,16 @@ fn new_window_handler(
         }
 
         let solo = url.query_pairs().any(|(k, v)| k == "solo" && v == "1");
+        // A link of ours that asks for a new tab (SeAT's Discord connector "register" button,
+        // target="_blank"): the app has no tabs, and an allowed new window never showed, so
+        // the button did nothing. It opens in the app's page instead.
+        let our_site = url.host_str().is_some_and(|host| host == host_of(SEAT_URL) || host == host_of(MAPPER_URL));
+        if !solo && our_site {
+            log::info!("new window for {} opened in the app's page instead", url.path());
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move { go(&app, url) });
+            return NewWindowResponse::Deny;
+        }
         if !solo {
             return NewWindowResponse::Allow;
         }
