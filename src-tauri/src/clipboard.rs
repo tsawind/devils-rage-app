@@ -284,6 +284,45 @@ pub fn open_eve_characters() -> Vec<String> {
     Vec::new()
 }
 
+/// Cameras: each EVE client's window handle with its character, so the share page can tell
+/// which client a shared window is (the browser names a shared window "window:<handle>:0").
+#[cfg(windows)]
+pub fn open_eve_windows() -> Vec<(String, isize)> {
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
+
+    unsafe extern "system" fn each(hwnd: HWND, found: LPARAM) -> BOOL {
+        // SAFETY: `found` is the &mut Vec passed to EnumWindows below, alive for the call.
+        let windows = unsafe { &mut *(found as *mut Vec<(String, isize)>) };
+        let mut buf = [0u16; 256];
+        // SAFETY: plain Win32 calls on a window handle EnumWindows gave us and a stack buffer.
+        let len = unsafe {
+            if IsWindowVisible(hwnd) == 0 {
+                return 1;
+            }
+            GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32)
+        };
+        if len > 0 {
+            if let Some(name) = eve_character_from_title(&String::from_utf16_lossy(&buf[..len as usize])) {
+                windows.push((name, hwnd as isize));
+            }
+        }
+        1
+    }
+
+    let mut windows: Vec<(String, isize)> = Vec::new();
+    // SAFETY: the callback only touches `windows` through the pointer, during this call.
+    unsafe {
+        EnumWindows(Some(each), &mut windows as *mut Vec<(String, isize)> as LPARAM);
+    }
+    windows
+}
+
+#[cfg(not(windows))]
+pub fn open_eve_windows() -> Vec<(String, isize)> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,7 +13,7 @@
 //! - /audio-learn?character=X            : the next loud moment in X's client is the sound
 //!
 //! and hears back through window events on that page:
-//! - devils-rage-app:audio-clients {clients: [names]}
+//! - devils-rage-app:audio-clients {clients: [names], windows: [{name, handle}]}
 //! - devils-rage-app:audio-level   {character, level (0-100)}  (4 a second while listening)
 //! - devils-rage-app:heard         {character, likeness}
 //! - devils-rage-app:learned       {character}
@@ -63,7 +63,12 @@ pub fn signal(app: &AppHandle, me: &str, url: &Url) {
     match url.path() {
         "/audio-clients" => {
             let clients = crate::clipboard::open_eve_characters();
-            tell(app, me, "devils-rage-app:audio-clients", serde_json::json!({ "clients": clients, "supported": cfg!(windows) }));
+            // Cameras: which window is which client (by its handle), see clipboard::open_eve_windows.
+            let windows: Vec<serde_json::Value> = crate::clipboard::open_eve_windows()
+                .into_iter()
+                .map(|(name, handle)| serde_json::json!({ "name": name, "handle": handle }))
+                .collect();
+            tell(app, me, "devils-rage-app:audio-clients", serde_json::json!({ "clients": clients, "windows": windows, "supported": cfg!(windows) }));
         }
         "/audio-listen" if !character.is_empty() => {
             if param("on").as_deref() == Some("1") {

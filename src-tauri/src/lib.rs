@@ -329,7 +329,7 @@ pub fn run() {
             // powers), and gives it a stand-in for Chrome's picture-in-picture so
             // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true, cameras: 2, clientAudio: true }});\n{}\n{}\n{}",
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true, cameras: 3, clientAudio: true }});\n{}\n{}\n{}",
                 channel.as_str(),
                 SHORTCUTS,
                 RECONNECT,
@@ -543,6 +543,14 @@ fn new_window_handler(
                     match url.query_pairs().find(|(k, _)| k == "url").and_then(|(_, v)| Url::parse(&v).ok()) {
                         Some(target) if camera_window(&target).is_some() => open_camera_window(&app, &marker, target),
                         _ => log::warn!("ignored /cameras without a camera page ({me})"),
+                    }
+                }
+                // Cameras: the share page / wall's own Close button (its window goes, even if the
+                // page is too busy to close itself).
+                "/close-window" if me == "cameras" || me == "camwall" => {
+                    if let Some(window) = app.get_webview_window(&me) {
+                        log::info!("closing the {me} window (its Close button)");
+                        let _ = window.destroy();
                     }
                 }
                 // Patch 51b: the character tabs close / bring up a character's pop-out.
