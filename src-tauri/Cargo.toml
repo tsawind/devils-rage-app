@@ -33,7 +33,7 @@ arboard = { version = "3", default-features = false }
 # The title of the window in front ("EVE - <character>"), to know whose scan was copied.
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.59"
-features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"]
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"]
 
 # Cameras: one EVE client's own sound (Windows process loopback) for the hole watch.
 # Pinned to the commit whose API clientaudio.rs was written against.

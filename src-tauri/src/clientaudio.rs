@@ -18,6 +18,9 @@
 //! - devils-rage-app:heard         {character, likeness}
 //! - devils-rage-app:learned       {character}
 //! - devils-rage-app:audio-error   {character, message}
+//! - devils-rage-app:active        {character, idleMs}  (4 a second while the page is open)
+//!   which client is in front and how long since the last mouse / key input, so the page can
+//!   pause watching a client while you play it (your own mouse and D-scan aren't a jump).
 
 use tauri::{AppHandle, Manager, Url};
 
@@ -56,6 +59,7 @@ fn save_print(app: &AppHandle, print: &[f32]) {
 pub fn signal(app: &AppHandle, me: &str, url: &Url) {
     let param = |key: &str| url.query_pairs().find(|(k, _)| k == key).map(|(_, v)| v.into_owned());
     let character = param("character").unwrap_or_default();
+    activity::watch(app, me);
     match url.path() {
         "/audio-clients" => {
             let clients = crate::clipboard::open_eve_characters();
@@ -239,4 +243,52 @@ mod listen {
     pub fn stop(_character: &str) {}
 
     pub fn learn(_character: &str) {}
+}
+
+/// Which client you're playing right now (in front, touched in the last moments).
+mod activity {
+    use std::collections::HashSet;
+    use std::sync::{LazyLock, Mutex};
+    use std::time::Duration;
+    use tauri::{AppHandle, Manager};
+
+    static WATCHED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+    /// Milliseconds since the last mouse or key input anywhere on this PC.
+    #[cfg(windows)]
+    fn idle_ms() -> u64 {
+        use windows_sys::Win32::System::SystemInformation::GetTickCount;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+        let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        // SAFETY: plain Win32 calls; `info` is a local of the size we pass.
+        unsafe {
+            if GetLastInputInfo(&mut info) == 0 {
+                return u64::MAX;
+            }
+            u64::from(GetTickCount().wrapping_sub(info.dwTime))
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn idle_ms() -> u64 {
+        u64::MAX
+    }
+
+    /// Starts telling page `me` about activity (once per page; stops when the page is gone).
+    pub fn watch(app: &AppHandle, me: &str) {
+        if !WATCHED.lock().unwrap().insert(me.to_string()) {
+            return;
+        }
+        let (app, me) = (app.clone(), me.to_string());
+        std::thread::spawn(move || {
+            while let Some(view) = app.get_webview(&me) {
+                let character = crate::clipboard::foreground_eve_character();
+                let idle = idle_ms().min(86_400_000);
+                let detail = serde_json::json!({ "character": character, "idleMs": idle });
+                let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:active', {{ detail: {detail} }}));"));
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            WATCHED.lock().unwrap().remove(&me);
+        });
+    }
 }
