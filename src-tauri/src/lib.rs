@@ -7,9 +7,11 @@ use tauri::{
 use tauri_plugin_opener::OpenerExt;
 
 mod appconfig;
+mod audiodetect;
 mod bar;
 mod chatlog;
 mod clipboard;
+mod clientaudio;
 mod commands;
 mod location;
 mod mainwindow;
@@ -327,7 +329,7 @@ pub fn run() {
             // powers), and gives it a stand-in for Chrome's picture-in-picture so
             // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true }});\n{}\n{}\n{}",
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true, cameras: true, clientAudio: true }});\n{}\n{}\n{}",
                 channel.as_str(),
                 SHORTCUTS,
                 RECONNECT,
@@ -532,6 +534,9 @@ fn new_window_handler(
                     }
                 }
                 "/clipboard" | "/attention" if from_mapper(&app, &me) => page_signal(&app, &me, &url),
+                // Cameras: one EVE client's own sound for the hole watch (clientaudio.rs).
+                "/audio-clients" | "/audio-listen" | "/audio-learn" if from_mapper(&app, &me) => clientaudio::signal(&app, &me, &url),
+                "/audio-clients" | "/audio-listen" | "/audio-learn" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),
                 // Patch 51b: the character tabs close / bring up a character's pop-out.
                 "/popout-focus" if from_mapper(&app, &me) && url.query_pairs().any(|(k, v)| k == "own" && v == "1") => {
                     scanner::focus_for(&app, &me);
@@ -575,6 +580,33 @@ fn new_window_handler(
         if !ours {
             open_in_browser(&app, &me, url.as_str());
             return NewWindowResponse::Deny;
+        }
+
+        // Cameras: "Share a camera" and the camera wall get a window of their own, so the map
+        // stays where it is (the share page keeps streaming while it's open).
+        if let Some(label) = camera_window(&url) {
+            if let Some(existing) = app.get_webview_window(label) {
+                let _ = existing.navigate(url);
+                let _ = existing.unminimize();
+                let _ = existing.set_focus();
+                return NewWindowResponse::Deny;
+            }
+            log::info!("opening the {label} window");
+            return match WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
+                .window_features(features)
+                .disable_drag_drop_handler()
+                .title(if label == "cameras" { "Devil's Rage · share a camera" } else { "Devil's Rage · camera wall" })
+                .inner_size(1360.0, 860.0)
+                .initialization_script(marker.clone())
+                .on_new_window(new_window_handler(app.clone(), marker.clone(), label.to_string()))
+                .build()
+            {
+                Ok(window) => NewWindowResponse::Create { window },
+                Err(err) => {
+                    log::warn!("couldn't open the {label} window: {err}");
+                    NewWindowResponse::Deny
+                }
+            };
         }
 
         let solo = url.query_pairs().any(|(k, v)| k == "solo" && v == "1");
@@ -644,6 +676,20 @@ fn new_window_handler(
             Ok(window) => NewWindowResponse::Create { window },
             Err(_) => NewWindowResponse::Allow,
         }
+    }
+}
+
+/// Cameras: the window a camera page of the mapper opens in ("cameras" for Share a camera,
+/// "camwall" for the wall), or None for any other page.
+fn camera_window(url: &Url) -> Option<&'static str> {
+    if url.host_str() != Some(host_of(MAPPER_URL)) {
+        return None;
+    }
+    let parts: Vec<&str> = url.path().trim_matches('/').split('/').collect();
+    match parts.as_slice() {
+        ["maps", _, "cameras", "share"] => Some("cameras"),
+        ["maps", _, "cameras"] => Some("camwall"),
+        _ => None,
     }
 }
 
@@ -728,3 +774,18 @@ fn page_signal(app: &AppHandle, me: &str, url: &Url) {
     }
 }
 
+
+#[cfg(test)]
+mod camera_window_tests {
+    use super::*;
+
+    #[test]
+    fn camera_pages_get_their_own_window() {
+        let at = |path: &str| camera_window(&Url::parse(&format!("{MAPPER_URL}{path}")).unwrap());
+        assert_eq!(at("/maps/daisy-1/cameras/share"), Some("cameras"));
+        assert_eq!(at("/maps/daisy-1/cameras"), Some("camwall"));
+        assert_eq!(at("/maps/daisy-1"), None);
+        assert_eq!(at("/maps/daisy-1/camera-feed"), None);
+        assert_eq!(camera_window(&Url::parse("https://example.com/maps/x/cameras").unwrap()), None);
+    }
+}
