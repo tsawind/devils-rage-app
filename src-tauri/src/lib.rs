@@ -329,7 +329,7 @@ pub fn run() {
             // powers), and gives it a stand-in for Chrome's picture-in-picture so
             // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true, cameras: true, clientAudio: true }});\n{}\n{}\n{}",
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true, cameras: 2, clientAudio: true }});\n{}\n{}\n{}",
                 channel.as_str(),
                 SHORTCUTS,
                 RECONNECT,
@@ -537,6 +537,14 @@ fn new_window_handler(
                 // Cameras: one EVE client's own sound for the hole watch (clientaudio.rs).
                 "/audio-clients" | "/audio-listen" | "/audio-learn" if from_mapper(&app, &me) => clientaudio::signal(&app, &me, &url),
                 "/audio-clients" | "/audio-listen" | "/audio-learn" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),
+                // Cameras: the page asks for its window directly (a link's own new window can
+                // vanish with the menu it sits in).
+                "/cameras" if from_mapper(&app, &me) => {
+                    match url.query_pairs().find(|(k, _)| k == "url").and_then(|(_, v)| Url::parse(&v).ok()) {
+                        Some(target) if camera_window(&target).is_some() => open_camera_window(&app, &marker, target),
+                        _ => log::warn!("ignored /cameras without a camera page ({me})"),
+                    }
+                }
                 // Patch 51b: the character tabs close / bring up a character's pop-out.
                 "/popout-focus" if from_mapper(&app, &me) && url.query_pairs().any(|(k, v)| k == "own" && v == "1") => {
                     scanner::focus_for(&app, &me);
@@ -584,29 +592,9 @@ fn new_window_handler(
 
         // Cameras: "Share a camera" and the camera wall get a window of their own, so the map
         // stays where it is (the share page keeps streaming while it's open).
-        if let Some(label) = camera_window(&url) {
-            if let Some(existing) = app.get_webview_window(label) {
-                let _ = existing.navigate(url);
-                let _ = existing.unminimize();
-                let _ = existing.set_focus();
-                return NewWindowResponse::Deny;
-            }
-            log::info!("opening the {label} window");
-            return match WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
-                .window_features(features)
-                .disable_drag_drop_handler()
-                .title(if label == "cameras" { "Devil's Rage · share a camera" } else { "Devil's Rage · camera wall" })
-                .inner_size(1360.0, 860.0)
-                .initialization_script(marker.clone())
-                .on_new_window(new_window_handler(app.clone(), marker.clone(), label.to_string()))
-                .build()
-            {
-                Ok(window) => NewWindowResponse::Create { window },
-                Err(err) => {
-                    log::warn!("couldn't open the {label} window: {err}");
-                    NewWindowResponse::Deny
-                }
-            };
+        if camera_window(&url).is_some() {
+            open_camera_window(&app, &marker, url);
+            return NewWindowResponse::Deny;
         }
 
         let solo = url.query_pairs().any(|(k, v)| k == "solo" && v == "1");
@@ -677,6 +665,37 @@ fn new_window_handler(
             Err(_) => NewWindowResponse::Allow,
         }
     }
+}
+
+/// Cameras: opens (or brings up) the cameras / camera wall window. Built off the page's own
+/// event (like `go`), so a page waiting on the answer never holds it up.
+fn open_camera_window(app: &AppHandle, marker: &str, url: Url) {
+    let Some(label) = camera_window(&url) else { return };
+    if let Some(existing) = app.get_webview_window(label) {
+        let _ = existing.navigate(url);
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return;
+    }
+    log::info!("opening the {label} window ({})", url.path());
+    let app = app.clone();
+    let marker = marker.to_string();
+    tauri::async_runtime::spawn(async move {
+        let built = WebviewWindowBuilder::new(&app, label, WebviewUrl::External(url))
+            .disable_drag_drop_handler()
+            .title(if label == "cameras" { "Devil's Rage · share a camera" } else { "Devil's Rage · camera wall" })
+            .inner_size(1360.0, 860.0)
+            .initialization_script(marker.clone())
+            .on_new_window(new_window_handler(app.clone(), marker, label.to_string()))
+            .build();
+        match built {
+            Ok(window) => {
+                let _ = window.set_focus();
+            }
+            Err(err) => log::warn!("couldn't open the {label} window: {err}"),
+        }
+    });
 }
 
 /// Cameras: the window a camera page of the mapper opens in ("cameras" for Share a camera,
