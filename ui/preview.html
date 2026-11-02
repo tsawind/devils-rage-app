@@ -77,7 +77,7 @@
     document.body.classList.toggle("edit", !!m.edit);
     document.body.classList.toggle("off", !m.enabled);
     document.body.classList.toggle("through", !!m.clickThrough);
-    document.getElementById("pic").style.opacity = String(m.enabled ? m.opacity : 0.25);
+    document.getElementById("pic").style.opacity = String(m.enabled ? m.opacity * (m.master ?? 1) : 0.25);
     // Only movable in edit mode.
     if (m.edit) drag.setAttribute("data-tauri-drag-region", ""); else drag.removeAttribute("data-tauri-drag-region");
     document.getElementById("shown").checked = !!m.enabled;

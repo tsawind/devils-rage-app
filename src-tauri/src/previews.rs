@@ -66,12 +66,21 @@ impl Default for ClientPrefs {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Layout {
     #[serde(default)]
     pub edit: bool,
     #[serde(default)]
     pub clients: BTreeMap<String, ClientPrefs>,
+    /// Master opacity for every preview (multiplies each client's own), 0.1 – 1.0.
+    #[serde(default = "one")]
+    pub opacity: f64,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Layout { edit: false, clients: BTreeMap::new(), opacity: 1.0 }
+    }
 }
 
 static LAYOUT: Mutex<Option<Layout>> = Mutex::new(None);
@@ -126,11 +135,13 @@ fn edit_mode(app: &AppHandle) -> bool {
 /// What a preview page needs to draw itself (sent on open and after every change).
 fn mode_json(app: &AppHandle, name: &str) -> serde_json::Value {
     let prefs = prefs_for(app, name);
+    let master = with_layout(app, |layout| layout.opacity);
     serde_json::json!({
         "edit": edit_mode(app),
         "enabled": prefs.enabled,
         "clickThrough": prefs.click_through,
         "opacity": prefs.opacity,
+        "master": master,
     })
 }
 
@@ -337,6 +348,18 @@ pub fn set_preview_client(app: AppHandle, name: String, enabled: Option<bool>, c
     Ok(())
 }
 
+/// The master opacity for every preview at once (Home's slider).
+#[tauri::command]
+pub fn set_previews_opacity(app: AppHandle, opacity: f64) {
+    with_layout(&app, |layout| layout.opacity = opacity.clamp(0.1, 1.0));
+    save_soon(&app);
+    for (label, window) in app.webview_windows() {
+        if let (true, Some(name)) = (label.starts_with(PREFIX), name_of_window(&window)) {
+            apply_mode(&app, &window, &name);
+        }
+    }
+}
+
 /// Resize the calling preview (its corner handle in edit mode), in physical pixels.
 #[tauri::command]
 pub fn preview_resize(window: WebviewWindow, width: u32, height: u32) {
@@ -410,6 +433,7 @@ pub async fn import_eveo(app: AppHandle) -> Result<String, String> {
             id: format!("eveo-{}", g.number),
             name: format!("EVE-O cycle group {}", g.number),
             members: g.members,
+            skipped: g.skipped,
             forward_hotkey: g.forward,
             backward_hotkey: g.backward,
         })
@@ -436,6 +460,8 @@ pub struct CycleGroup {
     pub forward: Option<String>,
     pub backward: Option<String>,
     pub members: Vec<String>,
+    /// EVE-O "!Name" entries: in the group, switched off.
+    pub skipped: Vec<String>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -506,22 +532,29 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
     let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
     for number in 1..=5u32 {
         let Some(order) = config.get(format!("CycleGroup{number}ClientsOrder")).and_then(|v| v.as_object()) else { continue };
-        let mut ranked: Vec<(i64, usize, String)> = order
+        let mut ranked: Vec<(i64, usize, String, bool)> = order
             .iter()
             .enumerate()
             .filter_map(|(i, (title, rank))| {
                 // EVE-O's bare "EVE" entry = clients at the login / character-select screen.
                 let name = if title.trim() == "EVE" { crate::cycle::LOGIN_SCREENS.to_string() } else { character_of(title)? };
-                Some((rank.as_i64().unwrap_or(i64::MAX), i, name))
+                let off = title.trim().strip_prefix("EVE - ").is_some_and(|rest| rest.trim_start().starts_with('!'));
+                Some((rank.as_i64().unwrap_or(i64::MAX), i, name, off))
             })
             .collect();
         ranked.sort();
         let mut members: Vec<String> = Vec::new();
-        for (_, _, name) in ranked {
+        let mut on: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (_, _, name, off) in ranked {
+            if !off {
+                on.insert(name.clone());
+            }
             if !members.contains(&name) {
                 members.push(name);
             }
         }
+        // "!Name" switches a character off unless the group also lists it plainly.
+        let skipped: Vec<String> = members.iter().filter(|name| !on.contains(*name)).cloned().collect();
         if members.is_empty() {
             continue;
         }
@@ -529,7 +562,7 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
         let mut claim = |key: Option<String>| key.filter(|k| claimed.insert(k.to_ascii_uppercase()));
         let forward = claim(hotkey(config.get(format!("CycleGroup{number}ForwardHotkeys"))));
         let backward = claim(hotkey(config.get(format!("CycleGroup{number}BackwardHotkeys"))));
-        out.groups.push(CycleGroup { number, forward, backward, members });
+        out.groups.push(CycleGroup { number, forward, backward, members, skipped });
     }
     out
 }
@@ -592,6 +625,7 @@ mod tests {
         assert!(!prefs.click_through);
         assert_eq!(prefs.opacity, 1.0);
         assert_eq!((prefs.x, prefs.y), (Some(10), Some(20)));
+        assert_eq!(layout.opacity, 1.0);
     }
 
     #[test]
@@ -635,6 +669,8 @@ mod tests {
         assert_eq!(group.forward.as_deref(), Some("F13"));
         assert_eq!(group.backward, None);
         assert_eq!(group.members, vec!["Tsawind", "Darkness Holder", "LuigiSquirrel"]);
+        // "!LuigiSquirrel" only: off. "!Tsawind" also listed plainly: on.
+        assert_eq!(group.skipped, vec!["LuigiSquirrel"]);
     }
 
     #[test]

@@ -59,6 +59,8 @@
   .plinks button { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; text-decoration: underline; }
   .plinks button:hover { color: var(--text); }
   .plinks button.on { color: #f0c040; }
+  .plinks label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .plinks input[type=range] { width: 90px; }
   .soon { margin-top: 10px; color: #c98a5a; font-size: 13px; min-height: 1.5em; }
   .motd b { display: block; font-size: 11px; letter-spacing: .6px; color: #c98a5a; margin-bottom: 2px; font-weight: 600; }
 </style>
@@ -113,6 +115,7 @@
   <div class="plinks">
     <button id="pEdit" title="Arrange previews: drag, resize from the corner, choose shown / click-through / opacity per client. Done locks them.">Edit preview layout</button>
     <button id="pClose">Close previews</button>
+    <label title="See-through-ness of every preview at once (each client's own opacity still applies)">All previews <input type="range" id="pOpacity" min="10" max="100" step="5" value="100"> <span id="pOpacityVal">100%</span></label>
     <button id="pImport" title="Bring in thumbnail spots and cycle groups (with their pedal hotkeys) from your EVE-O Preview settings file">Import EVE-O Preview settings…</button>
   </div>
   <p class="soon" id="soon"></p>
@@ -171,7 +174,17 @@
   // Patch 63c: preview layout controls.
   const pEdit = document.getElementById("pEdit");
   const showEdit = (on) => { pEdit.classList.toggle("on", on); pEdit.textContent = on ? "Lock previews (done editing)" : "Edit preview layout"; };
-  invoke("preview_layout").then(l => showEdit(!!(l && l.edit))).catch(() => {});
+  const pOpacity = document.getElementById("pOpacity");
+  const pOpacityVal = document.getElementById("pOpacityVal");
+  invoke("preview_layout").then(l => {
+    showEdit(!!(l && l.edit));
+    const pct = Math.round(((l && l.opacity) || 1) * 100);
+    pOpacity.value = String(pct); pOpacityVal.textContent = pct + "%";
+  }).catch(() => {});
+  pOpacity.addEventListener("input", () => {
+    pOpacityVal.textContent = pOpacity.value + "%";
+    invoke("set_previews_opacity", { opacity: Number(pOpacity.value) / 100 }).catch(() => {});
+  });
   pEdit.addEventListener("click", async () => {
     const on = !pEdit.classList.contains("on");
     try {

@@ -344,7 +344,10 @@ pub fn run() {
             launch::save_launch_groups,
             launch::launch_known_characters,
             launch::launch_status,
+            launch::pause_cycle_hotkeys,
+            launch::resume_cycle_hotkeys,
             previews::active_client,
+            previews::set_previews_opacity,
             launch::open_launcher,
             launch::launcher_ready,
         ])

@@ -17,6 +17,10 @@ pub struct Group {
     pub name: String,
     #[serde(default)]
     pub members: Vec<String>,
+    /// Members switched off: kept in the group (one click to turn back on) but skipped when
+    /// cycling. EVE-O Preview's "!Name" entries come in this way.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
     /// Patch 63b: a hotkey (e.g. the pedal's "F13") that cycles this group forward.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forward_hotkey: Option<String>,
@@ -58,12 +62,17 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
     let cleaned: Vec<Group> = groups
         .into_iter()
         .take(50)
-        .map(|g| Group {
+        .map(|g| {
+            let members: Vec<String> = g.members.into_iter().take(150).collect();
+            let skipped = g.skipped.into_iter().filter(|name| members.contains(name)).collect();
+            Group {
             id: g.id,
             name: g.name.chars().take(60).collect(),
-            members: g.members.into_iter().take(150).collect(),
+            members,
+            skipped,
             forward_hotkey: g.forward_hotkey.filter(|h| !h.trim().is_empty()),
             backward_hotkey: g.backward_hotkey.filter(|h| !h.trim().is_empty()),
+            }
         })
         .collect();
     let text = serde_json::to_string_pretty(&Groups { groups: cleaned }).map_err(|e| e.to_string())?;
@@ -198,7 +207,8 @@ mod hotkeys {
         let group: Option<Group> = load(app).groups.into_iter().find(|g| g.id == group_id);
         let Some(group) = group else { return };
         let logins = crate::clipboard::open_login_windows();
-        let order = crate::cycle::expand_login(&group.members, &logins);
+        let active: Vec<String> = group.members.iter().filter(|m| !group.skipped.contains(m)).cloned().collect();
+        let order = crate::cycle::expand_login(&active, &logins);
         let mut open: HashSet<String> = crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect();
         open.extend(logins.iter().map(|h| format!("login:{h}")));
         if let Some(next) = crate::cycle::advance(&group_id, &order, &open, forward) {
@@ -216,6 +226,27 @@ pub fn register_cycle_hotkeys(app: &AppHandle) {
     hotkeys::register(app);
 }
 
+/// Let go of the cycle hotkeys while the editor records a new key (else the pedal never reaches it).
+#[tauri::command]
+pub fn pause_cycle_hotkeys(app: AppHandle) {
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_global_shortcut::GlobalShortcutExt;
+        let _ = app.global_shortcut().unregister_all();
+    }
+    #[cfg(not(desktop))]
+    let _ = app;
+}
+
+/// Take the cycle hotkeys back after recording.
+#[tauri::command]
+pub fn resume_cycle_hotkeys(app: AppHandle) {
+    #[cfg(desktop)]
+    register_cycle_hotkeys(&app);
+    #[cfg(not(desktop))]
+    let _ = app;
+}
+
 #[cfg(desktop)]
 pub fn cycle_shortcut_fired(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) {
     hotkeys::fired(app, shortcut);
@@ -228,7 +259,7 @@ mod tests {
     #[test]
     fn groups_round_trip_through_json() {
         let groups = Groups {
-            groups: vec![Group { id: "a".into(), name: "Roll fleet".into(), members: vec!["Tsawind".into(), "LuigiSquirrel".into()], forward_hotkey: Some("F13".into()), backward_hotkey: None }],
+            groups: vec![Group { id: "a".into(), name: "Roll fleet".into(), members: vec!["Tsawind".into(), "LuigiSquirrel".into()], skipped: vec![], forward_hotkey: Some("F13".into()), backward_hotkey: None }],
         };
         let text = serde_json::to_string(&groups).unwrap();
         let back: Groups = serde_json::from_str(&text).unwrap();
