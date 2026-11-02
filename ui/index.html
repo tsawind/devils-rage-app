@@ -55,6 +55,10 @@
   button.tool span { color: var(--muted); font-size: 12px; }
   button.tool em { font-style: normal; font-size: 10px; letter-spacing: .5px; color: #c98a5a; border: 1px solid #5a2a14;
                    border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+  .plinks { margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; font-size: 13px; }
+  .plinks button { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; text-decoration: underline; }
+  .plinks button:hover { color: var(--text); }
+  .plinks button.on { color: #f0c040; }
   .soon { margin-top: 10px; color: #c98a5a; font-size: 13px; min-height: 1.5em; }
   .motd b { display: block; font-size: 11px; letter-spacing: .6px; color: #c98a5a; margin-bottom: 2px; font-weight: 600; }
 </style>
@@ -106,6 +110,11 @@
       <div><b>Client settings<em>SOON</em></b><span>Copy one client's settings to the others</span></div>
     </button>
   </div>
+  <div class="plinks">
+    <button id="pEdit" title="Arrange previews: drag, resize from the corner, choose shown / click-through / opacity per client. Done locks them.">Edit preview layout</button>
+    <button id="pClose">Close previews</button>
+    <button id="pImport" title="Bring in thumbnail spots and cycle groups (with their pedal hotkeys) from your EVE-O Preview settings file">Import EVE-O Preview settings…</button>
+  </div>
   <p class="soon" id="soon"></p>
 
   <label class="skip"><input type="checkbox" id="skip">
@@ -151,12 +160,30 @@
         soon.textContent = "Opening a preview for each EVE client…";
         try {
           const n = await invoke("open_previews");
-          soon.textContent = n ? `${n} preview${n === 1 ? "" : "s"} open. Click one to bring that client to the front; drag its title to move it.` : "No EVE clients are open.";
+          soon.textContent = n ? `${n} preview${n === 1 ? "" : "s"} open. Click one to bring that client to the front. Use “Edit preview layout” to move them.` : "No EVE clients are open (or every preview is hidden: use Edit preview layout).";
         } catch (e) { soon.textContent = String(e || "Couldn't open previews."); }
         return;
       }
       soon.textContent = SOON[btn.dataset.tool] || "";
     });
+  });
+
+  // Patch 63c: preview layout controls.
+  const pEdit = document.getElementById("pEdit");
+  const showEdit = (on) => { pEdit.classList.toggle("on", on); pEdit.textContent = on ? "Lock previews (done editing)" : "Edit preview layout"; };
+  invoke("preview_layout").then(l => showEdit(!!(l && l.edit))).catch(() => {});
+  pEdit.addEventListener("click", async () => {
+    const on = !pEdit.classList.contains("on");
+    try {
+      await invoke("set_preview_edit", { on });
+      showEdit(on);
+      soon.textContent = on ? "Editing: drag previews, resize from the yellow corner, pick Shown / Click-through / Opacity on each. Lock when done." : "Previews locked in place.";
+    } catch (e) { soon.textContent = String(e); }
+  });
+  document.getElementById("pClose").addEventListener("click", async () => { await invoke("close_previews").catch(() => {}); showEdit(false); soon.textContent = "Previews closed."; });
+  document.getElementById("pImport").addEventListener("click", async () => {
+    soon.textContent = "Pick your EVE-O Preview settings file (EVE-O-Preview.json)…";
+    try { soon.textContent = await invoke("import_eveo"); } catch (e) { soon.textContent = String(e); }
   });
 
   document.getElementById("upd").addEventListener("click", () => invoke("check_updates"));

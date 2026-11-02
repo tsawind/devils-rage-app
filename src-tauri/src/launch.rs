@@ -61,7 +61,7 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
         .map(|g| Group {
             id: g.id,
             name: g.name.chars().take(60).collect(),
-            members: g.members.into_iter().take(40).collect(),
+            members: g.members.into_iter().take(150).collect(),
             forward_hotkey: g.forward_hotkey.filter(|h| !h.trim().is_empty()),
             backward_hotkey: g.backward_hotkey.filter(|h| !h.trim().is_empty()),
         })
@@ -73,6 +73,20 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
     #[cfg(desktop)]
     register_cycle_hotkeys(&app);
     Ok(())
+}
+
+/// Patch 63c: groups brought in from an EVE-O Preview config. A group with the same name is
+/// replaced (so importing again updates it); the rest stay.
+pub fn merge_imported(app: &AppHandle, imported: Vec<Group>) -> Result<usize, String> {
+    let mut groups = load(app).groups;
+    let count = imported.len();
+    for group in imported {
+        groups.retain(|known| known.name != group.name);
+        crate::cycle::forget(&group.id);
+        groups.push(group);
+    }
+    save_launch_groups(app.clone(), groups)?;
+    Ok(count)
 }
 
 /// Characters to build groups from: the EVE clients open now (so you pick who you actually run).

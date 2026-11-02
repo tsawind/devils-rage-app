@@ -5,44 +5,81 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EVE preview</title>
 <style>
-  html, body { height: 100%; margin: 0; background: #000; overflow: hidden;
-               font: 12px "Segoe UI", system-ui, sans-serif; color: #eee; user-select: none; cursor: pointer; }
-  #shot { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; -webkit-user-drag: none; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: transparent;
+               font: 12px "Segoe UI", system-ui, sans-serif; color: #eee; user-select: none; }
+  #pic { position: fixed; inset: 0; background: #000; }
+  #shot { width: 100%; height: 100%; object-fit: contain; display: block; -webkit-user-drag: none; }
   #name { position: fixed; top: 0; left: 0; right: 0; padding: 3px 24px 6px 8px; font-weight: 600;
           background: linear-gradient(#000c, #0000); text-shadow: 0 1px 2px #000;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; z-index: 3; }
-  /* The whole thumbnail moves the window (drag) or focuses the client (click). */
+  /* The whole thumbnail: drag to move (edit mode) or click to bring the client forward. */
   #drag { position: fixed; inset: 0; z-index: 2; cursor: pointer; }
-  #msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-         text-align: center; padding: 16px; color: #c98a5a; }
-  /* A thin coloured frame so each client is easy to tell apart (colour set from the query). */
-  #frame { position: fixed; inset: 0; border: 2px solid var(--edge, #a8181f); pointer-events: none; box-sizing: border-box; z-index: 4; }
-  #close { position: fixed; top: 2px; right: 4px; width: 18px; height: 18px; line-height: 16px; text-align: center;
-           border-radius: 4px; background: #0008; color: #ccc; opacity: 0; transition: opacity .1s; z-index: 5; }
+  body.edit #drag { cursor: move; }
+  #frame { position: fixed; inset: 0; border: 2px solid #a8181f; pointer-events: none; box-sizing: border-box; z-index: 4; }
+  body.edit #frame { border: 2px dashed #f0c040; }
+  body.through #frame { border-color: #3a6ea8; }
+  #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3;
+         text-align: center; padding: 16px; color: #c98a5a; pointer-events: none; }
+  /* Edit mode toolbar */
+  #bar { position: fixed; left: 4px; right: 4px; bottom: 4px; z-index: 6; display: none; gap: 6px; align-items: center;
+         flex-wrap: wrap; background: #000c; border: 1px solid #333; border-radius: 6px; padding: 3px 6px; font-size: 11px; }
+  body.edit #bar { display: flex; }
+  #bar label { display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+  #bar input[type=range] { width: 60px; }
+  #bar button { font: inherit; background: #1c0d0e; color: #f3c6c6; border: 1px solid #a8181f; border-radius: 4px; padding: 1px 7px; cursor: pointer; margin-left: auto; }
+  #off { position: fixed; top: 40%; left: 0; right: 0; text-align: center; z-index: 3; display: none; color: #ddd; pointer-events: none; }
+  body.edit.off #off { display: block; }
+  #grip { position: fixed; right: 0; bottom: 0; width: 14px; height: 14px; z-index: 7; cursor: nwse-resize; display: none;
+          background: linear-gradient(135deg, transparent 50%, #f0c040 50%); }
+  body.edit #grip { display: block; }
+  #close { position: fixed; top: 2px; right: 4px; width: 18px; height: 18px; line-height: 16px; text-align: center; z-index: 7;
+           border-radius: 4px; background: #0008; color: #ccc; opacity: 0; transition: opacity .1s; cursor: pointer; }
   body:hover #close { opacity: 1; }
   #close:hover { background: #a8181f; color: #fff; }
 </style>
 </head>
 <body>
-  <img id="shot" alt="">
-  <div id="drag" data-tauri-drag-region></div>
+  <div id="pic"><img id="shot" alt=""></div>
+  <div id="drag"></div>
   <div id="name">…</div>
   <div id="frame"></div>
-  <div id="close" title="Close this preview">✕</div>
+  <div id="off">Hidden — tick “Shown” to keep it</div>
   <div id="msg" hidden></div>
+  <div id="bar">
+    <label title="Show this client's preview when previews are open"><input type="checkbox" id="shown"> Shown</label>
+    <label title="Clicks go straight through to the game; switch with the pedal / hotkeys"><input type="checkbox" id="through"> Click-through</label>
+    <label title="How see-through the preview is">Opacity <input type="range" id="opacity" min="20" max="100" step="5"></label>
+    <button id="done" title="Lock every preview in place">Done</button>
+  </div>
+  <div id="grip" title="Drag to resize"></div>
+  <div id="close" title="Close this preview">✕</div>
 
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const qs = new URLSearchParams(location.search);
   const name = (window.__PREVIEW_NAME__ != null ? String(window.__PREVIEW_NAME__) : "") || qs.get("name") || "";
-  const edge = qs.get("edge");
-  if (edge) document.documentElement.style.setProperty("--edge", edge);
   document.getElementById("name").textContent = name;
   document.title = name + " · preview";
 
   const shot = document.getElementById("shot");
   const msg = document.getElementById("msg");
-  let stopped = false, failures = 0;
+  const drag = document.getElementById("drag");
+  let stopped = false, failures = 0, mode = { edit: false, enabled: true, clickThrough: false, opacity: 1 };
+
+  // The app pushes the mode here (edit on/off, shown, click-through, opacity).
+  window.__previewMode = (m) => {
+    mode = m;
+    document.body.classList.toggle("edit", !!m.edit);
+    document.body.classList.toggle("off", !m.enabled);
+    document.body.classList.toggle("through", !!m.clickThrough);
+    document.getElementById("pic").style.opacity = String(m.enabled ? m.opacity : 0.25);
+    // Only movable in edit mode.
+    if (m.edit) drag.setAttribute("data-tauri-drag-region", ""); else drag.removeAttribute("data-tauri-drag-region");
+    document.getElementById("shown").checked = !!m.enabled;
+    document.getElementById("through").checked = !!m.clickThrough;
+    document.getElementById("opacity").value = String(Math.round((m.opacity || 1) * 100));
+  };
+  invoke("preview_mode", { name }).then(window.__previewMode).catch(() => {});
 
   async function tick() {
     if (stopped) return;
@@ -53,24 +90,47 @@
       failures = 0;
     } catch (e) {
       failures++;
-      // Give a minimized/closed client a moment before nagging.
+      // Give a minimized / closed client a moment before saying so.
       if (failures > 2) { msg.textContent = String(e || "no picture"); msg.hidden = false; }
     }
     setTimeout(tick, 500);
   }
   tick();
 
-  // Drag the thumbnail (data-tauri-drag-region moves the window). A click without real movement
-  // brings that client to the front, like EVE-O Preview.
-  const drag = document.getElementById("drag");
+  // Click (without dragging) brings that client forward — not while arranging.
   let downAt = null;
   drag.addEventListener("mousedown", (e) => { downAt = { x: e.screenX, y: e.screenY }; });
   drag.addEventListener("mouseup", (e) => {
     if (!downAt) return;
     const moved = Math.abs(e.screenX - downAt.x) + Math.abs(e.screenY - downAt.y);
     downAt = null;
-    if (moved < 5) invoke("preview_focus", { name }).catch(() => {});
+    if (moved < 5 && !mode.edit) invoke("preview_focus", { name }).catch(() => {});
   });
+
+  // Edit toolbar.
+  document.getElementById("shown").addEventListener("change", (e) => invoke("set_preview_client", { name, enabled: e.target.checked }).catch(() => {}));
+  document.getElementById("through").addEventListener("change", (e) => invoke("set_preview_client", { name, clickThrough: e.target.checked }).catch(() => {}));
+  document.getElementById("opacity").addEventListener("input", (e) => invoke("set_preview_client", { name, opacity: Number(e.target.value) / 100 }).catch(() => {}));
+  document.getElementById("done").addEventListener("click", () => invoke("set_preview_edit", { on: false }).catch(() => {}));
+
+  // Resize from the corner (edit mode).
+  const grip = document.getElementById("grip");
+  let sizing = null, pending = null;
+  grip.addEventListener("pointerdown", (e) => {
+    const dpr = window.devicePixelRatio || 1;
+    sizing = { x: e.screenX, y: e.screenY, w: window.innerWidth * dpr, h: window.innerHeight * dpr, dpr };
+    grip.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  grip.addEventListener("pointermove", (e) => {
+    if (!sizing) return;
+    const width = Math.round(sizing.w + (e.screenX - sizing.x) * sizing.dpr);
+    const height = Math.round(sizing.h + (e.screenY - sizing.y) * sizing.dpr);
+    if (pending) return;
+    pending = setTimeout(() => { pending = null; invoke("preview_resize", { width, height }).catch(() => {}); }, 30);
+  });
+  grip.addEventListener("pointerup", () => { sizing = null; });
+
   document.getElementById("close").addEventListener("click", (e) => {
     e.stopPropagation();
     stopped = true;
