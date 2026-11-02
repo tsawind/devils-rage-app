@@ -147,7 +147,7 @@ fn apply_mode(app: &AppHandle, window: &WebviewWindow, name: &str) {
 /// The EVE clients open right now (character name + whether it's minimized).
 #[tauri::command]
 pub fn preview_clients() -> Vec<serde_json::Value> {
-    crate::clipboard::open_eve_windows()
+    crate::clipboard::open_clients()
         .into_iter()
         .map(|(name, handle)| serde_json::json!({ "name": name, "minimized": crate::capture::minimized_handle(handle) }))
         .collect()
@@ -173,6 +173,12 @@ pub fn preview_focus(name: String) -> bool {
     crate::capture::focus_client(&name)
 }
 
+/// The EVE client in front (a character or "Login N"), so its preview can light up.
+#[tauri::command]
+pub fn active_client() -> Option<String> {
+    crate::clipboard::foreground_client()
+}
+
 /// A preview page asking how to show itself (edit mode, on/off, click-through, opacity).
 #[tauri::command]
 pub fn preview_mode(app: AppHandle, name: String) -> serde_json::Value {
@@ -192,7 +198,7 @@ pub fn preview_layout(app: AppHandle) -> Layout {
 /// UI thread until each webview is ready, which froze the whole app), so this returns at once.
 #[tauri::command]
 pub fn open_previews(app: AppHandle) -> Result<usize, String> {
-    let clients = crate::clipboard::open_eve_windows();
+    let clients = crate::clipboard::open_clients();
     if clients.is_empty() {
         return Err("No EVE clients are open.".to_string());
     }
@@ -485,6 +491,15 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
         }
     }
 
+    // EVE-O's single spot for a client at the login screen becomes our "Login 1" spot.
+    if let Some((x, y)) = config.get("LoginThumbnailLocation").and_then(|v| v.as_str()).and_then(pair) {
+        let name = crate::clipboard::login_label(0);
+        if !out.spots.iter().any(|known| known.name == name) {
+            let (w, h) = (default_w.max(MIN_SIZE.0 as i64) as u32, default_h.max(MIN_SIZE.1 as i64) as u32);
+            out.spots.push(Spot { name, x: x as i32, y: y as i32, w, h });
+        }
+    }
+
     // Same order whatever order the file's keys came in.
     out.spots.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -594,6 +609,7 @@ mod tests {
             "ThumbnailSize": "100, 50",
             "PerClientThumbnailSize": { "EVE - Example Toon 1": "200, 200", "EVE - Tsawind": "300, 160" },
             "FlatLayout": { "EVE - Tsawind": "1211, 1368", "EVE - LuigiSquirrel": "1311, 1767", "EVE": "1411, 1667" },
+            "LoginThumbnailLocation": "900, 1100",
             "CycleGroup1ForwardHotkeys": ["F15", "Control+F15"],
             "CycleGroup1BackwardHotkeys": ["", "Control+"],
             "CycleGroup1ClientsOrder": { "EVE": 1 },
@@ -605,6 +621,7 @@ mod tests {
         assert_eq!(
             import.spots,
             vec![
+                Spot { name: "Login 1".into(), x: 900, y: 1100, w: 100, h: 50 },
                 Spot { name: "LuigiSquirrel".into(), x: 1311, y: 1767, w: 100, h: 50 },
                 Spot { name: "Tsawind".into(), x: 1211, y: 1368, w: 300, h: 160 },
             ]

@@ -18,6 +18,9 @@
   #frame { position: fixed; inset: 0; border: 2px solid #a8181f; pointer-events: none; box-sizing: border-box; z-index: 4; }
   body.edit #frame { border: 2px dashed #f0c040; }
   body.through #frame { border-color: #3a6ea8; }
+  /* The client in front right now. */
+  body.active #frame { border: 3px solid #adff2f; }
+  body.login #name { color: #f0c040; }
   #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3;
          text-align: center; padding: 16px; color: #c98a5a; pointer-events: none; }
   /* Edit mode toolbar */
@@ -61,6 +64,7 @@
   const name = (window.__PREVIEW_NAME__ != null ? String(window.__PREVIEW_NAME__) : "") || qs.get("name") || "";
   document.getElementById("name").textContent = name;
   document.title = name + " · preview";
+  document.body.classList.toggle("login", /^Login \d+$/.test(name));
 
   const shot = document.getElementById("shot");
   const msg = document.getElementById("msg");
@@ -94,6 +98,7 @@
       // Give a minimized / closed client a moment before saying so.
       if (failures > 2) { msg.textContent = String(e || "no picture"); msg.hidden = false; }
     }
+    invoke("active_client").then((front) => document.body.classList.toggle("active", front === name)).catch(() => {});
     setTimeout(tick, 500);
   }
   tick();

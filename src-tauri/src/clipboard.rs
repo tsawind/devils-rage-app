@@ -342,6 +342,36 @@ pub fn open_login_windows() -> Vec<isize> {
     Vec::new()
 }
 
+/// The name a login-screen client goes by in previews ("Login 1", "Login 2", …).
+pub fn login_label(index: usize) -> String {
+    format!("Login {}", index + 1)
+}
+
+/// Every EVE client window: logged-in ones by character, ones still at the login /
+/// character-select screen as "Login 1", "Login 2", … (in a steady order while they stay open).
+pub fn open_clients() -> Vec<(String, isize)> {
+    let mut all = open_eve_windows();
+    all.extend(open_login_windows().into_iter().enumerate().map(|(i, handle)| (login_label(i), handle)));
+    all
+}
+
+/// The EVE client in front right now (a character, or "Login N"), if an EVE window is in front.
+#[cfg(windows)]
+pub fn foreground_client() -> Option<String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    // SAFETY: a plain Win32 call with no arguments.
+    let front = unsafe { GetForegroundWindow() } as isize;
+    if front == 0 {
+        return None;
+    }
+    open_clients().into_iter().find(|(_, handle)| *handle == front).map(|(name, _)| name)
+}
+
+#[cfg(not(windows))]
+pub fn foreground_client() -> Option<String> {
+    None
+}
+
 #[cfg(not(windows))]
 pub fn open_eve_windows() -> Vec<(String, isize)> {
     Vec::new()

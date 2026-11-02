@@ -108,7 +108,7 @@ fn encode(picture: &Picture, quality: u8) -> Result<Vec<u8>, &'static str> {
 /// Patch 62t: one EVE client's picture as JPEG bytes, for the previews (previews.rs). The name
 /// is the character ("EVE - <name>"); the client must be open and not minimized.
 pub fn client_jpeg(name: &str, width: u32, quality: u8) -> Result<Vec<u8>, String> {
-    let (_, handle) = crate::clipboard::open_eve_windows()
+    let (_, handle) = crate::clipboard::open_clients()
         .into_iter()
         .find(|(open, _)| open == name)
         .ok_or_else(|| "that EVE client is closed".to_string())?;
@@ -128,7 +128,7 @@ pub fn focus_handle(handle: isize) -> bool {
 }
 
 pub fn focus_client(name: &str) -> bool {
-    match crate::clipboard::open_eve_windows().into_iter().find(|(open, _)| open == name) {
+    match crate::clipboard::open_clients().into_iter().find(|(open, _)| open == name) {
         Some((_, handle)) => grab::focus(handle),
         None => false,
     }

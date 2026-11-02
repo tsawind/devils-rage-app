@@ -95,6 +95,27 @@ pub fn launch_known_characters() -> Vec<String> {
     crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect()
 }
 
+/// Live state for the launch-groups page: which characters are open, how many clients sit at
+/// the login screen, and which client is in front.
+#[tauri::command]
+pub fn launch_status() -> serde_json::Value {
+    serde_json::json!({
+        "open": crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        "logins": crate::clipboard::open_login_windows().len(),
+        "active": last_in_front(),
+    })
+}
+
+/// The EVE client in front, or the last one that was (this page is in front while you look at it).
+fn last_in_front() -> Option<String> {
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap();
+    if let Some(front) = crate::clipboard::foreground_client() {
+        *last = Some(front);
+    }
+    last.clone()
+}
+
 /// The official EVE launcher's exe: the saved path, else the usual install spots.
 fn find_launcher(app: &AppHandle) -> Option<PathBuf> {
     if let Some(saved) = crate::settings::load(app).launcher_path {

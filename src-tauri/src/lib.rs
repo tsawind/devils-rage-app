@@ -343,6 +343,8 @@ pub fn run() {
             launch::launch_groups,
             launch::save_launch_groups,
             launch::launch_known_characters,
+            launch::launch_status,
+            previews::active_client,
             launch::open_launcher,
             launch::launcher_ready,
         ])

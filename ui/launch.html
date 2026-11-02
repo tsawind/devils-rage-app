@@ -30,6 +30,10 @@
   .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px;
           padding: 2px 6px 2px 10px; font-size: 13px; background: #0d0d10; }
   .chip.off { opacity: .55; }
+  .chip.front { border-color: #adff2f; box-shadow: 0 0 0 1px #adff2f inset; }
+  .chip .n { color: var(--muted); font-size: 12px; }
+  .legend { color: var(--muted); font-size: 12px; margin: -8px 0 14px; }
+  .legend i { font-style: normal; border: 1px solid #adff2f; border-radius: 999px; padding: 0 6px; }
   .chip b { font-weight: 600; }
   .chip .x { color: var(--muted); border: 0; background: none; padding: 0 2px; }
   .chip .x:hover { color: var(--red-hi); }
@@ -63,6 +67,7 @@
     Can't find your EVE launcher yet. <span class="link" id="setPath">Set its path in Settings</span> (point to <code>eve-online.exe</code>).
   </div>
 
+  <p class="legend">Bright = open now · dim = not running · <i>green ring</i> = the client in front</p>
   <div id="groups"></div>
   <div class="empty" id="empty" hidden>No groups yet. Add one below.</div>
 
@@ -77,6 +82,7 @@
   const uid = () => Math.random().toString(36).slice(2, 9);
   let groups = [];
   let openClients = [];
+  let logins = 0, active = null;
   const LOGIN = "Login screens";
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -114,10 +120,12 @@
       const members = el("div", "members");
       if (!g.members.length) members.append(el("span", "chip off", "No characters yet"));
       g.members.forEach((m) => {
-        const live = m === LOGIN || openClients.includes(m);
-        const chip = el("span", "chip" + (live ? "" : " off"));
+        const live = m === LOGIN ? logins > 0 : openClients.includes(m);
+        const front = m === LOGIN ? /^Login \d+$/.test(active || "") : active === m;
+        const chip = el("span", "chip" + (live ? "" : " off") + (front ? " front" : ""));
         chip.title = m === LOGIN ? "Every client at the login / character-select screen" : live ? "Open now" : "Not running right now";
         chip.append(el("b", null, m));
+        if (m === LOGIN) chip.append(el("span", "n", logins ? `${logins} open` : "none open"));
         const x = el("button", "x", "✕");
         x.addEventListener("click", () => { g.members = g.members.filter(v => v !== m); save(); render(); });
         chip.append(x);
@@ -172,6 +180,16 @@
   document.getElementById("setPath").addEventListener("click", () => { location.href = "settings.html"; });
 
   load();
+
+  // Keep "open now" and "in front" live without redrawing while you're typing in a field.
+  setInterval(async () => {
+    const s = await invoke("launch_status").catch(() => null);
+    if (!s) return;
+    const changed = JSON.stringify([s.open, s.logins, s.active]) !== JSON.stringify([openClients, logins, active]);
+    openClients = s.open; logins = s.logins; active = s.active || null;
+    const typing = document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName);
+    if (changed && !typing) render();
+  }, 1500);
 </script>
 </body>
 </html>
