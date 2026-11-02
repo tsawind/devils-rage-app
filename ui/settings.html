@@ -125,6 +125,15 @@
   </section>
 
   <section>
+    <h2>EVE clients</h2>
+    <div class="row">
+      <div class="l">EVE launcher path<small id="lpWhat">For Launch groups' "Open launcher". Point to <code>eve-online.exe</code>. Leave blank to auto-detect.</small></div>
+      <input id="lpPath" class="in" spellcheck="false" autocomplete="off" placeholder="C:\Users\you\AppData\Local\eve-online\eve-online.exe">
+      <button class="b" id="lpSave">Save</button>
+    </div>
+  </section>
+
+  <section>
     <h2>Developer</h2>
     <div class="row">
       <div class="l">Developer tools<small>Show the extra tools below (handy for bug reports)</small></div>
@@ -212,6 +221,8 @@
       $("cbWhat").textContent = state.clipboard_last_scan ? `Last scan: ${state.clipboard_last_scan}` : "Watching the clipboard";
     }
     if (document.activeElement !== $("psId")) $("psId").value = state.parsec_peer_id || "";
+    if (document.activeElement !== $("lpPath")) $("lpPath").value = state.launcher_path || "";
+    if ($("lpWhat")) $("lpWhat").style.color = state.launcher_ready ? "" : "#f0c9a8";
     $("psWhat").textContent = state.parsec_installed
       ? "The PI screen's button opens Parsec on this PC. You still do everything in EVE yourself."
       : "Parsec isn't installed on this PC: the button opens Parsec's download page.";
@@ -255,6 +266,7 @@
   });
   $("psOpen").addEventListener("click", () => { invoke("open_parsec"); toast("Opening Parsec…"); });
   $("psSave").addEventListener("click", () => set("parsec_peer_id", $("psId").value.trim()));
+  $("lpSave").addEventListener("click", () => set("launcher_path", $("lpPath").value.trim()));
   $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
   $("copyLog").addEventListener("click", async () => {
     try {

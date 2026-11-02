@@ -73,6 +73,8 @@ pub struct SettingsView {
     clipboard_windows_only: bool,
     parsec_peer_id: String,
     parsec_installed: bool,
+    launcher_path: String,
+    launcher_ready: bool,
     last_check_secs_ago: Option<u64>,
     last_check: Option<String>,
 }
@@ -109,6 +111,8 @@ pub fn get_settings(app: AppHandle) -> SettingsView {
         clipboard_last_scan: crate::clipboard::last_scan(),
         clipboard_windows_only: !cfg!(windows),
         parsec_peer_id: s.parsec_peer_id.clone().unwrap_or_default(),
+        launcher_path: s.launcher_path.clone().unwrap_or_default(),
+        launcher_ready: crate::launch::launcher_ready(app.clone()),
         parsec_installed: crate::parsec::installed().is_some(),
         last_check_secs_ago: last.as_ref().map(|(ago, _)| *ago),
         last_check: last.map(|(_, text)| text),
@@ -146,6 +150,10 @@ pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), Stri
         "parsec_peer_id" => {
             let id = crate::parsec::clean_id(value.as_str().unwrap_or(""));
             s.parsec_peer_id = (!id.is_empty()).then_some(id);
+        }
+        "launcher_path" => {
+            let p = value.as_str().unwrap_or("").trim().to_string();
+            s.launcher_path = (!p.is_empty()).then_some(p);
         }
         "chat_log_location" => s.chat_log_location = Some(value.as_bool().unwrap_or(true)),
         "clipboard_scans" => s.clipboard_scans = Some(value.as_bool().unwrap_or(true)),

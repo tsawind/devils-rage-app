@@ -12,6 +12,7 @@ mod bar;
 mod capture;
 mod chatlog;
 mod clipboard;
+mod launch;
 mod clientaudio;
 mod commands;
 mod location;
@@ -323,6 +324,11 @@ pub fn run() {
             previews::open_previews,
             previews::close_preview,
             previews::close_previews,
+            launch::launch_groups,
+            launch::save_launch_groups,
+            launch::launch_known_characters,
+            launch::open_launcher,
+            launch::launcher_ready,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

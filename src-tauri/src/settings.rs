@@ -73,6 +73,10 @@ pub struct Settings {
     /// the PI screen. Missing = Parsec just opens and you pick the computer there.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parsec_peer_id: Option<String>,
+    /// Patch 63: the official EVE launcher's eve-online.exe, so "Open launcher" can start it
+    /// for a launch group. Missing = we look in the usual install spots.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launcher_path: Option<String>,
     /// Show the developer section in Settings.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub developer: bool,
