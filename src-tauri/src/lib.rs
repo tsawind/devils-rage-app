@@ -20,6 +20,7 @@ mod location;
 mod mainwindow;
 mod parsec;
 mod previews;
+mod profiles;
 mod scanner;
 mod settings;
 #[cfg(desktop)]
@@ -344,6 +345,13 @@ pub fn run() {
             launch::save_launch_groups,
             launch::launch_known_characters,
             launch::launch_status,
+            profiles::profiles_scan,
+            profiles::profiles_names,
+            profiles::profiles_label,
+            profiles::profiles_backup,
+            profiles::profiles_restore,
+            profiles::profiles_copy,
+            profiles::profiles_clone,
             launch::pause_cycle_hotkeys,
             launch::resume_cycle_hotkeys,
             previews::active_client,

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Client settings</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
+          --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+         display: flex; flex-direction: column; user-select: none; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .grow { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  .back { background: none; border: 0; color: var(--muted); }
+  .back:hover { color: var(--text); }
+  main { flex: 1; overflow: auto; padding: 18px 20px 40px; max-width: 980px; width: 100%; margin: 0 auto; }
+  h2 { font-size: 15px; margin: 22px 0 8px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .warn { color: #f0c9a8; border: 1px solid #5a2a14; background: #1c120d; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 14px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 12px 14px; margin-bottom: 10px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  select, input[type=text] { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 5px 8px; font: inherit; }
+  .btn { border: 1px solid var(--line); border-radius: 8px; background: #121216; color: var(--text); padding: 6px 12px; }
+  .btn:hover { border-color: var(--red-hi); }
+  .btn.red { border-color: var(--red); background: #1c0d0e; color: #f3c6c6; }
+  .btn.small { padding: 2px 9px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+  .prof h3 { margin: 0; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+  .prof h3 .num { color: var(--red-hi); }
+  .prof input.label { width: 100%; margin: 6px 0; }
+  .who { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+  .who label { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+  .who .meta { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .who .src { color: var(--ok); font-size: 11px; }
+  .muted { color: var(--muted); }
+  .status { min-height: 1.5em; margin: 8px 0; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: #f08a8a; }
+  .backups div { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid #1f1f25; }
+  .backups span { flex: 1; }
+  .steps { display: grid; gap: 8px; }
+  .steps b.n { display: inline-block; width: 20px; height: 20px; border-radius: 50%; background: var(--red); text-align: center; line-height: 20px; font-size: 12px; margin-right: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">DR</span>
+  <h1>Client settings</h1>
+  <span class="grow"></span>
+  <button class="back" id="home">← Home</button>
+</header>
+<main>
+  <p class="note">Each EVE <b>client profile</b> (the launcher's profile number) is a <code>settings_…</code> folder. Inside, a
+     <b>character file</b> holds windows, overview and chat; an <b>account file</b> holds keys, audio and graphics. Copy one onto
+     others to give every client identical settings. Everything is <b>backed up first</b>.</p>
+  <div class="warn" id="openWarn" hidden></div>
+  <div class="warn" id="noRoot" hidden></div>
+
+  <div class="card steps">
+    <div class="row"><b class="n">1</b> Copy from
+      <select id="source" style="min-width: 360px"></select>
+    </div>
+    <div class="row"><b class="n">2</b> Onto the ticked <span id="kindWord">characters</span> below ·
+      <button class="btn small" id="selAll">All</button>
+      <button class="btn small" id="selNone">None</button>
+      <select id="selGroup"><option value="">Tick a launch group…</option></select>
+    </div>
+    <div class="row"><b class="n">3</b>
+      <button class="btn red" id="copy" disabled>Copy settings (backs up first)</button>
+      <span class="muted" id="picked"></span>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <h2>Profiles</h2>
+  <div class="grid" id="profiles"></div>
+
+  <h2>Make a profile</h2>
+  <div class="card row">
+    New <code>settings_</code><input type="text" id="newName" placeholder="e.g. 34 or RollFleet" size="14">
+    from <select id="cloneFrom"></select>
+    <button class="btn" id="clone">Make it</button>
+    <span class="muted">then pick it as the client profile in the EVE launcher.</span>
+  </div>
+
+  <h2>Backups</h2>
+  <div class="card">
+    <div class="row" style="margin-bottom: 6px"><button class="btn" id="backup">Back up every profile now</button>
+      <span class="muted">Saved next to your profiles, like your own “backup 11-20-2025” folders.</span></div>
+    <div class="backups" id="backups"></div>
+  </div>
+</main>
+
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  let scan = null, names = {}, groups = [], ticked = new Set();
+
+  const when = (ms) => ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+  const who = (entry) => entry.kind === "char" ? (names[entry.id] || "Character " + entry.id) : "Account " + entry.id;
+  const kind = () => ($("source").value.includes("core_user_") ? "user" : "char");
+  function status(text, cls) { const s = $("status"); s.textContent = text || ""; s.className = "status" + (cls ? " " + cls : ""); }
+
+  async function load() {
+    try { scan = await invoke("profiles_scan"); }
+    catch (e) { $("noRoot").textContent = String(e); $("noRoot").hidden = false; return; }
+    groups = await invoke("launch_groups").catch(() => []);
+    const ids = [...new Set([...scan.profiles.flatMap(p => p.chars.map(c => c.id)), ...scan.templates.filter(t => t.kind === "char").map(t => t.id)])];
+    render();
+    names = Object.assign(names, await invoke("profiles_names", { ids }).catch(() => ({})));
+    render();
+  }
+
+  function render() {
+    const open = scan.clientsOpen;
+    $("openWarn").hidden = !open;
+    $("openWarn").textContent = open ? `${open} EVE client${open === 1 ? " is" : "s are"} open. EVE rewrites its settings when a client closes, so close them before copying or restoring.` : "";
+
+    // Source list: templates first, then every character / account in every profile.
+    const src = $("source"), keep = src.value;
+    src.innerHTML = "";
+    src.append(new Option("Choose a template or a client…", ""));
+    if (scan.templates.length) {
+      const og = document.createElement("optgroup"); og.label = "Templates";
+      scan.templates.forEach(t => og.append(new Option(`${t.file} (${t.kind === "char" ? "character" : "account"}, ${when(t.modified)})`, t.file)));
+      src.append(og);
+    }
+    scan.profiles.forEach(p => {
+      if (!p.chars.length && !p.users.length) return;
+      const og = document.createElement("optgroup"); og.label = "settings_" + p.name + (p.label ? " · " + p.label : "");
+      [...p.chars, ...p.users].forEach(e => og.append(new Option(`${who(e)} — ${e.kind === "char" ? "character" : "account"}, ${when(e.modified)}`, `settings_${p.name}/${e.file}`)));
+      src.append(og);
+    });
+    src.value = keep;
+
+    const gsel = $("selGroup"), gkeep = gsel.value;
+    gsel.innerHTML = ""; gsel.append(new Option("Tick a launch group…", ""));
+    groups.forEach(g => gsel.append(new Option(g.name, g.id)));
+    gsel.value = gkeep;
+
+    $("kindWord").textContent = kind() === "user" ? "accounts" : "characters";
+
+    const host = $("profiles"); host.innerHTML = "";
+    scan.profiles.forEach(p => {
+      const card = el("div", "card prof");
+      const h = el("h3"); h.append(el("span", "num", "settings_" + p.name), el("span", "muted", when(p.modified)));
+      const label = el("input", "label"); label.type = "text"; label.placeholder = "Whose / what for (e.g. Tsawind account, Roll fleet)"; label.value = p.label || "";
+      label.addEventListener("change", () => invoke("profiles_label", { profile: p.name, label: label.value }).then(() => { p.label = label.value; render(); }).catch(e => status(String(e), "bad")));
+      const list = el("div", "who");
+      const entries = kind() === "user" ? p.users : p.chars;
+      if (!entries.length) list.append(el("span", "muted", kind() === "user" ? "No account files yet" : "No characters yet"));
+      entries.forEach(e => {
+        const spec = `settings_${p.name}/${e.file}`;
+        const row = el("label");
+        const box = el("input"); box.type = "checkbox"; box.checked = ticked.has(spec); box.disabled = spec === src.value;
+        box.addEventListener("change", () => { box.checked ? ticked.add(spec) : ticked.delete(spec); summary(); });
+        row.append(box, el("span", null, who(e)));
+        if (spec === src.value) row.append(el("span", "src", "← copying from this"));
+        row.append(el("span", "meta", when(e.modified)));
+        list.append(row);
+      });
+      card.append(h, label, list);
+      host.append(card);
+    });
+
+    const cf = $("cloneFrom"), ckeep = cf.value;
+    cf.innerHTML = "";
+    scan.profiles.forEach(p => cf.append(new Option("settings_" + p.name + (p.label ? " · " + p.label : ""), p.name)));
+    if (ckeep) cf.value = ckeep;
+
+    const b = $("backups"); b.innerHTML = "";
+    if (!scan.backups.length) b.append(el("span", "muted", "No backups made by the app yet."));
+    scan.backups.forEach(name => {
+      const row = el("div"); row.append(el("span", null, name));
+      const r = el("button", "btn small", "Restore");
+      r.addEventListener("click", () => restore(name));
+      row.append(r); b.append(row);
+    });
+    summary();
+  }
+
+  function visibleSpecs() {
+    const k = kind();
+    return scan.profiles.flatMap(p => (k === "user" ? p.users : p.chars).map(e => ({ spec: `settings_${p.name}/${e.file}`, entry: e, profile: p })));
+  }
+
+  function summary() {
+    // Only targets of the source's kind count.
+    const valid = new Set(visibleSpecs().map(v => v.spec));
+    [...ticked].forEach(s => { if (!valid.has(s) || s === $("source").value) ticked.delete(s); });
+    $("picked").textContent = ticked.size ? `${ticked.size} ${kind() === "user" ? "account" : "character"} file${ticked.size === 1 ? "" : "s"} ticked` : "";
+    $("copy").disabled = !$("source").value || !ticked.size;
+  }
+
+  $("source").addEventListener("change", () => { ticked.clear(); render(); });
+  $("selAll").addEventListener("click", () => { visibleSpecs().forEach(v => ticked.add(v.spec)); render(); });
+  $("selNone").addEventListener("click", () => { ticked.clear(); render(); });
+  $("selGroup").addEventListener("change", () => {
+    const g = groups.find(x => x.id === $("selGroup").value);
+    $("selGroup").value = "";
+    if (!g) return;
+    const members = new Set(g.members.filter(m => !(g.skipped || []).includes(m)));
+    // Characters: the group's members. Accounts: the accounts in profiles holding those characters.
+    const hit = (v) => kind() === "char" ? members.has(names[v.entry.id]) : v.profile.chars.some(c => members.has(names[c.id]));
+    let n = 0;
+    visibleSpecs().forEach(v => { if (hit(v)) { ticked.add(v.spec); n++; } });
+    status(n ? `Ticked ${n} from “${g.name}”.` : `None of “${g.name}” found in these profiles (names load from EVE's servers; try again in a moment).`);
+    render();
+  });
+
+  async function withForce(action) {
+    try { return await action(false); }
+    catch (e) {
+      if (String(e).includes("close them first") && confirm(String(e) + "\n\nGo ahead anyway?")) return await action(true);
+      throw e;
+    }
+  }
+
+  $("copy").addEventListener("click", async () => {
+    const source = $("source").value, targets = [...ticked];
+    status("Backing up, then copying…");
+    try {
+      const msg = await withForce((force) => invoke("profiles_copy", { source, targets, force }));
+      ticked.clear(); status(msg, "ok"); await load();
+    } catch (e) { status(String(e), "bad"); }
+  });
+
+  async function restore(name) {
+    if (!confirm(`Put back “${name}”? Your current settings are backed up first.`)) return;
+    status("Restoring…");
+    try { status(await withForce((force) => invoke("profiles_restore", { backup: name, force })), "ok"); await load(); }
+    catch (e) { status(String(e), "bad"); }
+  }
+
+  $("backup").addEventListener("click", async () => {
+    try { status("Backed up: " + await invoke("profiles_backup"), "ok"); await load(); }
+    catch (e) { status(String(e), "bad"); }
+  });
+
+  $("clone").addEventListener("click", async () => {
+    try { status(await invoke("profiles_clone", { from: $("cloneFrom").value, name: $("newName").value.trim() }), "ok"); $("newName").value = ""; await load(); }
+    catch (e) { status(String(e), "bad"); }
+  });
+
+  $("home").addEventListener("click", () => { location.href = "index.html"; });
+  load();
+</script>
+</body>
+</html>
