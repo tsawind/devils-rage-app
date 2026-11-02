@@ -55,8 +55,9 @@
   <button class="back" id="home">← Home</button>
 </header>
 <main>
-  <p class="note">A group is a set of characters you run together. <b>Open launcher</b> starts the official EVE
-     launcher so it can sign in and launch — the app never holds your passwords. (Direct one-click launch is a
+  <p class="note">A group is a set of characters you run together, in order. <b>Open launcher</b> starts the official
+     EVE launcher so it can sign in and launch (the app never holds your passwords). Set a <b>pedal / hotkey</b>
+     and tapping it brings the next client in the group to the front — like EVE-O Preview. (Direct one-click launch is a
      separate option we're still testing; the launcher is the safe fallback whenever CCP updates it.)</p>
   <div class="warn" id="pathWarn" hidden>
     Can't find your EVE launcher yet. <span class="link" id="setPath">Set its path in Settings</span> (point to <code>eve-online.exe</code>).
@@ -130,6 +131,22 @@
       typed.addEventListener("keydown", (e) => { if (e.key === "Enter" && typed.value.trim()) { g.members.push(typed.value.trim()); save(); render(); } });
       add.append(pick, typed);
 
+      // Patch 63b: foot-pedal / hotkey cycling for this group.
+      const KEYS = ["", "F13", "F14", "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24"];
+      const cyc = el("div", "add");
+      cyc.append(el("span", "note", "Pedal / hotkey:"));
+      const fwd = el("select");
+      KEYS.forEach(k => fwd.append(new Option(k ? "Next: " + k : "Next: —", k)));
+      fwd.value = g.forward_hotkey || "";
+      fwd.title = "Bring the next client in this group to the front";
+      fwd.addEventListener("change", () => { g.forward_hotkey = fwd.value || null; save(); });
+      const bwd = el("select");
+      KEYS.forEach(k => bwd.append(new Option(k ? "Prev: " + k : "Prev: —", k)));
+      bwd.value = g.backward_hotkey || "";
+      bwd.title = "Bring the previous client to the front";
+      bwd.addEventListener("change", () => { g.backward_hotkey = bwd.value || null; save(); });
+      cyc.append(fwd, bwd);
+
       const row = el("div", "row");
       const open = el("button", "btn red", "▶ Open launcher");
       open.addEventListener("click", async () => {
@@ -140,7 +157,7 @@
       const hint = el("span", "note"); hint.style.margin = "0"; hint.textContent = "then click these clients in the launcher";
       row.append(open, hint);
 
-      card.append(top, members, add, row);
+      card.append(top, members, add, cyc, row);
       host.append(card);
     });
   }

@@ -12,6 +12,7 @@ mod bar;
 mod capture;
 mod chatlog;
 mod clipboard;
+mod cycle;
 mod launch;
 mod clientaudio;
 mod commands;
@@ -291,6 +292,15 @@ pub fn run() {
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_process::init())
+            .plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(|app, shortcut, event| {
+                        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                            launch::cycle_shortcut_fired(app, shortcut);
+                        }
+                    })
+                    .build(),
+            )
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
@@ -428,6 +438,8 @@ pub fn run() {
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
             clipboard::start(handle.clone());
+            #[cfg(desktop)]
+            launch::register_cycle_hotkeys(&handle);
             appconfig::start(handle.clone());
 
             // "Skip this screen" ticked: go straight to the chosen site (your last map).

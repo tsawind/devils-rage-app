@@ -17,6 +17,12 @@ pub struct Group {
     pub name: String,
     #[serde(default)]
     pub members: Vec<String>,
+    /// Patch 63b: a hotkey (e.g. the pedal's "F13") that cycles this group forward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_hotkey: Option<String>,
+    /// And one that cycles it backward.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backward_hotkey: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -56,12 +62,16 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
             id: g.id,
             name: g.name.chars().take(60).collect(),
             members: g.members.into_iter().take(40).collect(),
+            forward_hotkey: g.forward_hotkey.filter(|h| !h.trim().is_empty()),
+            backward_hotkey: g.backward_hotkey.filter(|h| !h.trim().is_empty()),
         })
         .collect();
     let text = serde_json::to_string_pretty(&Groups { groups: cleaned }).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    #[cfg(desktop)]
+    register_cycle_hotkeys(&app);
     Ok(())
 }
 
@@ -107,6 +117,67 @@ pub fn open_launcher(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn launcher_ready(app: AppHandle) -> bool {
     find_launcher(&app).is_some()
+}
+
+/// Patch 63b: the foot-pedal / hotkey cycling. Registers every group's cycle hotkeys as global
+/// shortcuts; when one fires, brings the next open client in that group to the front.
+#[cfg(desktop)]
+mod hotkeys {
+    use super::{load, Group};
+    use std::collections::HashSet;
+    use std::str::FromStr;
+    use std::sync::Mutex;
+    use tauri::AppHandle;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    /// Each registered shortcut -> (group id, forward?).
+    static BOUND: Mutex<Vec<(Shortcut, String, bool)>> = Mutex::new(Vec::new());
+
+    pub fn register(app: &AppHandle) {
+        let gs = app.global_shortcut();
+        let _ = gs.unregister_all();
+        let mut bound = BOUND.lock().unwrap();
+        bound.clear();
+        for group in load(app).groups {
+            for (hotkey, forward) in [(group.forward_hotkey.as_deref(), true), (group.backward_hotkey.as_deref(), false)] {
+                let Some(hotkey) = hotkey.filter(|h| !h.trim().is_empty()) else { continue };
+                match Shortcut::from_str(hotkey) {
+                    Ok(shortcut) => {
+                        if gs.register(shortcut).is_ok() {
+                            bound.push((shortcut, group.id.clone(), forward));
+                        } else {
+                            log::warn!("couldn't register cycle hotkey {hotkey} (in use by another app?)");
+                        }
+                    }
+                    Err(_) => log::warn!("cycle hotkey {hotkey} isn't a key we understand"),
+                }
+            }
+        }
+        log::info!("cycle hotkeys registered: {}", bound.len());
+    }
+
+    /// A registered cycle shortcut fired: advance that group and bring the next client forward.
+    pub fn fired(app: &AppHandle, shortcut: &Shortcut) {
+        let hit = BOUND.lock().unwrap().iter().find(|(s, _, _)| s == shortcut).map(|(_, id, fwd)| (id.clone(), *fwd));
+        let Some((group_id, forward)) = hit else { return };
+        let group: Option<Group> = load(app).groups.into_iter().find(|g| g.id == group_id);
+        let Some(group) = group else { return };
+        let open: HashSet<String> = crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect();
+        if let Some(next) = crate::cycle::advance(&group_id, &group.members, &open, forward) {
+            crate::capture::focus_client(&next);
+            log::info!("cycle {}: brought {next} forward", group.name);
+        }
+    }
+}
+
+#[cfg(desktop)]
+pub fn register_cycle_hotkeys(app: &AppHandle) {
+    hotkeys::register(app);
+}
+
+#[cfg(desktop)]
+pub fn cycle_shortcut_fired(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) {
+    hotkeys::fired(app, shortcut);
 }
 
 #[cfg(test)]

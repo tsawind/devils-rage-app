@@ -46,6 +46,8 @@ rev = "8221dcaa19c46836afbdbac4b5b9a6ed6a2ad8ab"
 # Self-update only exists on desktop; phones update through their app stores.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+# Foot-pedal / hotkey cycling through client groups (F13/F14/F15).
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-autostart = "2"
