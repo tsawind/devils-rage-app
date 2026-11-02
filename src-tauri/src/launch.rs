@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn groups_round_trip_through_json() {
         let groups = Groups {
-            groups: vec![Group { id: "a".into(), name: "Roll fleet".into(), members: vec!["Tsawind".into(), "LuigiSquirrel".into()] }],
+            groups: vec![Group { id: "a".into(), name: "Roll fleet".into(), members: vec!["Tsawind".into(), "LuigiSquirrel".into()], forward_hotkey: Some("F13".into()), backward_hotkey: None }],
         };
         let text = serde_json::to_string(&groups).unwrap();
         let back: Groups = serde_json::from_str(&text).unwrap();
