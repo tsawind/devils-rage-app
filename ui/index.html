@@ -40,6 +40,22 @@
   .hint { color: #55555c; }
   .motd { max-width: 478px; margin: 0 0 22px; padding: 10px 14px; border: 1px solid #5a2a14; border-radius: 10px;
           background: #1c120d; color: #f0c9a8; font-size: 14px; white-space: pre-wrap; text-align: center; }
+  /* EVE client tools (coming): launch groups, multibox previews, client settings */
+  .tools { margin-top: 26px; display: grid; grid-template-columns: repeat(3, 286px); gap: 12px; }
+  @media (max-width: 960px) { .tools { grid-template-columns: repeat(1, 300px); } }
+  .tools h2 { grid-column: 1 / -1; margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .8px;
+              color: var(--muted); text-transform: uppercase; }
+  button.tool { background: #121216; border: 1px dashed var(--line); border-radius: 10px; color: var(--text);
+                padding: 12px 14px; cursor: pointer; font: inherit; text-align: left; display: flex; gap: 12px;
+                align-items: center; }
+  button.tool:hover, button.tool:focus-visible { border-color: var(--red-hi); outline: none; }
+  button.tool svg { width: 26px; height: 26px; flex: none; stroke: var(--muted); fill: none; stroke-width: 1.6;
+                    stroke-linecap: round; stroke-linejoin: round; }
+  button.tool b { display: block; font-size: 15px; font-weight: 600; }
+  button.tool span { color: var(--muted); font-size: 12px; }
+  button.tool em { font-style: normal; font-size: 10px; letter-spacing: .5px; color: #c98a5a; border: 1px solid #5a2a14;
+                   border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+  .soon { margin-top: 10px; color: #c98a5a; font-size: 13px; min-height: 1.5em; }
   .motd b { display: block; font-size: 11px; letter-spacing: .6px; color: #c98a5a; margin-bottom: 2px; font-weight: 600; }
 </style>
 </head>
@@ -73,6 +89,25 @@
     </button>
   </div>
 
+  <div class="tools">
+    <h2>EVE clients</h2>
+    <button class="tool" data-tool="launch">
+      <svg viewBox="0 0 24 24"><path d="M12 3c3 2.2 4.5 5.4 4.5 9.2L14 15h-4l-2.5-2.8C7.5 8.4 9 5.2 12 3z"/><circle cx="12" cy="9" r="1.6"/>
+        <path d="M8.2 13.5L5 16.5l3 .5M15.8 13.5l3.2 3-3 .5M10.5 17.5L12 21l1.5-3.5"/></svg>
+      <div><b>Launch groups<em>SOON</em></b><span>Start a set of clients in one click</span></div>
+    </button>
+    <button class="tool" data-tool="multibox">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.2"/><rect x="13" y="4" width="8" height="7" rx="1.2"/>
+        <rect x="3" y="13" width="8" height="7" rx="1.2"/><rect x="13" y="13" width="8" height="7" rx="1.2"/></svg>
+      <div><b>Multibox previews<em>SOON</em></b><span>Live thumbnails of every client, click to switch</span></div>
+    </button>
+    <button class="tool" data-tool="settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
+      <div><b>Client settings<em>SOON</em></b><span>Copy one client's settings to the others</span></div>
+    </button>
+  </div>
+  <p class="soon" id="soon"></p>
+
   <label class="skip"><input type="checkbox" id="skip">
     <span>Skip this screen next time and open what I pick</span></label>
 </main>
@@ -102,6 +137,16 @@
       const remember = document.getElementById("skip").checked;
       invoke("open_site", { site: btn.dataset.site, remember }).catch(err => alert(err));
     });
+  });
+
+  // EVE client tools: placeholders for now (the app already sees every client's window).
+  const SOON = {
+    launch: "Launch groups are coming: pick characters once, start them together from here.",
+    multibox: "Multibox previews are coming: a live thumbnail of each client, click one to bring it to the front.",
+    settings: "Client settings are coming: copy one character's EVE settings (windows, overview, keys) to the others.",
+  };
+  document.querySelectorAll("button.tool").forEach(btn => {
+    btn.addEventListener("click", () => { document.getElementById("soon").textContent = SOON[btn.dataset.tool] || ""; });
   });
 
   document.getElementById("upd").addEventListener("click", () => invoke("check_updates"));

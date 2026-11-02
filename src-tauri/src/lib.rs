@@ -9,6 +9,7 @@ use tauri_plugin_opener::OpenerExt;
 mod appconfig;
 mod audiodetect;
 mod bar;
+mod capture;
 mod chatlog;
 mod clipboard;
 mod clientaudio;
@@ -294,6 +295,11 @@ pub fn run() {
             ));
     }
 
+    // Cameras: each EVE client's picture for the mapper's share page (capture.rs).
+    builder = builder.register_asynchronous_uri_scheme_protocol(capture::SCHEME, |_ctx, request, responder| {
+        std::thread::spawn(move || responder.respond(capture::handle(request)));
+    });
+
     builder
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
@@ -329,7 +335,7 @@ pub fn run() {
             // powers), and gives it a stand-in for Chrome's picture-in-picture so
             // its scanner pop-out opens as a pinned app window (see pip.js).
             let marker = format!(
-                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true, cameras: 3, clientAudio: true }});\n{}\n{}\n{}",
+                "window.__DEVILS_RAGE_APP__ = Object.freeze({{ version: {version:?}, channel: {:?}, parsec: true, cameras: 4, clientAudio: true, capture: true }});\n{}\n{}\n{}",
                 channel.as_str(),
                 SHORTCUTS,
                 RECONNECT,

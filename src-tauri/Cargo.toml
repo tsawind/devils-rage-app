@@ -29,11 +29,13 @@ dirs = "6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Patch 47: the clipboard (way back after a jump, probe scans copied in EVE).
 arboard = { version = "3", default-features = false }
+# Cameras: each EVE client's picture for the share page (capture.rs).
+jpeg-encoder = "0.6"
 
 # The title of the window in front ("EVE - <character>"), to know whose scan was copied.
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.59"
-features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"]
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_Graphics_Gdi", "Win32_Storage_Xps"]
 
 # Cameras: one EVE client's own sound (Windows process loopback) for the hole watch.
 # Pinned to the commit whose API clientaudio.rs was written against.
