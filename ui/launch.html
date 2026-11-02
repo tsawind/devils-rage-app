@@ -57,8 +57,8 @@
 <main>
   <p class="note">A group is a set of characters you run together, in order. <b>Open launcher</b> starts the official
      EVE launcher so it can sign in and launch (the app never holds your passwords). Set a <b>pedal / hotkey</b>
-     and tapping it brings the next client in the group to the front — like EVE-O Preview. (Direct one-click launch is a
-     separate option we're still testing; the launcher is the safe fallback whenever CCP updates it.)</p>
+     and tapping it brings the next client in the group to the front — like EVE-O Preview. Add <b>Login screens</b> to a
+     group to cycle clients still sitting at character select.</p>
   <div class="warn" id="pathWarn" hidden>
     Can't find your EVE launcher yet. <span class="link" id="setPath">Set its path in Settings</span> (point to <code>eve-online.exe</code>).
   </div>
@@ -77,6 +77,7 @@
   const uid = () => Math.random().toString(36).slice(2, 9);
   let groups = [];
   let openClients = [];
+  const LOGIN = "Login screens";
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
@@ -99,7 +100,7 @@
     const host = document.getElementById("groups");
     host.innerHTML = "";
     document.getElementById("empty").hidden = groups.length > 0;
-    const names = Array.from(new Set([...openClients, ...groups.flatMap(g => g.members)]));
+    const names = Array.from(new Set([LOGIN, ...openClients, ...groups.flatMap(g => g.members)]));
 
     groups.forEach((g) => {
       const card = el("div", "group");
@@ -113,8 +114,9 @@
       const members = el("div", "members");
       if (!g.members.length) members.append(el("span", "chip off", "No characters yet"));
       g.members.forEach((m) => {
-        const chip = el("span", "chip" + (openClients.includes(m) ? "" : " off"));
-        chip.title = openClients.includes(m) ? "Open now" : "Not running right now";
+        const live = m === LOGIN || openClients.includes(m);
+        const chip = el("span", "chip" + (live ? "" : " off"));
+        chip.title = m === LOGIN ? "Every client at the login / character-select screen" : live ? "Open now" : "Not running right now";
         chip.append(el("b", null, m));
         const x = el("button", "x", "✕");
         x.addEventListener("click", () => { g.members = g.members.filter(v => v !== m); save(); render(); });

@@ -23,7 +23,8 @@
   /* Edit mode toolbar */
   #bar { position: fixed; left: 4px; right: 4px; bottom: 4px; z-index: 6; display: none; gap: 6px; align-items: center;
          flex-wrap: wrap; background: #000c; border: 1px solid #333; border-radius: 6px; padding: 3px 6px; font-size: 11px; }
-  body.edit #bar { display: flex; }
+  /* Only while the pointer is over this preview, so small previews stay draggable and visible. */
+  body.edit:hover #bar { display: flex; }
   #bar label { display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
   #bar input[type=range] { width: 60px; }
   #bar button { font: inherit; background: #1c0d0e; color: #f3c6c6; border: 1px solid #a8181f; border-radius: 4px; padding: 1px 7px; cursor: pointer; margin-left: auto; }
