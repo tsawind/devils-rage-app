@@ -23,11 +23,18 @@ pub fn preview_clients() -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// One client's picture as a data URL, for its preview window to draw.
+/// One client's picture as a data URL, for its preview window to draw. The capture and JPEG
+/// encode run on a blocking thread so a preview never stalls the UI thread.
 #[tauri::command]
-pub fn preview_frame(name: String, width: Option<u32>, quality: Option<u8>) -> Result<String, String> {
-    let jpeg = crate::capture::client_jpeg(&name, width.unwrap_or(480).clamp(120, 1280), quality.unwrap_or(70).clamp(30, 90))?;
-    Ok(format!("data:image/jpeg;base64,{}", base64_encode(&jpeg)))
+pub async fn preview_frame(name: String, width: Option<u32>, quality: Option<u8>) -> Result<String, String> {
+    let w = width.unwrap_or(480).clamp(120, 1280);
+    let q = quality.unwrap_or(70).clamp(30, 90);
+    tauri::async_runtime::spawn_blocking(move || {
+        let jpeg = crate::capture::client_jpeg(&name, w, q)?;
+        Ok(format!("data:image/jpeg;base64,{}", base64_encode(&jpeg)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Bring a client to the front (its preview was clicked).
@@ -37,37 +44,47 @@ pub fn preview_focus(name: String) -> bool {
 }
 
 /// Open (or refocus) a preview window for every open EVE client. Idempotent.
+///
+/// The windows are built off the main thread (building them inside the command would block the
+/// UI thread until each webview is ready, which froze the whole app), so this returns at once.
 #[tauri::command]
 pub fn open_previews(app: AppHandle) -> Result<usize, String> {
     let clients = crate::clipboard::open_eve_windows();
     if clients.is_empty() {
         return Err("No EVE clients are open.".to_string());
     }
-    let mut count = 0usize;
-    for (name, _) in clients {
-        let label = label_for(&name);
-        if let Some(existing) = app.get_webview_window(&label) {
+    let count = clients.len();
+    // Already-open previews: just show them.
+    for (name, _) in &clients {
+        if let Some(existing) = app.get_webview_window(&label_for(name)) {
             let _ = existing.show();
             let _ = existing.set_focus();
-            count += 1;
-            continue;
-        }
-        let url = format!("preview.html?name={}", urlencode(&name));
-        let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
-            .title(&format!("{name} · preview"))
-            .decorations(false)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .shadow(false)
-            .inner_size(320.0, 200.0)
-            .min_inner_size(160.0, 100.0)
-            .build();
-        match built {
-            Ok(_) => count += 1,
-            Err(err) => log::warn!("couldn't open preview for {name}: {err}"),
         }
     }
-    log::info!("previews open: {count}");
+    tauri::async_runtime::spawn(async move {
+        for (name, _) in clients {
+            let label = label_for(&name);
+            if app.get_webview_window(&label).is_some() {
+                continue;
+            }
+            let init = format!("window.__PREVIEW_NAME__ = {};", serde_json::Value::String(name.clone()));
+            let url = format!("preview.html?name={}", urlencode(&name));
+            let built = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+                .initialization_script(init)
+                .title(&format!("{name} · preview"))
+                .decorations(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .shadow(false)
+                .inner_size(320.0, 200.0)
+                .min_inner_size(160.0, 100.0)
+                .build();
+            if let Err(err) = built {
+                log::warn!("couldn't open preview for {name}: {err}");
+            }
+        }
+        log::info!("previews opened");
+    });
     Ok(count)
 }
 

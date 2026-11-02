@@ -31,7 +31,7 @@
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const qs = new URLSearchParams(location.search);
-  const name = qs.get("name") || "";
+  const name = (window.__PREVIEW_NAME__ != null ? String(window.__PREVIEW_NAME__) : "") || qs.get("name") || "";
   const edge = qs.get("edge");
   if (edge) document.documentElement.style.setProperty("--edge", edge);
   document.getElementById("name").textContent = name;
