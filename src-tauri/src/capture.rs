@@ -105,6 +105,30 @@ fn encode(picture: &Picture, quality: u8) -> Result<Vec<u8>, &'static str> {
     Ok(out)
 }
 
+/// Patch 62t: one EVE client's picture as JPEG bytes, for the previews (previews.rs). The name
+/// is the character ("EVE - <name>"); the client must be open and not minimized.
+pub fn client_jpeg(name: &str, width: u32, quality: u8) -> Result<Vec<u8>, String> {
+    let (_, handle) = crate::clipboard::open_eve_windows()
+        .into_iter()
+        .find(|(open, _)| open == name)
+        .ok_or_else(|| "that EVE client is closed".to_string())?;
+    let picture = grab::picture(handle, width).map_err(str::to_string)?;
+    encode(&picture, quality).map_err(str::to_string)
+}
+
+/// Whether a window handle is minimized (for the previews).
+pub fn minimized_handle(handle: isize) -> bool {
+    grab::minimized(handle)
+}
+
+/// Bring one EVE client to the front (clicking its preview). True if it was found.
+pub fn focus_client(name: &str) -> bool {
+    match crate::clipboard::open_eve_windows().into_iter().find(|(open, _)| open == name) {
+        Some((_, handle)) => grab::focus(handle),
+        None => false,
+    }
+}
+
 #[cfg(windows)]
 mod grab {
     use super::Picture;
@@ -122,6 +146,18 @@ mod grab {
     pub fn minimized(handle: isize) -> bool {
         // SAFETY: a plain query on a window handle (a stale one just answers no).
         unsafe { IsIconic(handle as _) != 0 }
+    }
+
+    pub fn focus(handle: isize) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, ShowWindow, SW_RESTORE};
+        let hwnd = handle as _;
+        // SAFETY: plain window calls on a handle EnumWindows gave us; a stale one just fails.
+        unsafe {
+            if IsIconic(hwnd) != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            SetForegroundWindow(hwnd) != 0
+        }
     }
 
     pub fn picture(handle: isize, max_width: u32) -> Result<Picture, &'static str> {
@@ -192,6 +228,10 @@ mod grab {
     use super::Picture;
 
     pub fn minimized(_handle: isize) -> bool {
+        false
+    }
+
+    pub fn focus(_handle: isize) -> bool {
         false
     }
 

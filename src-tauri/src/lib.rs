@@ -17,6 +17,7 @@ mod commands;
 mod location;
 mod mainwindow;
 mod parsec;
+mod previews;
 mod scanner;
 mod settings;
 #[cfg(desktop)]
@@ -316,6 +317,12 @@ pub fn run() {
             commands::reset_app,
             bar::bar_action,
             bar::bar_state,
+            previews::preview_clients,
+            previews::preview_frame,
+            previews::preview_focus,
+            previews::open_previews,
+            previews::close_preview,
+            previews::close_previews,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

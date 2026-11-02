@@ -99,7 +99,7 @@
     <button class="tool" data-tool="multibox">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.2"/><rect x="13" y="4" width="8" height="7" rx="1.2"/>
         <rect x="3" y="13" width="8" height="7" rx="1.2"/><rect x="13" y="13" width="8" height="7" rx="1.2"/></svg>
-      <div><b>Multibox previews<em>SOON</em></b><span>Live thumbnails of every client, click to switch</span></div>
+      <div><b>Multibox previews<em>NEW</em></b><span>Live thumbnails of every client, click to switch</span></div>
     </button>
     <button class="tool" data-tool="settings">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
@@ -142,11 +142,21 @@
   // EVE client tools: placeholders for now (the app already sees every client's window).
   const SOON = {
     launch: "Launch groups are coming: pick characters once, start them together from here.",
-    multibox: "Multibox previews are coming: a live thumbnail of each client, click one to bring it to the front.",
     settings: "Client settings are coming: copy one character's EVE settings (windows, overview, keys) to the others.",
   };
+  const soon = document.getElementById("soon");
   document.querySelectorAll("button.tool").forEach(btn => {
-    btn.addEventListener("click", () => { document.getElementById("soon").textContent = SOON[btn.dataset.tool] || ""; });
+    btn.addEventListener("click", async () => {
+      if (btn.dataset.tool === "multibox") {
+        soon.textContent = "Opening a preview for each EVE client…";
+        try {
+          const n = await invoke("open_previews");
+          soon.textContent = n ? `${n} preview${n === 1 ? "" : "s"} open. Click one to bring that client to the front; drag its title to move it.` : "No EVE clients are open.";
+        } catch (e) { soon.textContent = String(e || "Couldn't open previews."); }
+        return;
+      }
+      soon.textContent = SOON[btn.dataset.tool] || "";
+    });
   });
 
   document.getElementById("upd").addEventListener("click", () => invoke("check_updates"));

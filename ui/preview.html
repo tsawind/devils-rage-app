@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EVE preview</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden;
+               font: 12px "Segoe UI", system-ui, sans-serif; color: #eee; user-select: none; cursor: pointer; }
+  #shot { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; -webkit-user-drag: none; }
+  #name { position: fixed; top: 0; left: 0; right: 0; padding: 3px 24px 6px 8px; font-weight: 600;
+          background: linear-gradient(#000c, #0000); text-shadow: 0 1px 2px #000;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: move; }
+  #msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+         text-align: center; padding: 16px; color: #c98a5a; }
+  /* A thin coloured frame so each client is easy to tell apart (colour set from the query). */
+  #frame { position: fixed; inset: 0; border: 2px solid var(--edge, #a8181f); pointer-events: none; box-sizing: border-box; }
+  #close { position: fixed; top: 2px; right: 4px; width: 18px; height: 18px; line-height: 16px; text-align: center;
+           border-radius: 4px; background: #0008; color: #ccc; opacity: 0; transition: opacity .1s; }
+  body:hover #close { opacity: 1; }
+  #close:hover { background: #a8181f; color: #fff; }
+</style>
+</head>
+<body>
+  <img id="shot" alt="">
+  <div id="name" data-tauri-drag-region>…</div>
+  <div id="frame"></div>
+  <div id="close" title="Close this preview">✕</div>
+  <div id="msg" hidden></div>
+
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const qs = new URLSearchParams(location.search);
+  const name = qs.get("name") || "";
+  const edge = qs.get("edge");
+  if (edge) document.documentElement.style.setProperty("--edge", edge);
+  document.getElementById("name").textContent = name;
+  document.title = name + " · preview";
+
+  const shot = document.getElementById("shot");
+  const msg = document.getElementById("msg");
+  let stopped = false, failures = 0;
+
+  async function tick() {
+    if (stopped) return;
+    try {
+      const url = await invoke("preview_frame", { name, width: Math.min(1280, Math.round(window.innerWidth * (window.devicePixelRatio || 1))) });
+      shot.src = url;
+      msg.hidden = true;
+      failures = 0;
+    } catch (e) {
+      failures++;
+      // Give a minimized/closed client a moment before nagging.
+      if (failures > 2) { msg.textContent = String(e || "no picture"); msg.hidden = false; }
+    }
+    setTimeout(tick, 500);
+  }
+  tick();
+
+  // Click anywhere (except close) brings the client to the front.
+  document.body.addEventListener("click", (e) => {
+    if (e.target.id === "close") return;
+    invoke("preview_focus", { name }).catch(() => {});
+  });
+  // Clicking the name bar (drag region) shouldn't also focus the client.
+  document.getElementById("name").addEventListener("click", (e) => e.stopPropagation());
+  document.getElementById("close").addEventListener("click", (e) => {
+    e.stopPropagation();
+    stopped = true;
+    invoke("close_preview").catch(() => {});
+  });
+</script>
+</body>
+</html>
