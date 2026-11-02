@@ -176,9 +176,15 @@ mod hotkeys {
         let Some((group_id, forward)) = hit else { return };
         let group: Option<Group> = load(app).groups.into_iter().find(|g| g.id == group_id);
         let Some(group) = group else { return };
-        let open: HashSet<String> = crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect();
-        if let Some(next) = crate::cycle::advance(&group_id, &group.members, &open, forward) {
-            crate::capture::focus_client(&next);
+        let logins = crate::clipboard::open_login_windows();
+        let order = crate::cycle::expand_login(&group.members, &logins);
+        let mut open: HashSet<String> = crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect();
+        open.extend(logins.iter().map(|h| format!("login:{h}")));
+        if let Some(next) = crate::cycle::advance(&group_id, &order, &open, forward) {
+            match crate::cycle::login_handle(&next) {
+                Some(handle) => crate::capture::focus_handle(handle),
+                None => crate::capture::focus_client(&next),
+            };
             log::info!("cycle {}: brought {next} forward", group.name);
         }
     }

@@ -284,10 +284,9 @@ pub fn open_eve_characters() -> Vec<String> {
     Vec::new()
 }
 
-/// Cameras: each EVE client's window handle with its character, so the share page can tell
-/// which client a shared window is (the browser names a shared window "window:<handle>:0").
+/// Every visible top-level window with a title: (title, handle).
 #[cfg(windows)]
-pub fn open_eve_windows() -> Vec<(String, isize)> {
+fn visible_titled_windows() -> Vec<(String, isize)> {
     use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
 
@@ -303,9 +302,7 @@ pub fn open_eve_windows() -> Vec<(String, isize)> {
             GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32)
         };
         if len > 0 {
-            if let Some(name) = eve_character_from_title(&String::from_utf16_lossy(&buf[..len as usize])) {
-                windows.push((name, hwnd as isize));
-            }
+            windows.push((String::from_utf16_lossy(&buf[..len as usize]), hwnd as isize));
         }
         1
     }
@@ -316,6 +313,33 @@ pub fn open_eve_windows() -> Vec<(String, isize)> {
         EnumWindows(Some(each), &mut windows as *mut Vec<(String, isize)> as LPARAM);
     }
     windows
+}
+
+/// Cameras: each EVE client's window handle with its character, so the share page can tell
+/// which client a shared window is (the browser names a shared window "window:<handle>:0").
+#[cfg(windows)]
+pub fn open_eve_windows() -> Vec<(String, isize)> {
+    visible_titled_windows()
+        .into_iter()
+        .filter_map(|(title, handle)| Some((eve_character_from_title(&title)?, handle)))
+        .collect()
+}
+
+/// EVE clients sitting at the character-select / login screen (their window is titled just "EVE").
+#[cfg(windows)]
+pub fn open_login_windows() -> Vec<isize> {
+    let mut handles: Vec<isize> = visible_titled_windows()
+        .into_iter()
+        .filter(|(title, _)| title.trim() == "EVE")
+        .map(|(_, handle)| handle)
+        .collect();
+    handles.sort_unstable();
+    handles
+}
+
+#[cfg(not(windows))]
+pub fn open_login_windows() -> Vec<isize> {
+    Vec::new()
 }
 
 #[cfg(not(windows))]

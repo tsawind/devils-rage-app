@@ -122,6 +122,11 @@ pub fn minimized_handle(handle: isize) -> bool {
 }
 
 /// Bring one EVE client to the front (clicking its preview). True if it was found.
+/// Bring a window forward by handle (a client still at the login screen has no character name).
+pub fn focus_handle(handle: isize) -> bool {
+    grab::focus(handle)
+}
+
 pub fn focus_client(name: &str) -> bool {
     match crate::clipboard::open_eve_windows().into_iter().find(|(open, _)| open == name) {
         Some((_, handle)) => grab::focus(handle),

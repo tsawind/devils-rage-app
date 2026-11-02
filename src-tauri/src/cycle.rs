@@ -6,6 +6,29 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
+/// A group member that stands for every client at the login / character-select screen
+/// (EVE-O Preview's "EVE" entry). Each one is cycled like a character.
+pub const LOGIN_SCREENS: &str = "Login screens";
+
+/// The cycle order with "Login screens" expanded into one entry per open login window
+/// ("login:<handle>", oldest handle first).
+pub fn expand_login(order: &[String], logins: &[isize]) -> Vec<String> {
+    let mut out = Vec::new();
+    for name in order {
+        if name == LOGIN_SCREENS {
+            out.extend(logins.iter().map(|h| format!("login:{h}")));
+        } else {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+/// The window handle in an expanded "login:<handle>" entry.
+pub fn login_handle(entry: &str) -> Option<isize> {
+    entry.strip_prefix("login:")?.parse().ok()
+}
+
 /// Where each group is in its cycle: group id -> the character last brought forward.
 static CURSOR: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
@@ -100,5 +123,14 @@ mod tests {
         assert_eq!(advance("g", &order, &open, true).as_deref(), Some("B"));
         assert_eq!(advance("g", &order, &open, false).as_deref(), Some("A"));
         forget("g");
+    }
+
+    #[test]
+    fn login_screens_expand_to_each_login_window() {
+        let order = list(&["A", LOGIN_SCREENS, "B"]);
+        assert_eq!(expand_login(&order, &[7, 9]), list(&["A", "login:7", "login:9", "B"]));
+        assert_eq!(expand_login(&order, &[]), list(&["A", "B"]));
+        assert_eq!(login_handle("login:9"), Some(9));
+        assert_eq!(login_handle("Tsawind"), None);
     }
 }

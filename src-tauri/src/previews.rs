@@ -488,12 +488,17 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
     // Same order whatever order the file's keys came in.
     out.spots.sort_by(|a, b| a.name.cmp(&b.name));
 
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
     for number in 1..=5u32 {
         let Some(order) = config.get(format!("CycleGroup{number}ClientsOrder")).and_then(|v| v.as_object()) else { continue };
         let mut ranked: Vec<(i64, usize, String)> = order
             .iter()
             .enumerate()
-            .filter_map(|(i, (title, rank))| Some((rank.as_i64().unwrap_or(i64::MAX), i, character_of(title)?)))
+            .filter_map(|(i, (title, rank))| {
+                // EVE-O's bare "EVE" entry = clients at the login / character-select screen.
+                let name = if title.trim() == "EVE" { crate::cycle::LOGIN_SCREENS.to_string() } else { character_of(title)? };
+                Some((rank.as_i64().unwrap_or(i64::MAX), i, name))
+            })
             .collect();
         ranked.sort();
         let mut members: Vec<String> = Vec::new();
@@ -505,12 +510,11 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
         if members.is_empty() {
             continue;
         }
-        out.groups.push(CycleGroup {
-            number,
-            forward: hotkey(config.get(format!("CycleGroup{number}ForwardHotkeys"))),
-            backward: hotkey(config.get(format!("CycleGroup{number}BackwardHotkeys"))),
-            members,
-        });
+        // A key can only drive one group; the lower-numbered group keeps it (EVE-O's order).
+        let mut claim = |key: Option<String>| key.filter(|k| claimed.insert(k.to_ascii_uppercase()));
+        let forward = claim(hotkey(config.get(format!("CycleGroup{number}ForwardHotkeys"))));
+        let backward = claim(hotkey(config.get(format!("CycleGroup{number}BackwardHotkeys"))));
+        out.groups.push(CycleGroup { number, forward, backward, members });
     }
     out
 }
@@ -605,9 +609,11 @@ mod tests {
                 Spot { name: "Tsawind".into(), x: 1211, y: 1368, w: 300, h: 160 },
             ]
         );
-        // Group 1 only had the junk "EVE" entry: skipped.
-        assert_eq!(import.groups.len(), 1);
-        let group = &import.groups[0];
+        // Group 1's bare "EVE" entry is the login screens, cycled with F15.
+        assert_eq!(import.groups.len(), 2);
+        assert_eq!(import.groups[0].members, vec![crate::cycle::LOGIN_SCREENS]);
+        assert_eq!(import.groups[0].forward.as_deref(), Some("F15"));
+        let group = &import.groups[1];
         assert_eq!(group.number, 3);
         assert_eq!(group.forward.as_deref(), Some("F13"));
         assert_eq!(group.backward, None);
