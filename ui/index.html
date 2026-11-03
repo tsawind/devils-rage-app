@@ -129,6 +129,14 @@
     <button id="pClose">Close previews</button>
     <label title="See-through-ness of every preview at once (each client's own opacity still applies)">All previews <input type="range" id="pOpacity" min="10" max="100" step="5" value="100"> <span id="pOpacityVal">100%</span></label>
     <label title="Open the previews by themselves when EVE clients start"><input type="checkbox" id="pAuto"> Open by themselves</label>
+    <label title="Hide the preview of the client you're looking at; the rest stay"><input type="checkbox" id="pHide"> Hide the one in front</label>
+    <label title="When you press Done in edit layout: spots and sizes round to this grid, and edges close to another preview line up with it">Snap <select id="pSnap"><option value="0">off</option><option value="5">5 px</option><option value="10">10 px</option><option value="20">20 px</option></select></label>
+  </div>
+  <div class="plinks">
+    <span class="soon" style="margin: 0">EVE windows:</span>
+    <button id="cwRemember" title="Remember where every logged-in client's window is and how big">Remember where they are</button>
+    <button id="cwPlace" title="Move every open client back to its remembered spot">Put them back</button>
+    <label title="Move a client to its spot when it starts or logs in"><input type="checkbox" id="cwAuto"> Put back by themselves</label>
     <button id="pImport" title="Bring in thumbnail spots and cycle groups (with their pedal hotkeys) from your EVE-O Preview settings file">Import EVE-O Preview settings…</button>
   </div>
   <p class="soon" id="soon"></p>
@@ -201,6 +209,15 @@
   const pAuto = document.getElementById("pAuto");
   invoke("preview_layout").then(l => { pAuto.checked = !l || l.auto_open !== false; }).catch(() => {});
   pAuto.addEventListener("change", () => invoke("set_previews_auto", { on: pAuto.checked }).catch(() => {}));
+  const pHide = document.getElementById("pHide"), pSnap = document.getElementById("pSnap"), cwAuto = document.getElementById("cwAuto");
+  invoke("preview_layout").then(l => { pHide.checked = !!(l && l.hide_active); pSnap.value = String(l && l.snap !== undefined ? l.snap : 10); }).catch(() => {});
+  pHide.addEventListener("change", () => invoke("set_previews_hide_active", { on: pHide.checked }).catch(() => {}));
+  pSnap.addEventListener("change", () => invoke("set_previews_snap", { grid: Number(pSnap.value) }).catch(() => {}));
+  invoke("client_windows_state").then(st => { cwAuto.checked = !!(st && st.auto); }).catch(() => {});
+  cwAuto.addEventListener("change", () => invoke("client_windows_auto", { on: cwAuto.checked }).catch(() => {}));
+  const cwSay = async (cmd) => { try { soon.textContent = await invoke(cmd); } catch (e) { soon.textContent = String(e); } };
+  document.getElementById("cwRemember").addEventListener("click", () => cwSay("client_windows_remember"));
+  document.getElementById("cwPlace").addEventListener("click", () => cwSay("client_windows_place"));
   pOpacity.addEventListener("input", () => {
     pOpacityVal.textContent = pOpacity.value + "%";
     invoke("set_previews_opacity", { opacity: Number(pOpacity.value) / 100 }).catch(() => {});

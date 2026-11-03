@@ -11,6 +11,7 @@ mod audiodetect;
 mod bar;
 mod capture;
 mod chatlog;
+mod clientwindows;
 mod clipboard;
 mod cycle;
 mod groupsetup;
@@ -26,6 +27,7 @@ mod profiles;
 mod scanner;
 mod seatsync;
 mod settings;
+mod tray;
 mod tuning;
 #[cfg(desktop)]
 mod updates;
@@ -367,6 +369,7 @@ pub fn run() {
             profiles::tuning_read,
             profiles::tuning_apply,
             groupsetup::group_setup_create,
+            groupsetup::group_setup_update,
             piscan::piscan_planets,
             piscan::piscan_cells,
             piscan::piscan_save,
@@ -377,6 +380,12 @@ pub fn run() {
             previews::active_client,
             previews::set_previews_opacity,
             previews::set_previews_auto,
+            previews::set_previews_hide_active,
+            previews::set_previews_snap,
+            clientwindows::client_windows_remember,
+            clientwindows::client_windows_place,
+            clientwindows::client_windows_auto,
+            clientwindows::client_windows_state,
             launch::open_launcher,
             launch::launcher_ready,
         ])
@@ -481,6 +490,9 @@ pub fn run() {
             #[cfg(desktop)]
             launch::register_cycle_hotkeys(&handle);
             previews::start_watch(handle.clone());
+            if let Err(err) = tray::build(&handle) {
+                log::warn!("tray icon: {err}");
+            }
             appconfig::start(handle.clone());
 
             // "Skip this screen" ticked: go straight to the chosen site (your last map).

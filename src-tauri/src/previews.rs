@@ -89,6 +89,17 @@ pub struct Layout {
     /// Patch 70: open the previews by themselves when EVE clients start.
     #[serde(default = "yes")]
     pub auto_open: bool,
+    /// Hide the preview of the client in front (you're looking at it already).
+    #[serde(default)]
+    pub hide_active: bool,
+    /// Snap grid in pixels when edit mode ends (0 = off): spots and sizes round to it, and
+    /// edges within a few pixels of another preview's line up with it.
+    #[serde(default = "ten")]
+    pub snap: u32,
+}
+
+fn ten() -> u32 {
+    10
 }
 
 impl Default for Layout {
@@ -98,6 +109,8 @@ impl Default for Layout {
             clients: BTreeMap::new(),
             opacity: 1.0,
             auto_open: true,
+            hide_active: false,
+            snap: 10,
         }
     }
 }
@@ -352,6 +365,9 @@ pub fn set_preview_edit(app: AppHandle, on: bool) -> Result<(), String> {
         // Make sure every open client has a preview to arrange.
         let _ = open_previews(app.clone());
     }
+    if !on {
+        snap_all(&app);
+    }
     for (label, window) in app.webview_windows() {
         if !label.starts_with(PREFIX) {
             continue;
@@ -401,6 +417,78 @@ pub fn set_preview_client(
 }
 
 /// Patch 70: open previews by themselves when EVE clients start (Home's switch).
+/// On / off: hide the preview of the client in front.
+#[tauri::command]
+pub fn set_previews_hide_active(app: AppHandle, on: bool) {
+    with_layout(&app, |layout| layout.hide_active = on);
+    save_soon(&app);
+    if !on {
+        let windows: Vec<WebviewWindow> = app.webview_windows().into_iter().filter(|(l, _)| l.starts_with(PREFIX)).map(|(_, w)| w).collect();
+        let _ = app.run_on_main_thread(move || {
+            for window in windows {
+                let _ = window.show();
+            }
+        });
+    } else {
+        push_active(&app, crate::clipboard::foreground_client().as_deref());
+    }
+}
+
+/// The snap grid in pixels (0 = off).
+#[tauri::command]
+pub fn set_previews_snap(app: AppHandle, grid: u32) {
+    with_layout(&app, |layout| layout.snap = grid.min(100));
+    save_soon(&app);
+}
+
+/// One rectangle snapped: round to the grid, then edges within `pull` px of another
+/// rectangle's edge line up with it (side by side or flush).
+pub fn snap_rect(rect: (i32, i32, i32, i32), others: &[(i32, i32, i32, i32)], grid: i32, pull: i32) -> (i32, i32, i32, i32) {
+    let round = |v: i32| if grid > 1 { ((v as f64 / grid as f64).round() as i32) * grid } else { v };
+    let (mut x, mut y, mut w, mut h) = (round(rect.0), round(rect.1), round(rect.2).max(MIN_SIZE.0 as i32), round(rect.3).max(MIN_SIZE.1 as i32));
+    for &(ox, oy, ow, oh) in others {
+        for target in [ox, ox + ow] {
+            if (x - target).abs() <= pull {
+                x = target;
+            } else if (x + w - target).abs() <= pull {
+                x = target - w;
+            }
+        }
+        for target in [oy, oy + oh] {
+            if (y - target).abs() <= pull {
+                y = target;
+            } else if (y + h - target).abs() <= pull {
+                y = target - h;
+            }
+        }
+    }
+    (x, y, w, h)
+}
+
+fn snap_all(app: &AppHandle) {
+    let grid = with_layout(app, |layout| layout.snap) as i32;
+    if grid == 0 {
+        return;
+    }
+    let windows: Vec<(String, WebviewWindow)> = app.webview_windows().into_iter().filter(|(l, _)| l.starts_with(PREFIX)).filter_map(|(_, w)| name_of_window(&w).map(|n| (n, w))).collect();
+    let mut placed: Vec<(i32, i32, i32, i32)> = Vec::new();
+    for (name, window) in windows {
+        let (Ok(pos), Ok(size)) = (window.outer_position(), window.inner_size()) else { continue };
+        let (x, y, w, h) = snap_rect((pos.x, pos.y, size.width as i32, size.height as i32), &placed, grid, 12);
+        placed.push((x, y, w, h));
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+        let _ = window.set_size(PhysicalSize::new(w as u32, h as u32));
+        with_layout(app, |layout| {
+            let prefs = layout.clients.entry(name).or_default();
+            prefs.x = Some(x);
+            prefs.y = Some(y);
+            prefs.w = Some(w as u32);
+            prefs.h = Some(h as u32);
+        });
+    }
+    save_soon(app);
+}
+
 #[tauri::command]
 pub fn set_previews_auto(app: AppHandle, on: bool) {
     with_layout(&app, |layout| layout.auto_open = on);
@@ -459,8 +547,17 @@ pub fn start_watch(app: AppHandle) {
             last_open = open.clone();
             // Every 2 s: new clients get their previews.
             if tick % 25 == 0 {
-                let fresh = open.iter().any(|name| !known.contains(name));
+                let new_names: Vec<String> = open.iter().filter(|name| !known.contains(*name)).cloned().collect();
+                let fresh = !new_names.is_empty();
                 known = open;
+                if fresh {
+                    let app = app.clone();
+                    // A new client (or one that just logged in) goes to its remembered spot.
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        crate::clientwindows::on_new_clients(&app, &new_names);
+                    });
+                }
                 if fresh
                     && !AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed)
                     && with_layout(&app, |layout| layout.auto_open)
@@ -477,9 +574,21 @@ pub fn start_watch(app: AppHandle) {
     });
 }
 
-/// Tell every preview which client is in front now.
+/// Tell every preview which client is in front now (and, with "hide the one in front", hide
+/// that client's preview and bring the others back).
 pub fn push_active(app: &AppHandle, name: Option<&str>) {
     let arg = serde_json::to_string(&name).unwrap_or_else(|_| "null".into());
+    let (hide, edit) = with_layout(app, |layout| (layout.hide_active, layout.edit));
+    if hide && !edit {
+        let front = name.map(str::to_string);
+        let windows: Vec<WebviewWindow> = app.webview_windows().into_iter().filter(|(l, _)| l.starts_with(PREFIX)).map(|(_, w)| w).collect();
+        let _ = app.run_on_main_thread(move || {
+            for window in windows {
+                let is_front = front.is_some() && name_of_window(&window) == front;
+                let _ = if is_front { window.hide() } else { window.show() };
+            }
+        });
+    }
     for (label, window) in app.webview_windows() {
         if label.starts_with(PREFIX) {
             let _ = window.eval(format!(
@@ -959,5 +1068,26 @@ mod tests {
         assert_eq!(pair("-7,0"), Some((-7, 0)));
         assert_eq!(pair("nope"), None);
         assert_eq!(pair("1,2,3"), None);
+    }
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::snap_rect;
+
+    #[test]
+    fn rounds_to_the_grid() {
+        assert_eq!(snap_rect((13, 27, 318, 203), &[], 10, 12), (10, 30, 320, 200));
+    }
+
+    #[test]
+    fn lines_up_with_a_neighbour() {
+        // Right next to one at x 0..320: its left edge pulls flush to 320.
+        assert_eq!(snap_rect((326, 4, 320, 200), &[(0, 0, 320, 200)], 1, 12), (320, 0, 320, 200));
+    }
+
+    #[test]
+    fn grid_off_leaves_it() {
+        assert_eq!(snap_rect((13, 27, 318, 203), &[], 0, 0), (13, 27, 318, 203));
     }
 }

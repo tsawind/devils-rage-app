@@ -106,6 +106,8 @@
 
     <div class="step"><div class="n">6</div><div>
       <button class="btn red" id="create" disabled>Create the group</button>
+      <button class="btn" id="cancelEdit" hidden>Stop editing</button>
+      <div class="muted small" id="editNote" hidden style="font-size: 12px; margin-top: 6px">Editing keeps everything the clients saved in this group's folder (windows, overview, modules). Characters you add get settings as step 3 says; characters you untick leave the folder. Only the sound &amp; graphics settings ticked in step 4 are written; untick them all to leave those alone. Close the EVE clients first.</div>
       <div class="status" id="status"></div>
     </div></div>
   </div>
@@ -124,6 +126,7 @@
   const PRESETS = [...window.DR_PRESETS, { id: "keep", name: "Keep the baseline's sound & graphics", why: "Copies them as they are; nothing changed.", values: {}, prefs: {} }];
 
   let accounts = [], pick = {}, keys = { forward: null, backward: null };
+  let editing = null; // { profile, name } while changing a group made here
   let levers = [], prefsList = [], values = {}, prefs = {};
   function usePreset(id) {
     const p = PRESETS.find(x => x.id === id) || PRESETS[0];
@@ -205,6 +208,9 @@
     const f = folder($("name").value);
     $("folderHint").textContent = f ? `→ client profile “${f}” (settings_${f})` : "";
     $("create").disabled = !f || !ids.length;
+    $("create").textContent = editing ? `Update “${editing.name}”` : "Create the group";
+    $("cancelEdit").hidden = !editing;
+    $("name").disabled = !!editing;
   }
 
   function keyButton(label, onSet) {
@@ -236,6 +242,9 @@
     made.forEach(m => {
       const row = el("div", "made");
       row.append(el("b", null, m.name), el("span", "muted", `client profile “${m.profile}” · ${m.characters.length} characters`), el("span", "grow"));
+      const edit = el("button", "btn small", "Edit");
+      edit.addEventListener("click", () => startEdit(m));
+      row.append(edit);
       const del = el("button", "btn small", "Delete");
       del.addEventListener("click", async () => {
         if (!confirm(`Delete “${m.name}”? It leaves Your accounts, and its profile folder is moved aside (not deleted). Your other profiles aren't touched.`)) return;
@@ -270,7 +279,37 @@
     box.scrollIntoView({ behavior: "smooth" });
   }
 
+  async function startEdit(m) {
+    editing = { profile: m.profile, name: m.name };
+    $("name").value = m.name;
+    pick = {};
+    m.characters.forEach((id) => { const a = accounts.find((x) => x.characters.some((c) => c.id === id)); if (a) pick[a.nickname] = id; });
+    // Start from what the group's profile has now, with nothing ticked (so nothing is changed unless you tick it).
+    const t = await invoke("tuning_read").catch(() => null);
+    const now = t && t.profiles && t.profiles[m.profile];
+    $("preset").value = "keep"; usePreset("keep");
+    if (now && now.values) { $("presetWhy").textContent = "Showing nothing ticked: pick a preset or tick settings to change them in this group."; }
+    $("editNote").hidden = false;
+    status(`Editing “${m.name}” (client profile ${m.profile}).`);
+    render();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  $("cancelEdit").addEventListener("click", () => { editing = null; $("editNote").hidden = true; $("name").value = ""; pick = {}; usePreset("alt"); $("preset").value = "alt"; status(""); render(); });
+
   $("create").addEventListener("click", async () => {
+    if (editing) {
+      const setup = {
+        name: editing.name, character_ids: picked(), baseline_id: Number($("baseline").value),
+        characters_from: document.querySelector("input[name=chars]:checked").value,
+        values, prefs, forward_hotkey: keys.forward, backward_hotkey: keys.backward, login_screens: $("logins").checked,
+      };
+      $("create").disabled = true;
+      status("Updating the group…");
+      try { status(await invoke("group_setup_update", { profile: editing.profile, setup }), "ok"); editing = null; $("editNote").hidden = true; loadMade(); }
+      catch (e) { status(String(e), "bad"); }
+      render();
+      return;
+    }
     const name = $("name").value.trim();
     const setup = {
       name, character_ids: picked(), baseline_id: Number($("baseline").value),

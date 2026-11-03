@@ -190,6 +190,119 @@ async fn save_seat_group(app: &AppHandle, name: &str, ids: &[u64]) -> Result<u64
     body["id"].as_u64().ok_or_else(|| "SeAT didn't say which group it made".to_string())
 }
 
+/// Change a group made here, in place: characters added get their settings (their own or the
+/// baseline's), characters taken out leave the folder, the sound & graphics you ticked are
+/// written, and Your accounts gets the new member list. Everything a client saved in the folder
+/// since (window layouts while playing) is kept. A copy of the folder is put aside first.
+#[tauri::command]
+pub async fn group_setup_update(app: AppHandle, profile: String, setup: NewGroup) -> Result<String, String> {
+    if !crate::profiles::safe_name(&profile) {
+        return Err("not a profile".into());
+    }
+    let root = crate::profiles::root()?;
+    let dir = root.join(format!("settings_{profile}"));
+    let mut marker: Marker = std::fs::read_to_string(dir.join(MARKER)).ok().and_then(|t| serde_json::from_str(&t).ok()).ok_or("Only groups made on this page can be changed here.")?;
+    if setup.character_ids.is_empty() {
+        return Err("Pick at least one character.".into());
+    }
+    if crate::profiles::clients_open() > 0 {
+        return Err("Close the EVE clients first: a running client writes its settings back when it closes.".into());
+    }
+    let seat = crate::launch::fetch_seat(&app).await?;
+    crate::launch::store_seat(&app, &seat)?;
+    let account_of = |id: u64| seat.accounts.iter().find(|a| a.characters.iter().any(|c| c.id == id));
+    let mut per_account: BTreeMap<String, u64> = BTreeMap::new();
+    for id in &setup.character_ids {
+        let account = account_of(*id).ok_or_else(|| format!("Character {id} isn't in Your accounts."))?;
+        if per_account.insert(account.nickname.clone(), *id).is_some() {
+            return Err(format!("Account {} has two characters picked: the launcher starts one character per account.", account.nickname));
+        }
+    }
+    let profile_dir = |id: u64| -> Option<PathBuf> {
+        let p = account_of(id)?.profile.clone()?;
+        let d = root.join(format!("settings_{p}"));
+        d.is_dir().then_some(d)
+    };
+
+    // A copy first (small: a few character files).
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let backup = root.join(format!("Devils Rage before edit settings_{profile} {stamp}"));
+    std::fs::create_dir_all(&backup).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            copy(&entry.path(), &backup.join(entry.file_name()))?;
+        }
+    }
+
+    let present: Vec<u64> = crate::profiles::entries_in(&dir, settings_file).into_iter().filter(|e| e.kind == Kind::Char).map(|e| e.id).collect();
+    // Where an added character's settings come from: the baseline's copy in this group if the
+    // baseline is already here (that's the one tuned while playing), else its own profile.
+    let base_char = if present.contains(&setup.baseline_id) {
+        Some(dir.join(format!("core_char_{}.dat", setup.baseline_id)))
+    } else {
+        profile_dir(setup.baseline_id).map(|d| d.join(format!("core_char_{}.dat", setup.baseline_id))).filter(|p| p.is_file())
+    };
+    let base_user = newest_user(&dir).map(|(p, _)| p).or_else(|| profile_dir(setup.baseline_id).as_deref().and_then(newest_user).map(|(p, _)| p));
+    let (mut added, mut removed) = (0usize, 0usize);
+    for id in &setup.character_ids {
+        if present.contains(id) {
+            continue;
+        }
+        let own = profile_dir(*id);
+        let own_char = own.as_ref().map(|d| d.join(format!("core_char_{id}.dat"))).filter(|p| p.is_file());
+        let from = match setup.characters_from.as_str() {
+            "own" => own_char.or_else(|| base_char.clone()),
+            _ => base_char.clone().or(own_char),
+        }
+        .ok_or_else(|| format!("No settings to start character {id} from: log it in once, then try again."))?;
+        copy(&from, &dir.join(format!("core_char_{id}.dat")))?;
+        if let Some((_, user_id)) = own.as_deref().and_then(newest_user) {
+            let target = dir.join(format!("core_user_{user_id}.dat"));
+            if !target.is_file() {
+                let from_user = if setup.characters_from == "own" { own.as_deref().and_then(newest_user).map(|(p, _)| p) } else { base_user.clone() };
+                if let Some(from_user) = from_user {
+                    copy(&from_user, &target)?;
+                }
+            }
+        }
+        added += 1;
+    }
+    for id in &present {
+        if !setup.character_ids.contains(id) {
+            let _ = std::fs::remove_file(dir.join(format!("core_char_{id}.dat")));
+            removed += 1;
+        }
+    }
+    if !setup.values.is_empty() || !setup.prefs.is_empty() {
+        crate::tuning::apply_to(&dir, &setup.values, &setup.prefs, crate::tuning::file_time_now())?;
+    }
+
+    let group_id = save_seat_group(&app, &marker.name, &setup.character_ids).await?;
+    marker.group_id = Some(group_id);
+    std::fs::write(dir.join(MARKER), serde_json::to_string(&marker).unwrap_or_default()).map_err(|e| e.to_string())?;
+    let old = crate::launch::seat_group_prefs(&app, group_id);
+    crate::launch::save_seat_group_prefs(
+        app.clone(),
+        group_id,
+        crate::launch::GroupPrefs {
+            forward_hotkey: setup.forward_hotkey.or(old.forward_hotkey),
+            backward_hotkey: setup.backward_hotkey.or(old.backward_hotkey),
+            skipped: old.skipped,
+            login_screens: setup.login_screens,
+        },
+    )?;
+    let _ = crate::launch::seat_refresh(app.clone()).await;
+    let new_accounts: Vec<String> = per_account.keys().cloned().collect();
+    Ok(format!(
+        "Updated “{}”: {added} added, {removed} taken out, {} kept as they were{}. A copy of the folder before is in “{}”.{}",
+        marker.name,
+        setup.character_ids.len() - added,
+        if setup.values.is_empty() && setup.prefs.is_empty() { "" } else { "; sound & graphics written" },
+        backup.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+        if added > 0 || removed > 0 { format!(" In the EVE launcher, make the group's accounts match: {}.", new_accounts.join(", ")) } else { String::new() }
+    ))
+}
+
 /// The groups this page made (folders with the note), newest first.
 #[tauri::command]
 pub fn group_setups() -> Result<Vec<serde_json::Value>, String> {

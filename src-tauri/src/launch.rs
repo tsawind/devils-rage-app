@@ -189,6 +189,11 @@ fn load_prefs(app: &AppHandle) -> SeatPrefs {
     config_file(app, "seat-group-prefs.json").and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
+/// This PC's pedal keys and switches for one SeAT group (defaults when none saved).
+pub(crate) fn seat_group_prefs(app: &AppHandle, id: u64) -> GroupPrefs {
+    load_prefs(app).groups.remove(&id.to_string()).unwrap_or_default()
+}
+
 /// The Your accounts page handed us fresh groups (seatsync.rs).
 pub fn store_seat(app: &AppHandle, data: &SeatData) -> Result<(), String> {
     write_json(config_file(app, "seat-groups.json").ok_or("no config folder")?, data)?;
