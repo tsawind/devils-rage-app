@@ -434,7 +434,7 @@
   }
 
   // ---- painting ----
-  function newMap() { return { sum: new Float32Array(GRID_W * GRID_H), weight: new Float32Array(GRID_W * GRID_H) }; }
+  function newMap() { return { sum: new Float32Array(GRID_W * GRID_H), weight: new Float32Array(GRID_W * GRID_H), best: new Float32Array(GRID_W * GRID_H) }; }
 
   /** Paint one picture onto a resource's map: every disc pixel facing the camera well enough. */
   // EVE's scan colour band (sampled from the Scan panel), low → high, and how it's laid over
@@ -467,7 +467,7 @@
   }
 
   /** The bare planet's colours (EVE on "No filter"), one cell per degree, for unmixing. */
-  function newBare() { return { rgb: new Float32Array(GRID_W * GRID_H * 3), weight: new Float32Array(GRID_W * GRID_H) }; }
+  function newBare() { return { rgb: new Float32Array(GRID_W * GRID_H * 3), weight: new Float32Array(GRID_W * GRID_H), best: new Float32Array(GRID_W * GRID_H) }; }
   function bareCoverage(bare) { return coverage({ weight: bare.weight }); }
   function bareToBytes(bare) {
     const out = new Uint8Array(GRID_W * GRID_H * 3);
@@ -478,7 +478,7 @@
     const bare = newBare();
     for (let i = 0; i < GRID_W * GRID_H; i++) {
       if (!bytes[i * 3] && !bytes[i * 3 + 1] && !bytes[i * 3 + 2]) continue;
-      bare.weight[i] = 1;
+      bare.weight[i] = 1; bare.best[i] = 1; // a saved map is settled; only "Record bare map again" redoes it
       for (let c = 0; c < 3; c++) bare.rgb[i * 3 + c] = bytes[i * 3 + c];
     }
     return bare;
@@ -491,8 +491,10 @@
    */
   function paint(map, rgba, width, height, disc, Q, mirrored, every, bare) {
     const Qt = transpose(Q), step = every || 2;
-    let painted = 0;
     const recording = bare === "record";
+    if (!map.best) map.best = new Float32Array(map.weight.length);
+    // This picture's own look at each cell (its colour or level, and how face-on it was).
+    const look = new Map();
     const y0 = Math.max(0, Math.floor(disc.cy - disc.r)), y1 = Math.min(height - 1, Math.ceil(disc.cy + disc.r));
     const x0 = Math.max(0, Math.floor(disc.cx - disc.r)), x1 = Math.min(width - 1, Math.ceil(disc.cx + disc.r));
     for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) {
@@ -502,23 +504,35 @@
       if (square < 0.35) continue; // near the edge the picture is too squashed to trust
       const { lat, lon } = latLon(apply(Qt, v), mirrored);
       const row = Math.min(GRID_H - 1, Math.floor(lat / Math.PI * GRID_H)), col = Math.min(GRID_W - 1, Math.floor(lon / (2 * Math.PI) * GRID_W));
-      const cell = row * GRID_W + col, k = (y * width + x) * 4, w = square * square;
+      const cell = row * GRID_W + col, k = (y * width + x) * 4;
+      let level = 0;
+      if (!recording) {
+        if (bare && bare.weight[cell] > 0) {
+          const bw = bare.weight[cell];
+          level = unmix(rgba[k], rgba[k + 1], rgba[k + 2], bare.rgb[cell * 3] / bw, bare.rgb[cell * 3 + 1] / bw, bare.rgb[cell * 3 + 2] / bw);
+          if (level === null) continue;
+        } else {
+          level = heat(rgba[k], rgba[k + 1], rgba[k + 2]);
+        }
+      }
+      let l = look.get(cell);
+      if (!l) look.set(cell, l = { r: 0, g: 0, b: 0, level: 0, n: 0, square: 0 });
+      l.r += rgba[k]; l.g += rgba[k + 1]; l.b += rgba[k + 2]; l.level += level; l.n++;
+      l.square = Math.max(l.square, square);
+    }
+    // Each cell keeps the most face-on look it has had, and nothing else: once a spot has been
+    // seen near the middle of the disc it's settled, and more turning (or another character,
+    // other light, moving lava) leaves it alone. Only a clearly better look replaces it.
+    let painted = 0;
+    for (const [cell, l] of look) {
+      if (l.square <= map.best[cell] + 0.02) continue;
+      map.best[cell] = l.square;
       if (recording) {
-        map.rgb[cell * 3] += rgba[k] * w; map.rgb[cell * 3 + 1] += rgba[k + 1] * w; map.rgb[cell * 3 + 2] += rgba[k + 2] * w;
-        map.weight[cell] += w;
-        painted++;
-        continue;
-      }
-      let level;
-      if (bare && bare.weight[cell] > 0) {
-        const bw = bare.weight[cell];
-        level = unmix(rgba[k], rgba[k + 1], rgba[k + 2], bare.rgb[cell * 3] / bw, bare.rgb[cell * 3 + 1] / bw, bare.rgb[cell * 3 + 2] / bw);
-        if (level === null) continue;
+        map.rgb[cell * 3] = l.r / l.n; map.rgb[cell * 3 + 1] = l.g / l.n; map.rgb[cell * 3 + 2] = l.b / l.n;
       } else {
-        level = heat(rgba[k], rgba[k + 1], rgba[k + 2]);
+        map.sum[cell] = l.level / l.n;
       }
-      map.sum[cell] += level * w;
-      map.weight[cell] += w;
+      map.weight[cell] = 1;
       painted++;
     }
     return painted;

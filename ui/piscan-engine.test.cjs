@@ -202,5 +202,25 @@ check("picture ↔ planet round trip (close camera)", rt && Math.abs(rt[0] - 0.3
   check("glowing lava is skipped", E.unmix(250, 230, 120, 250, 220, 100) === null);
 }
 
+// A map is settled once seen: more turning, other light or another character changes nothing.
+{
+  const solid = (v) => { const a = new Uint8ClampedArray(W * H * 4); for (let i = 0; i < a.length; i += 4) { a[i] = v; a[i + 1] = v; a[i + 2] = v; a[i + 3] = 255; } return a; };
+  const b = E.newBare();
+  E.paint(b, solid(100), W, H, disc, Q, false, 3, "record");
+  const first = E.bareToBytes(b);
+  E.paint(b, solid(180), W, H, disc, Q, false, 3, "record"); // same view, brighter light
+  const again = E.bareToBytes(b);
+  check("the same view again (other light) leaves the bare map alone", first.every((x, i) => x === again[i]));
+  const turned = E.mul(E.rotationAbout([0, 1, 0], 0.5), Q);
+  E.paint(b, solid(180), W, H, disc, turned, false, 3, "record");
+  const after = E.bareToBytes(b);
+  const centre = (() => { const v = E.apply(E.transpose(Q), [0, 0, 1]); const ll = E.latLon(v, false); return Math.floor(ll.lat / Math.PI * 180) * 360 + Math.floor(ll.lon / (2 * Math.PI) * 360); })();
+  check("a spot seen face-on keeps its look after turning", after[centre * 3] === 100);
+  check("turning still fills in what wasn't seen", E.bareCoverage(b) > 0 && after.some((x, i) => i % 3 === 0 && x === 180 && first[i] === 0));
+  const saved = E.bareFromBytes(first);
+  E.paint(saved, solid(30), W, H, disc, Q, false, 3, "record");
+  check("a saved bare map isn't repainted", E.bareToBytes(saved).every((x, i) => x === first[i]));
+}
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);
