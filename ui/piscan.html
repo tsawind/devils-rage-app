@@ -98,7 +98,7 @@
       <div class="step"><div class="n">5</div><div>
         <h3>Save for the corp</h3>
         <div class="muted small">Adds to what the corp already has for this planet and resource (the Corp map tab on the PI screen shows it, with the best places to put two extractors).</div>
-        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button> <button class="btn" id="wipe" hidden title="Delete every scan the corp has of this planet (made with older versions that slid while scanning)">Delete this planet's old scans</button></div>
+        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button> <button class="btn" id="rebare" title="Throw away the bare planet map on this PC and record it again">Record bare map again</button> <button class="btn" id="wipe" hidden title="Delete every scan the corp has of this planet (made with older versions that slid while scanning)">Delete this planet's old scans</button></div>
         <div class="status" id="saveStatus"></div>
       </div></div>
     </div>
@@ -140,7 +140,7 @@
   let lastStep = null, keys = [], lost = null, keyTry = 0;
   // The bare map as the reference every picture is placed on (refreshed while it's still being recorded).
   const DEG = Math.PI / 180;
-  let refCache = null, refAt = 0, lastFind = 0;
+  let refCache = null, refAt = 0, lastFind = 0, mapMisses = 0;
   function mapRef() {
     if (!bare || E.bareCoverage(bare) < 0.15) return null;
     const recording = $("resource").value === BARE;
@@ -148,6 +148,16 @@
       refCache = { bare, fine: E.bareGrey(bare), coarse: E.bareGrey(bare, true) }; refAt = Date.now();
     }
     return refCache;
+  }
+  /** A lock you just made beats a saved map: if the map doesn't match this view, clear it. */
+  function checkMapAgainstLock() {
+    const ref = mapRef();
+    if (!ref || !frame || !facing) return;
+    const near = E.alignToMap(E.samplePoints(frame.data.data, frame.w, frame.h, disc, 600), ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
+    if (near && near.score < 0.5) {
+      forgetBare();
+      say("scanStatus", "Your saved bare map didn't match this lock (recorded under an older one), so it was cleared: record the bare planet again.", "warn");
+    }
   }
   function forgetTrack() { prevGrey = null; lastStep = null; keys = []; lost = null; lostRun = 0; }
   const BARE = "__bare";
@@ -191,7 +201,7 @@
   const currentPlanet = () => planets.find((p) => String(p.planet_id) === $("planet").value) || null;
   // The bare planet's colours, kept on this PC per planet (only the scanner needs them).
   // v2: maps from before every picture was placed on the map slid while recording; not reused.
-  const bareKey = (p) => "piscan-bare2-" + p.planet_id;
+  const bareKey = (p) => "piscan-bare3-" + p.planet_id;
   let bareMirrored = false;
   function loadBare(p) {
     if (!p) return null;
@@ -469,7 +479,7 @@
     if (anchors.length === 1) return lockFromOne(groups);
     const solved = E.solveMatching(anchors.map((a) => ({ px: a.px, py: a.py, candidates: groups.get(a.kind) || [] })), disc);
     if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
-    facing = solved; forgetTrack(); frozen = false;
+    facing = solved; forgetTrack(); frozen = false; mapMisses = 0;
     disc = { ...disc, D: solved.D };
     const byKey = new Map(anchorList().map((a) => [a.key, a]));
     facing.owners = [...new Set(solved.matched.map((k) => byKey.get(k)?.owner).filter(Boolean))];
@@ -484,6 +494,7 @@
       return say("lockStatus", `Those buildings are too close together to tell which way the planet faces (${(solved.spread * 180 / Math.PI).toFixed(0)}° apart). Add some far away: "Any command center" on other colonies works well.`, "bad");
     }
     if (anchors.length >= 3) savePole({ up: E.northUp(solved.Q), mirrored: solved.mirrored });
+    checkMapAgainstLock();
     say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings.` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
     updateButtons(); drawShot();
   });
@@ -508,7 +519,8 @@
     disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
     facing = { Q, mirrored: way.mirrored, misses: [], owners: [items[0].owner].filter(Boolean), one: { groups, way } };
     focal = disc.r * Math.sqrt(disc.D * disc.D - 1);
-    forgetTrack(); frozen = false; say("autoStatus", "");
+    forgetTrack(); frozen = false; say("autoStatus", ""); mapMisses = 0;
+    checkMapAgainstLock();
     say("lockStatus", "Locked on from one building. With your network showing in EVE, the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
     updateButtons(); drawShot();
   }
@@ -643,8 +655,16 @@
           if (ref) {
             const pts = E.samplePoints(f.data.data, f.w, f.h, disc, 600);
             const near = E.alignToMap(pts, ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
-            if (near && near.score >= 0.55) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; }
-            else if (near || !tracked) {
+            if (near && near.score >= 0.55) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; mapMisses = 0; }
+            else if (near && tracked) {
+              // Tracking is fine but the saved map disagrees: the map is what's wrong (recorded
+              // under an older, wrong lock). Never jump to it; after a few such pictures, drop it.
+              if (++mapMisses > 6) {
+                forgetBare(); mapMisses = 0;
+                say("lockStatus", "The saved bare map didn't fit your lock (it was recorded before), so it was cleared: record the bare planet again.", "warn");
+              }
+            }
+            else if (!tracked) {
               ok = false;
               if (Date.now() - lastFind > 300) {
                 lastFind = Date.now();
@@ -698,6 +718,7 @@
     } catch (e) { say("saveStatus", String(e), "bad"); }
   });
 
+  $("rebare").addEventListener("click", () => { forgetBare(); $("resource").options[0].text = "Bare planet (EVE on No filter)"; updateButtons(); say("saveStatus", "Bare map cleared: pick Bare planet, press Scan and turn it all the way round.", "ok"); });
   $("wipe").addEventListener("click", async () => {
     const p = currentPlanet();
     if (!p || !(p.scans || []).length) return;
