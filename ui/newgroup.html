@@ -44,7 +44,8 @@
   .status { min-height: 1.4em; margin-top: 8px; color: var(--muted); }
   .status.ok { color: var(--ok); } .status.bad { color: #f08a8a; }
   .done { border-color: #3c5a1a; }
-  .done ol { margin: 6px 0 0 18px; padding: 0; }
+  .done ol { margin: 6px 0 0 22px; padding: 0; }
+  .done li::marker { color: var(--red-hi); font-weight: 700; }
   .done li { margin: 4px 0; }
   .done code { background: #0d0d10; border: 1px solid var(--line); border-radius: 5px; padding: 0 6px; color: var(--ok); }
   .made { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid #23232a; }
@@ -92,6 +93,9 @@
       <h3>Sound &amp; graphics</h3>
       <select id="preset"></select>
       <div class="muted" id="presetWhy" style="font-size: 12px; margin-top: 4px"></div>
+      <details id="fine" style="margin-top: 8px"><summary style="cursor: pointer" class="muted">Fine-tune: every setting the preset sets, and more</summary>
+        <table id="levers" style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px"></table>
+      </details>
     </div></div>
 
     <div class="step"><div class="n">5</div><div>
@@ -120,6 +124,51 @@
   const PRESETS = [...window.DR_PRESETS, { id: "keep", name: "Keep the baseline's sound & graphics", why: "Copies them as they are; nothing changed.", values: {}, prefs: {} }];
 
   let accounts = [], pick = {}, keys = { forward: null, backward: null };
+  let levers = [], prefsList = [], values = {}, prefs = {};
+  function usePreset(id) {
+    const p = PRESETS.find(x => x.id === id) || PRESETS[0];
+    values = { ...p.values }; prefs = { ...p.prefs };
+    $("presetWhy").textContent = p.why || "";
+    renderLevers();
+  }
+  function renderLevers() {
+    const t = $("levers"); if (!t) return; t.innerHTML = "";
+    const section = (title) => { const tr = el("tr"); const td = el("td", null, title); td.colSpan = 3; td.style.cssText = "color: var(--warn); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; padding-top: 10px"; tr.append(td); t.append(tr); };
+    const row = (label, on, onToggle, control) => {
+      const tr = el("tr"); tr.style.borderTop = "1px solid #23232a"; if (!on) tr.style.opacity = ".5";
+      const c = el("td"); const box = el("input"); box.type = "checkbox"; box.checked = on; box.addEventListener("change", () => onToggle(box.checked)); c.append(box);
+      const v = el("td"); v.append(control); v.style.whiteSpace = "nowrap";
+      tr.append(c, el("td", null, label), v); t.append(tr);
+    };
+    const control = (l) => {
+      const cur = values[l.key];
+      if (l.kind === "volume" || l.kind === "scale") {
+        const w = el("span"); const r = el("input"); r.type = "range"; r.min = l.kind === "volume" ? 0 : 0.5; r.max = l.kind === "volume" ? 1 : 2; r.step = 0.05; r.style.width = "130px";
+        r.value = cur ?? (l.kind === "volume" ? 0.5 : 1);
+        const o = el("span", "muted"); const show = () => { o.textContent = " " + (l.kind === "volume" ? Math.round(r.value * 100) + "%" : Number(r.value).toFixed(2)); }; show();
+        r.addEventListener("input", show); r.addEventListener("change", () => { values[l.key] = Number(r.value); renderLevers(); });
+        w.append(r, o); return w;
+      }
+      const s = el("select");
+      const opts = l.kind === "switch" ? [[0, "off"], [1, "on"]] : l.kind === "bool" ? [[false, "off"], [true, "on"]] : [[0, "0"], [1, "1"], [2, "2"], [3, "3"]];
+      opts.forEach(([v, lab]) => s.append(new Option(lab, JSON.stringify(v))));
+      s.value = JSON.stringify(cur ?? opts[0][0]);
+      s.addEventListener("change", () => { values[l.key] = JSON.parse(s.value); renderLevers(); });
+      return s;
+    };
+    const groups = [["Sound", (l) => l.section === "audio"], ["Graphics", (l) => l.section === "device" && !["UIScaleWindowed", "UIScaleFullscreen", "brightness"].includes(l.key)], ["Interface", (l) => l.section === "ui" || ["UIScaleWindowed", "UIScaleFullscreen", "brightness"].includes(l.key)]];
+    groups.forEach(([title, test]) => {
+      section(title);
+      levers.filter(test).forEach(l => row(l.label, values[l.key] !== undefined, (on) => { if (on) values[l.key] = l.kind === "volume" ? 0.5 : l.kind === "scale" ? 1 : l.kind === "bool" ? false : 0; else delete values[l.key]; renderLevers(); }, control(l)));
+    });
+    section("prefs.ini");
+    prefsList.forEach(p => {
+      const s = el("select"); s.append(new Option("off", "0"), new Option("on", "1")); s.value = prefs[p.key] ? "1" : "0";
+      s.addEventListener("change", () => { prefs[p.key] = s.value === "1"; renderLevers(); });
+      row(p.label, prefs[p.key] !== undefined, (on) => { if (on) prefs[p.key] = true; else delete prefs[p.key]; renderLevers(); }, s);
+    });
+    t.append(Object.assign(el("tr"), { innerHTML: '<td colspan="3" class="muted" style="font-size: 12px; padding-top: 8px">Ticked = written into the new profile; unticked = kept as the baseline has it.</td>' }));
+  }
 
   const folder = (name) => name.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 30);
   function status(t, c) { $("status").textContent = t || ""; $("status").className = "status" + (c ? " " + c : ""); }
@@ -201,8 +250,14 @@
     const box = $("result"); box.hidden = false; box.innerHTML = "";
     box.append(el("h3", null, `✓ “${name}” is ready`));
     box.lastChild.style.margin = "0";
-    const ol = el("ol");
-    const li1 = el("li"); li1.innerHTML = `In the EVE launcher: <b>⚙ Settings → EVE Online → Launch Groups</b>, type <code></code> and <b>Create</b>.`;
+    const ol = el("ol"); ol.start = 7;
+    const li0 = el("li"); li0.innerHTML = `<b>Close the EVE launcher</b> if it's open (File → Exit, or right-click its tray icon → Exit), then start it again so it sees the new client profile <code></code>.`;
+    li0.querySelector("code").textContent = r.profile; ol.append(li0);
+    const open = el("button", "btn red small", "▶ Open the EVE launcher");
+    open.style.marginLeft = "8px";
+    open.addEventListener("click", () => invoke("open_launcher").catch(e => status(String(e), "bad")));
+    li0.append(open);
+    const li1 = el("li"); li1.innerHTML = `In the launcher: <b>⚙ Settings → EVE Online → Launch Groups</b>, type <code></code> and <b>Create</b>.`;
     li1.querySelector("code").textContent = name; ol.append(li1);
     r.accounts.forEach(a => {
       const li = el("li"); li.innerHTML = `Add account <b></b> (<span></span>) and set its <b>Client profile</b> to <code></code>.`;
@@ -211,21 +266,15 @@
     });
     const last = el("li"); last.textContent = "Launch the group. Previews open by themselves when the clients start; cycle with your pedal keys."; ol.append(last);
     box.append(ol);
-    const row = el("div", "row"); row.style.marginTop = "10px";
-    const open = el("button", "btn red", "▶ Open the EVE launcher");
-    open.addEventListener("click", () => invoke("open_launcher").catch(e => status(String(e), "bad")));
-    row.append(open, el("span", "muted", "If “" + r.profile + "” isn't in its Client profile list, close and reopen the launcher once."));
-    box.append(row);
     box.scrollIntoView({ behavior: "smooth" });
   }
 
   $("create").addEventListener("click", async () => {
     const name = $("name").value.trim();
-    const p = PRESETS.find(x => x.id === $("preset").value) || PRESETS[0];
     const setup = {
       name, character_ids: picked(), baseline_id: Number($("baseline").value),
       characters_from: document.querySelector("input[name=chars]:checked").value,
-      values: p.values, prefs: p.prefs,
+      values, prefs,
       forward_hotkey: keys.forward, backward_hotkey: keys.backward, login_screens: $("logins").checked,
     };
     $("create").disabled = true;
@@ -241,12 +290,15 @@
 
   $("name").addEventListener("input", render);
   $("filter").addEventListener("input", renderAccounts);
-  $("preset").addEventListener("change", () => { $("presetWhy").textContent = (PRESETS.find(x => x.id === $("preset").value) || {}).why || ""; });
+  $("preset").addEventListener("change", () => usePreset($("preset").value));
   $("home").addEventListener("click", () => { location.href = "index.html"; });
 
   (async () => {
     PRESETS.forEach(p => $("preset").append(new Option(p.name, p.id)));
-    $("preset").value = "alt"; $("presetWhy").textContent = PRESETS.find(x => x.id === "alt").why;
+    $("preset").value = "alt";
+    const t = await invoke("tuning_read").catch(() => null);
+    if (t) { levers = t.levers; prefsList = t.prefs; }
+    usePreset("alt");
     $("keys").append(keyButton("Next", (k) => { keys.forward = k; }), keyButton("Prev", (k) => { keys.backward = k; }));
     try { await invoke("seat_refresh"); } catch (e) { status("Your accounts: " + e, "bad"); }
     accounts = (await invoke("seat_launch_groups").catch(() => ({ accounts: [] }))).accounts || [];
