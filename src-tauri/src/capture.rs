@@ -25,6 +25,20 @@ pub fn allowed_origin(origin: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// "/frame" and "name=X&w=1" from any spelling of the address.
+pub fn path_and_query(uri: &str) -> (String, String) {
+    let rest = match uri.find("://") {
+        Some(i) => {
+            let after = &uri[i + 3..];
+            after.find('/').map(|j| &after[j..]).unwrap_or("/")
+        }
+        None => uri,
+    };
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let path = path.split('#').next().unwrap_or("").trim_end_matches('/');
+    (if path.is_empty() { "/".to_string() } else { path.to_string() }, query.split('#').next().unwrap_or("").to_string())
+}
+
 /// Width and quality the page asked for, within limits.
 pub fn wanted(width: Option<&str>, quality: Option<&str>) -> (u32, u8) {
     let width = width.and_then(|w| w.parse::<u32>().ok()).unwrap_or(MAX_WIDTH).clamp(160, MAX_WIDTH);
@@ -59,11 +73,11 @@ pub fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     if request.method() == tauri::http::Method::OPTIONS {
         return reply(StatusCode::NO_CONTENT, "text/plain", Vec::new(), &origin);
     }
-    // WebView2 hands over the whole address ("http://drcap.localhost/frame?…"), others just the path.
-    let uri = request.uri().to_string();
-    let url = if uri.starts_with("http") { Url::parse(&uri).ok() } else { Url::parse(&format!("http://{SCHEME}.localhost{uri}")).ok() };
+    // Path and query straight from the request (however the webview spells the address:
+    // "http://drcap.localhost/frame?…", "drcap://localhost/frame?…" or just "/frame?…").
+    let (path, query) = path_and_query(&request.uri().to_string());
+    let url = Url::parse(&format!("http://{SCHEME}.localhost/?{query}")).ok();
     let param = |key: &str| url.as_ref().and_then(|url| url.query_pairs().find(|(k, _)| k == key).map(|(_, v)| v.into_owned()));
-    let path = url.as_ref().map(|url| url.path().to_string()).unwrap_or_default();
 
     match path.as_str() {
         "/windows" => {
@@ -78,6 +92,7 @@ pub fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
                 return reply(StatusCode::BAD_REQUEST, "text/plain", b"which client?".to_vec(), &origin);
             };
             let Some((_, handle)) = crate::clipboard::open_eve_windows().into_iter().find(|(open, _)| *open == name) else {
+                log::info!("camera picture: no EVE window called {name:?} (open: {:?})", crate::clipboard::open_eve_windows().into_iter().map(|(n, _)| n).collect::<Vec<_>>());
                 return reply(StatusCode::NOT_FOUND, "text/plain", b"no such EVE window".to_vec(), &origin);
             };
             let (width, quality) = wanted(param("w").as_deref(), param("q").as_deref());
@@ -86,7 +101,10 @@ pub fn handle(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
                 Err(why) => reply(StatusCode::CONFLICT, "text/plain", why.as_bytes().to_vec(), &origin),
             }
         }
-        _ => reply(StatusCode::NOT_FOUND, "text/plain", b"unknown".to_vec(), &origin),
+        other => {
+            log::warn!("camera picture: unknown address {other:?} ({})", request.uri());
+            reply(StatusCode::BAD_REQUEST, "text/plain", b"unknown".to_vec(), &origin)
+        }
     }
 }
 
@@ -248,6 +266,14 @@ mod grab {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_spelling_of_the_address() {
+        for uri in ["http://drcap.localhost/frame?name=A%20B&w=1", "drcap://localhost/frame?name=A%20B&w=1", "/frame?name=A%20B&w=1", "https://drcap.localhost/frame/?name=A%20B&w=1"] {
+            assert_eq!(path_and_query(uri), ("/frame".to_string(), "name=A%20B&w=1".to_string()), "{uri}");
+        }
+        assert_eq!(path_and_query("http://drcap.localhost/windows").0, "/windows");
+    }
 
     #[test]
     fn only_the_mapper_may_ask() {

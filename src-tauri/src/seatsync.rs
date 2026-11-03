@@ -15,9 +15,7 @@ const MAX_BODY: usize = 2 * 1024 * 1024;
 
 /// Whether a drcap request is one of ours (the rest is the camera capture).
 pub fn wants(request: &Request<Vec<u8>>) -> bool {
-    let uri = request.uri().to_string();
-    let path = Url::parse(&uri).map(|u| u.path().to_string()).unwrap_or(uri);
-    path.starts_with("/launch-")
+    crate::capture::path_and_query(&request.uri().to_string()).0.starts_with("/launch-")
 }
 
 fn allowed(origin: &str) -> bool {
@@ -53,8 +51,7 @@ pub fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     if method == tauri::http::Method::OPTIONS {
         return reply(StatusCode::NO_CONTENT, Vec::new(), &origin);
     }
-    let uri = request.uri().to_string();
-    let path = Url::parse(&uri).map(|u| u.path().to_string()).unwrap_or(uri);
+    let (path, _) = crate::capture::path_and_query(&request.uri().to_string());
     log::info!("SeAT page → app: {} {path} ({} bytes)", method.as_str(), request.body().len());
     match (method.as_str(), path.as_str()) {
         ("POST", "/launch-sync") => {
