@@ -98,7 +98,7 @@
       <div class="step"><div class="n">5</div><div>
         <h3>Save for the corp</h3>
         <div class="muted small">Adds to what the corp already has for this planet and resource (the Corp map tab on the PI screen shows it, with the best places to put two extractors).</div>
-        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button> <button class="btn" id="rebare" title="Throw away the bare planet map on this PC and record it again">Record bare map again</button> <button class="btn" id="wipe" hidden title="Delete every scan the corp has of this planet (made with older versions that slid while scanning)">Delete this planet's old scans</button></div>
+        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button> <button class="btn" id="rebare" title="Delete the bare map version in use on this PC and record it again">Record bare map again</button> <button class="btn" id="wipe" hidden title="Delete every scan the corp has of this planet (made with older versions that slid while scanning)">Delete this planet's old scans</button></div>
         <div class="status" id="saveStatus"></div>
       </div></div>
     </div>
@@ -149,19 +149,16 @@
     }
     return refCache;
   }
-  /** A lock you just made beats a saved map: if the map doesn't match this view, clear it. */
+  /** After a lock: use the bare map version that fits this client's look; none fits → a new one gets recorded. */
   function checkMapAgainstLock() {
-    const ref = mapRef();
-    if (!ref || !frame || !facing) return;
-    const near = E.alignToMap(E.samplePoints(frame.data.data, frame.w, frame.h, disc, 600), ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
-    if (near && near.score >= 0.55 && bareLegacy) {
-      // The older map fits this client's lock: it's this client's. Keep it under its name.
-      bareLegacy = false; storeBare();
-      const p = currentPlanet(); try { if (p) { localStorage.removeItem(legacyKey(p)); localStorage.removeItem(legacyKey(p) + "-mirrored"); } } catch {}
-    }
-    if (near && near.score < 0.5) {
-      forgetBare();
-      say("scanStatus", "Your saved bare map didn't match this lock (recorded under an older one), so it was cleared: record the bare planet again.", "warn");
+    if (!frame || !facing || !versions.length) return;
+    const best = bestVersionAt(facing.Q, facing.mirrored);
+    if (best && best.score >= 0.55) {
+      useVersion(best.v);
+      if (versions.length > 1) say("scanStatus", `Using bare map version "${best.v.label}" (fits this client's graphics).`, "ok");
+    } else {
+      dropVersion();
+      say("scanStatus", `None of this planet's ${versions.length} bare map version(s) match how this client draws it (different graphics settings?). Pick Bare planet and Scan once: it's saved as a new version, and the others are kept.`, "warn");
     }
   }
   function forgetTrack() { prevGrey = null; lastStep = null; keys = []; lost = null; lostRun = 0; }
@@ -206,34 +203,77 @@
   const currentPlanet = () => planets.find((p) => String(p.planet_id) === $("planet").value) || null;
   // The bare planet's colours, kept on this PC per planet (only the scanner needs them).
   // v2: maps from before every picture was placed on the map slid while recording; not reused.
-  // Per planet AND per EVE client: each client's graphics settings draw the planet differently
-  // (Low settings turn lava into bright yellow blobs), so a map only fits the client that made it.
-  const bareKey = (p) => "piscan-bare3-" + p.planet_id + "@" + ($("client").value || "");
-  const legacyKey = (p) => "piscan-bare3-" + p.planet_id; // made before maps were per client: whose is unknown
-  let bareMirrored = false, bareLegacy = false;
-  function loadBare(p) {
-    bareLegacy = false;
-    if (!p) return null;
+  // A planet's bare map comes in versions, one per graphics look (Low settings draw lava as
+  // bright yellow blobs, High as fine glowing veins). The CEO records each look once; any client
+  // then uses the version its picture matches best. Kept on this PC: piscan-bare4-<planet>-list
+  // lists them, each map under piscan-bare4-<planet>-v<id>.
+  const listKey = (p) => "piscan-bare4-" + p.planet_id + "-list";
+  const versionKey = (p, id) => "piscan-bare4-" + p.planet_id + "-v" + id;
+  let versions = [], bareVersion = null, bareMirrored = false;
+  function readVersions(p) {
+    if (!p) return [];
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(listKey(p)) || "[]"); } catch { list = []; }
+    // Maps from before versions (one per planet, or per client): bring them in once.
     try {
-      let key = bareKey(p), text = localStorage.getItem(key);
-      if (!text && localStorage.getItem(legacyKey(p))) { key = legacyKey(p); text = localStorage.getItem(key); bareLegacy = true; }
-      bareMirrored = localStorage.getItem(key + "-mirrored") === "1";
-      return text ? E.bareFromBytes(Uint8Array.from(atob(text), (c) => c.charCodeAt(0))) : null;
-    } catch (e) { return null; }
+      for (let n = 0; n < localStorage.length; n++) {
+        const key = localStorage.key(n);
+        if (!key || !key.startsWith("piscan-bare3-" + p.planet_id) || key.endsWith("-mirrored")) continue;
+        const id = Date.now() + n, who = key.includes("@") ? key.split("@")[1] : "";
+        localStorage.setItem(versionKey(p, id), localStorage.getItem(key));
+        list.push({ id, mirrored: localStorage.getItem(key + "-mirrored") === "1", label: who ? `recorded on ${who}` : "recorded earlier" });
+        localStorage.removeItem(key); localStorage.removeItem(key + "-mirrored"); n = -1;
+      }
+      localStorage.setItem(listKey(p), JSON.stringify(list));
+    } catch {}
+    return list.map((v) => {
+      try { const t = localStorage.getItem(versionKey(p, v.id)); return t ? { ...v, bare: E.bareFromBytes(Uint8Array.from(atob(t), (c) => c.charCodeAt(0))) } : null; } catch { return null; }
+    }).filter(Boolean);
   }
+  function loadBare(p) {
+    versions = readVersions(p);
+    // Until a lock or a picture says which look this client has, the newest version is shown.
+    const v = versions[versions.length - 1] || null;
+    bareVersion = v ? v.id : null; bareMirrored = v ? v.mirrored : false;
+    return v ? v.bare : null;
+  }
+  function useVersion(v) { bare = v ? v.bare : null; bareVersion = v ? v.id : null; bareMirrored = v ? v.mirrored : false; refCache = null; }
+  /** Stop using the current version for this client (it doesn't fit); the next bare scan makes a new one. */
+  function dropVersion() { useVersion(null); }
+  /** Delete the current version from this PC ("Record bare map again"). */
   function forgetBare() {
-    const p = currentPlanet(), legacy = bareLegacy; bare = null; refCache = null; bareLegacy = false;
-    if (legacy) return; // not this client's map: leave it for the client that made it
-    try { if (p) { localStorage.removeItem(bareKey(p)); localStorage.removeItem(bareKey(p) + "-mirrored"); } } catch {}
+    const p = currentPlanet(), id = bareVersion; useVersion(null);
+    if (!p || id === null) return;
+    versions = versions.filter((v) => v.id !== id);
+    try { localStorage.removeItem(versionKey(p, id)); localStorage.setItem(listKey(p), JSON.stringify(versions.map(({ bare: _b, ...v }) => v))); } catch {}
+  }
+  /** The version a picture fits best at a known facing (null if none fits). */
+  function bestVersionAt(Q, mirroredNow) {
+    if (!frame || !versions.length) return null;
+    const pts = E.samplePoints(frame.data.data, frame.w, frame.h, disc, 600);
+    let best = null;
+    for (const v of versions) {
+      if (v.mirrored !== mirroredNow) continue;
+      const near = E.alignToMap(pts, E.bareGrey(v.bare), v.mirrored, E.poseOf(Q), 2 * DEG, 0.5 * DEG);
+      if (near && (!best || near.score > best.score)) best = { v, score: near.score };
+    }
+    return best;
   }
   function storeBare() {
     const p = currentPlanet();
     if (!p || !bare) return;
     const bytes = E.bareToBytes(bare);
     let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
-    if (bareLegacy) return; // someone else's (unknown) map: not saved under this client
-    try { localStorage.setItem(bareKey(p), btoa(bin)); localStorage.setItem(bareKey(p) + "-mirrored", facing && facing.mirrored ? "1" : "0"); } catch (e) { /* kept for this visit */ }
+    if (bareVersion === null) {
+      bareVersion = Date.now(); bareMirrored = !!(facing && facing.mirrored);
+      versions.push({ id: bareVersion, mirrored: bareMirrored, label: `recorded on ${$("client").value || "?"}`, bare });
+    }
+    try {
+      localStorage.setItem(versionKey(p, bareVersion), btoa(bin));
+      localStorage.setItem(listKey(p), JSON.stringify(versions.map(({ bare: _b, ...v }) => v)));
+    } catch (e) { /* kept for this visit */ }
   }
+
   /** Every colony on the planet as a layout to look for (buildings and heads). */
   function colonies() {
     const p = currentPlanet();
@@ -541,7 +581,7 @@
     const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);
     const next = POLE_WAYS[(at + 1) % POLE_WAYS.length];
     savePole(next);
-    if (bare) { forgetBare(); say("scanStatus", "Flipped: the bare map recorded the other way round was cleared; record it again.", "warn"); }
+    if (bare) dropVersion();
     lockFromOne(facing.one.groups, next);
   });
 
@@ -636,21 +676,24 @@
             updateButtons();
           }
         }
-        // A bare map of this planet already recorded: no lock needed, find where the picture sits on it.
-        if (f && disc && !facing && bare && !bareLegacy && Date.now() - lastFind > 700) {
+        // Bare map versions of this planet recorded: no lock needed, find which version and where.
+        if (f && disc && !facing && versions.length && Date.now() - lastFind > 700) {
           lastFind = Date.now();
-          const ref = mapRef();
-          if (ref) {
-            if (!isFinite(disc.D)) disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) }, focal = lensPx();
-            const found = E.findOnMap(E.samplePoints(f.data.data, f.w, f.h, disc, 300, true), ref.coarse, bareMirrored);
-            if (found && found.score >= 0.55 && found.margin >= 0.15) {
-              const r = E.alignToMap(E.samplePoints(f.data.data, f.w, f.h, disc, 600), ref.fine, bareMirrored, found, 1 * DEG, 0.5 * DEG) || found;
-              facing = { Q: E.poseQ(r.yaw, r.pitch), mirrored: bareMirrored, misses: [], owners: [$("client").value] };
-              focal = lensPx(); forgetTrack();
-              say("lockStatus", `Found on ${$("client").value}'s bare planet map: no lock needed. Pick the resource EVE shows and press Scan.`, "ok");
-              updateButtons();
-            } else say("lockStatus", "Looking for this view on your bare planet map… (zoomed all the way out, edge set)", "");
+          if (!isFinite(disc.D)) disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) }, focal = lensPx();
+          const coarsePts = E.samplePoints(f.data.data, f.w, f.h, disc, 300, true);
+          let best = null;
+          for (const v of versions) {
+            const found = E.findOnMap(coarsePts, E.bareGrey(v.bare, true), v.mirrored);
+            if (found && found.score >= 0.55 && found.margin >= 0.15 && (!best || found.score > best.found.score)) best = { v, found };
           }
+          if (best) {
+            useVersion(best.v);
+            const r = E.alignToMap(E.samplePoints(f.data.data, f.w, f.h, disc, 600), E.bareGrey(best.v.bare), best.v.mirrored, best.found, 1 * DEG, 0.5 * DEG) || best.found;
+            facing = { Q: E.poseQ(r.yaw, r.pitch), mirrored: best.v.mirrored, misses: [], owners: [$("client").value] };
+            focal = lensPx(); forgetTrack();
+            say("lockStatus", `Found on the bare planet map${versions.length > 1 ? ` (version "${best.v.label}")` : ""}: no lock needed. Pick the resource EVE shows and press Scan.`, "ok");
+            updateButtons();
+          } else say("lockStatus", "Looking for this view on the planet's bare map… none fits yet? Lock on one building: if this client's graphics differ, a new version gets recorded.", "");
         }
         if (f && disc && $("auto").checked && !facing) autoStep(f);
         if (f && running && facing && disc) {
@@ -672,8 +715,8 @@
               // Tracking is fine but the saved map disagrees: the map is what's wrong (recorded
               // under an older, wrong lock). Never jump to it; after a few such pictures, drop it.
               if (++mapMisses > 6) {
-                forgetBare(); mapMisses = 0;
-                say("lockStatus", "The saved bare map didn't fit your lock (it was recorded before), so it was cleared: record the bare planet again.", "warn");
+                dropVersion(); mapMisses = 0;
+                say("lockStatus", "This bare map version doesn't fit how this client draws the planet: pick Bare planet and Scan once to record a version for these graphics (the others are kept).", "warn");
               }
             }
             else if (!tracked) {
