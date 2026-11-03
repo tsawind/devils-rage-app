@@ -254,8 +254,8 @@
    * matched patches (coarse at half size, then refined). Returns { R, used, spread (radians), moved (radians) }
    * or null when too few patches agree (moved too fast, or nothing to grip on).
    */
-  function trackRotation(prev, cur, D) {
-    const P = 4, step = 18, inner = 0.72;
+  function trackRotation(prev, cur, D, opts) {
+    const o = opts || {}, P = o.P || 4, step = o.step || 18, inner = o.inner || 0.72, CP = o.CP || 2;
     const crop = { cx: SIZE / 2, cy: SIZE / 2, r: SIZE / 2, D };
     const unit = (x, y) => toSphere(x + 0.5, y + 0.5, crop);
     const prevHalf = half(prev, SIZE), curHalf = half(cur, SIZE);
@@ -266,7 +266,14 @@
       if (textured(prev, SIZE, x, y, P) < 12) continue;
       const hx = x >> 1, hy = y >> 1;
       if (hx - 3 < 0 || hy - 3 < 0) continue;
-      const coarse = search(prevHalf, curHalf, SIZE / 2, hx, hy, hx, hy, 14, 2);
+      // Turning steadily: look first where the last step's turn would put this patch.
+      let gx = hx, gy = hy;
+      if (o.guess) {
+        const g = toPicture(apply(o.guess, a), crop);
+        if (!g.front) continue;
+        gx = Math.round(g.x - 0.5) >> 1; gy = Math.round(g.y - 0.5) >> 1;
+      }
+      const coarse = search(prevHalf, curHalf, SIZE / 2, hx, hy, gx, gy, o.range || 14, CP);
       const fine = search(prev, cur, SIZE, x, y, coarse.x * 2, coarse.y * 2, 3, P);
       const b = unit(fine.x, fine.y);
       if (!b) continue;
@@ -287,8 +294,10 @@
     const used = keep.filter(Boolean).length;
     if (used < Math.max(8, as.length * 0.4)) return null;
     const miss = as.map((a, i) => angle(apply(R, a), bs[i])).filter((_, i) => keep[i]).sort((m, n) => m - n);
+    // Patches that agree only loosely mean the matches were guesses (turned past the search): lost.
+    if (miss[Math.floor(miss.length / 2)] > (o.maxSpread || 0.012)) return null;
     const moved = Math.acos(Math.max(-1, Math.min(1, (R[0] + R[4] + R[8] - 1) / 2)));
-    return { R, used, of: as.length, spread: miss[Math.floor(miss.length / 2)], moved };
+    return { R, used, of: as.length, spread: miss[Math.floor(miss.length / 2)], moved, ...(o.debug ? { as, bs, keep } : {}) };
   }
 
   // ---- painting ----

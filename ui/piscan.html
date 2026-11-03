@@ -133,6 +133,11 @@
   let planets = [], frame = null, frozen = false, disc = null, anchors = [], selected = null, facing = null;
   const maps = new Map(); // resource → engine map
   let running = false, prevGrey = null, lostRun = 0, painting = false;
+  // Tracking memory: the last step's turn (to look ahead when turning steadily), pictures kept
+  // every ~11° with where the planet faced (to pick up again after losing the grip), and the
+  // picture right after a loss (to tell a filter switch from a fast spin).
+  let lastStep = null, keys = [], lost = null, keyTry = 0;
+  function forgetTrack() { prevGrey = null; lastStep = null; keys = []; lost = null; lostRun = 0; }
   const BARE = "__bare";
   let bare = null, focal = null, autoBusy = false, autoAsked = 0, worker = null, workerId = 0;
   try { worker = new Worker("piscan-worker.js"); } catch (e) { worker = null; }
@@ -203,7 +208,7 @@
   }
   function planetChanged() {
     const p = currentPlanet();
-    anchors = []; facing = null; selected = null; maps.clear(); prevGrey = null; focal = null;
+    anchors = []; facing = null; selected = null; maps.clear(); forgetTrack(); focal = null;
     const res = $("resource"); res.innerHTML = "";
     bare = loadBare(p);
     res.append(new Option(`Bare planet (EVE on No filter)${bare ? ` · ${Math.round(E.bareCoverage(bare) * 100)}% recorded` : ""}`, BARE));
@@ -369,7 +374,7 @@
     if (!c || c.r < 40) { say("lockStatus", "That's too close to the middle: click on the planet's edge.", "bad"); return; }
     if (facing && focal) {
       disc = { cx: c.cx, cy: c.cy, r: c.r, D: Math.sqrt((focal / c.r) ** 2 + 1) };
-      prevGrey = null;
+      forgetTrack();
       say("lockStatus", "Edge set again; still locked on.", "ok");
     } else {
       disc = { cx: c.cx, cy: c.cy, r: c.r }; facing = null; anchors = []; renderAnchors();
@@ -399,7 +404,7 @@
       const cam = E.toSphere(p.x, p.y, disc);
       let best = null, miss = Infinity;
       group.items.forEach((a) => { const m = E.angle(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), cam); if (m < miss) { miss = m; best = a; } });
-      if (best) facing.Q = E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored);
+      if (best) { facing.Q = E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored); prevGrey = null; lastStep = null; lost = null; lostRun = 0; }
       say("scanStatus", `Pulled back onto a ${selected.toLowerCase()}.`, "ok");
     } else {
       if (anchors.filter((x) => x.kind === selected).length >= group.items.length) return say("lockStatus", `There ${group.items.length === 1 ? "is only one" : "are only " + group.items.length} ${selected.toLowerCase()}: pick another kind.`, "warn");
@@ -419,7 +424,7 @@
     const groups = new Map(kinds().map((k) => [k.kind, k.items]));
     const solved = E.solveMatching(anchors.map((a) => ({ px: a.px, py: a.py, candidates: groups.get(a.kind) || [] })), disc);
     if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
-    facing = solved; prevGrey = null; frozen = false;
+    facing = solved; forgetTrack(); frozen = false;
     disc = { ...disc, D: solved.D };
     const byKey = new Map(anchorList().map((a) => [a.key, a]));
     facing.owners = [...new Set(solved.matched.map((k) => byKey.get(k)?.owner).filter(Boolean))];
@@ -448,8 +453,8 @@
     } catch (e) { /* start fresh */ }
     drawFlat(); updateButtons();
   }
-  $("resource").addEventListener("change", () => { if ($("resource").value !== BARE) loadCorpScan($("resource").value); drawFlat(); updateButtons(); });
-  $("scan").addEventListener("click", () => { if (running && $("resource").value === BARE) storeBare(); running = !running; prevGrey = null; lostRun = 0; frozen = false; updateButtons(); if (running) say("scanStatus", "Scanning: turn the planet slowly.", "ok"); });
+  $("resource").addEventListener("change", () => { keys = []; prevGrey = null; lastStep = null; lost = null; if ($("resource").value !== BARE) loadCorpScan($("resource").value); drawFlat(); updateButtons(); });
+  $("scan").addEventListener("click", () => { if (running && $("resource").value === BARE) storeBare(); running = !running; prevGrey = null; lastStep = null; lost = null; lostRun = 0; frozen = false; updateButtons(); if (running) say("scanStatus", "Scanning: turn the planet slowly.", "ok"); });
   $("showHeat").addEventListener("change", drawShot);
 
   // ---------- automatic lock-on ----------
@@ -457,7 +462,7 @@
     facing = { Q: pose.Q, mirrored: pose.mirrored, misses: [], owners: [pose.owner] };
     disc = { cx: disc.cx, cy: disc.cy, r: disc.r, D: pose.D };
     focal = isFinite(pose.D) ? disc.r * Math.sqrt(pose.D * pose.D - 1) : null;
-    prevGrey = null;
+    forgetTrack();
     say("autoStatus", `${how}: ${pose.owner}'s colony, ${pose.inliers} buildings line up. Green rings should sit on the buildings; Scan when ready.`, "ok");
     updateButtons();
   }
@@ -518,7 +523,7 @@
           lastRim = rim ? rim.r : null;
           if (steady && Math.abs(rim.r - disc.r) > disc.r * 0.012) {
             disc = { cx: rim.cx, cy: rim.cy, r: rim.r, D: Math.sqrt((focal / rim.r) ** 2 + 1) };
-            prevGrey = null;
+            forgetTrack();
             updateButtons();
           }
         }
@@ -526,9 +531,32 @@
         if (f && running && facing && disc) {
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
           let ok = true;
-          if (prevGrey) {
-            const t = E.trackRotation(prevGrey, grey, disc.D);
-            if (t) { facing.Q = E.mul(t.R, facing.Q); lostRun = 0; } else { ok = false; lostRun++; }
+          if (lost) {
+            ok = false; lostRun++;
+            // Back over ground already seen (or the start, after a double-click in EVE)? A few kept pictures per tick.
+            for (let n = 0; n < Math.min(6, keys.length) && !ok; n++) {
+              const k = keys[keyTry++ % keys.length], t = E.trackRotation(k.grey, grey, disc.D);
+              if (t) { facing.Q = E.mul(t.R, k.Q); ok = true; }
+            }
+            // Lost while holding still and still holding still: the picture changed (EVE filter), not the planet.
+            if (!ok && lost.still && lostRun <= 8) {
+              const t = E.trackRotation(lost.grey, grey, disc.D);
+              if (t && t.moved < 0.017) { keys = []; ok = true; }
+              else if (!t || t.moved >= 0.017) lost.still = false;
+            }
+            if (ok) { lost = null; lostRun = 0; lastStep = null; }
+          } else if (prevGrey) {
+            const t = (lastStep && E.trackRotation(prevGrey, grey, disc.D, { guess: lastStep })) || E.trackRotation(prevGrey, grey, disc.D);
+            if (t) { facing.Q = E.mul(t.R, facing.Q); lastStep = t.R; lostRun = 0; }
+            else {
+              ok = false; lostRun = 1;
+              const before = lastStep ? Math.acos(Math.max(-1, Math.min(1, (lastStep[0] + lastStep[4] + lastStep[8] - 1) / 2))) : 0;
+              lost = { grey, still: before < 0.017 }; lastStep = null;
+            }
+          }
+          if (ok && (!keys.length || keys.every((k) => E.angle(E.apply(k.Q, [0, 0, 1]), E.apply(facing.Q, [0, 0, 1])) > 0.2))) {
+            keys.push({ grey, Q: facing.Q.slice() });
+            if (keys.length > 60) keys.splice(1, 1); // keep the first (where the scan started)
           }
           if (ok) {
             prevGrey = grey;
@@ -544,9 +572,8 @@
               const hint = E.missingHint(m, facing.Q, facing.mirrored), cover = E.coverage(m);
               say("scanStatus", cover > 0.97 ? "Whole planet seen: save it, or pick the next resource." : `${Math.round(cover * 100)}% seen. Still missing: ${hint || "a little here and there"}.`, "ok");
             }
-          } else if (lostRun > 2) {
-            prevGrey = grey; // start again from here; a building click fixes any jump
-            say("scanStatus", "Lost the grip (turned too fast, or the picture changed). Turn slower; if the green rings are off, pick a building and click it.", "warn");
+          } else if (lost) {
+            say("scanStatus", "Lost the grip (turned too fast): painting is paused. Turn back to a part already scanned and it picks up by itself, or double-click the planet in EVE to go back to where the scan started.", "warn");
           }
           drawFlat(); updateButtons();
         }

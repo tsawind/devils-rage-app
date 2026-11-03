@@ -121,6 +121,26 @@ check("follows a zoom from the last circle", rim2 && Math.abs(rim2.r - zoomed.r)
 const three = E.circleFrom3([520, 240], [320, 40], [120, 240]);
 check("three clicks on the rim make the circle", three && Math.abs(three.cx - 320) < 1e-6 && Math.abs(three.r - 200) < 1e-6);
 
+// Turning fast and steadily: too far to find without looking ahead, found with the last step's turn.
+{
+  const R = E.rotationAbout([0.2, 1, 0], 0.30);
+  const a = E.greyDisc(render(Q), W, H, disc), b = E.greyDisc(render(E.mul(R, Q)), W, H, disc);
+  const blind = E.trackRotation(a, b), ahead = E.trackRotation(a, b, undefined, { guess: E.rotationAbout([0.2, 1, 0], 0.27) });
+  const err = ahead ? E.angle(E.apply(ahead.R, [0.3, 0.4, 0.86]), E.apply(R, [0.3, 0.4, 0.86])) : 9;
+  console.log(`     17° in one step: blind ${blind ? "found " + (blind.moved * 180 / Math.PI).toFixed(1) + "°" : "lost"}, looking ahead error ${(err * 180 / Math.PI).toFixed(2)}°`);
+  check("a turn too far to see blind isn't passed off as a small one", !blind || Math.abs(blind.moved - 0.3) < 0.02);
+  check("looking ahead with the last turn follows a fast spin", err < 0.01);
+}
+// Lost, then back over seen ground: a kept picture gives the facing back.
+{
+  const R = E.rotationAbout([1, 0.3, 0], 0.9);
+  const a = E.greyDisc(render(Q), W, H, disc), far = E.greyDisc(render(E.mul(R, Q)), W, H, disc);
+  check("a picture of the far side doesn't match (no false grip)", !E.trackRotation(a, far));
+  const near = E.rotationAbout([0, 0.4, 1], 0.08), again = E.greyDisc(render(E.mul(near, Q)), W, H, disc);
+  const t = E.trackRotation(a, again);
+  check("back near a kept picture: the facing comes back", t && E.angle(E.apply(t.R, [0.3, 0.4, 0.86]), E.apply(near, [0.3, 0.4, 0.86])) < 0.01);
+}
+
 // With EVE's on-screen stripes over everything, a long turn still doesn't drift.
 STRIPES = true;
 {
