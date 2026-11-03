@@ -72,7 +72,8 @@ pub fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
             let groups = crate::launch::local_for_import(app);
             reply(StatusCode::OK, serde_json::to_vec(&groups).unwrap_or_default(), &origin)
         }
-        ("DELETE", "/launch-local") => match crate::launch::retire_local(app) {
+        // POST (a "simple" request, no CORS preflight) or DELETE: SeAT took the PC's groups.
+        ("POST", "/launch-local-done") | ("DELETE", "/launch-local") => match crate::launch::retire_local(app) {
             Ok(()) => reply(StatusCode::OK, b"{\"done\":true}".to_vec(), &origin),
             Err(e) => reply(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({ "error": e }).to_string().into_bytes(), &origin),
         },
