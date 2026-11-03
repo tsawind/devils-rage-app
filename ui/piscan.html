@@ -66,7 +66,7 @@
         <div class="muted small">In EVE: open the planet, turn on the scan for a resource. This page only watches the picture; it never clicks or types in EVE.</div>
         <div class="row"><select id="client"></select><button class="btn" id="reload" title="Look for clients and your planets again">↻</button></div>
         <div class="row"><select id="planet" style="width: 100%"></select></div>
-        <label class="small muted"><input type="checkbox" id="others"> Show other characters' planets</label>
+        <label class="small muted"><input type="checkbox" id="others"> Show the other planets here (scan them using a corp mate's buildings)</label>
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
@@ -75,7 +75,7 @@
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Point out 3 of your buildings</h3>
-        <div class="muted small"><b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
+        <div class="muted small">Not your colony? Anyone's buildings work: in EVE right-click the planet → <b>Show other characters' networks</b>. <b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
         <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button></div>
         <div class="anchors" id="anchors"></div>
         <div class="status" id="lockStatus"></div>
@@ -151,16 +151,17 @@
   function fillPlanets() {
     const sel = $("planet"), client = $("client").value, was = sel.value;
     sel.innerHTML = "";
-    const mine = planets.filter((p) => p.character === client), rest = planets.filter((p) => p.character !== client);
+    const has = (p) => (p.characters || []).some((c) => c.name === client);
+    const mine = planets.filter(has), rest = planets.filter((p) => !has(p));
     if (!planets.length) sel.append(new Option("No colonies found in SeAT (open the PI tab once?)", ""));
-    const group = (label, list) => { if (!list.length) return; const g = document.createElement("optgroup"); g.label = label; list.forEach((p) => g.append(new Option(`${p.name} · ${cap(p.type)} · ${p.character}`, p.character_id + ":" + p.planet_id))); sel.append(g); };
+    const group = (label, list) => { if (!list.length) return; const g = document.createElement("optgroup"); g.label = label; list.forEach((p) => g.append(new Option(`${p.name} · ${cap(p.type)} · ${(p.characters || []).map((c) => c.name).join(", ")}`, String(p.planet_id)))); sel.append(g); };
     group(client ? client + "'s planets" : "Your planets", mine);
-    if ($("others").checked || !mine.length) group("Other characters", rest);
+    if ($("others").checked || !mine.length) group("Other planets here (anyone's buildings can anchor)", rest);
     if ([...sel.options].some((o) => o.value === was)) sel.value = was;
     planetChanged();
   }
   const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : "";
-  const currentPlanet = () => planets.find((p) => p.character_id + ":" + p.planet_id === $("planet").value) || null;
+  const currentPlanet = () => planets.find((p) => String(p.planet_id) === $("planet").value) || null;
   function planetChanged() {
     const p = currentPlanet();
     anchors = []; facing = null; selected = null; maps.clear(); prevGrey = null;
@@ -177,9 +178,12 @@
     const p = currentPlanet();
     if (!p) return [];
     const out = [];
+    // Several people's colonies here: say whose, so look-alikes stay apart (EVE shows them with "Show other characters' networks").
+    const owners = new Set(p.pins.map((pin) => pin.owner || ""));
+    const whose = (pin) => (owners.size > 1 && pin.owner ? pin.owner + " · " : "");
     p.pins.forEach((pin) => {
-      out.push({ key: "p" + pin.id, kind: pin.name.replace(/^(Barren|Gas|Ice|Lava|Oceanic|Plasma|Storm|Temperate) /, ""), lat: pin.lat, lon: pin.lon });
-      (pin.heads || []).forEach((h) => out.push({ key: "h" + pin.id + ":" + h.id, kind: "Extractor head", lat: h.lat, lon: h.lon }));
+      out.push({ key: "p" + pin.id, kind: whose(pin) + pin.name.replace(/^(Barren|Gas|Ice|Lava|Oceanic|Plasma|Storm|Temperate) /, ""), lat: pin.lat, lon: pin.lon });
+      (pin.heads || []).forEach((h) => out.push({ key: "h" + pin.id + ":" + h.id, kind: whose(pin) + "Extractor head", lat: h.lat, lon: h.lon }));
     });
     return out;
   }
@@ -416,7 +420,7 @@
     let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
     say("saveStatus", "Saving…");
     try {
-      say("saveStatus", await invoke("piscan_save", { planetId: p.planet_id, resource, characterId: p.character_id, cells: btoa(bin) }), "ok");
+      say("saveStatus", await invoke("piscan_save", { planetId: p.planet_id, resource, characterId: p.character_id ?? null, cells: btoa(bin) }), "ok");
       const had = (p.scans || []).find((s) => s.resource === resource);
       if (had) had.coverage = Math.max(had.coverage, E.coverage(m)); else (p.scans = p.scans || []).push({ resource, coverage: E.coverage(m) });
     } catch (e) { say("saveStatus", String(e), "bad"); }
