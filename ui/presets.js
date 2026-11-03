@@ -20,6 +20,9 @@ window.DR_PRESETS = [
     { id: "redeem", name: "Daily redeem (lots of alts at once)", why: "Lowest everything and nearly silent: for logging a big batch in to claim the daily and log out. Smallest font, no crash-report uploads.",
       values: { masterVolume: 0.1, worldVolume: 0.2, uiGain: 0.4, evevoiceGain: 0.3, ...QUIET_MUSIC, ...LOW, brightness: 1, clientFontSize: 0 },
       prefs: { breakpadUpload: false } },
+    { id: "scanner", name: "PI scanner (sharp planet, no lighting tricks)", why: "For the character that scans planets: sharp textures and icons so the app can follow the planet and find buildings; no shadows, reflections or haze, so a spot looks the same from every angle.",
+      values: { ...QUIET_MUSIC, textureQuality: 0, shaderQuality: 3, lodQuality: 3, shadowQuality: 0, reflectionQuality: 0, aoQuality: 0, postProcessingQuality: 1, volumetricQuality: 0, antiAliasing: 2 },
+      prefs: {} },
     { id: "sound", name: "Just kill the music", why: "Changes only music, combat music and turret noise; leaves everything else.",
       values: { ...QUIET_MUSIC }, prefs: {} },
   ];

@@ -70,19 +70,23 @@
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
-        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Set your zoom in EVE first, then the edge, and don't zoom after that (if you do, set the edge again).</div>
+        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Once it's locked on, zooming in EVE is fine while some of the edge stays in view (the circle follows).</div>
         <div class="row"><button class="btn" id="fit">Find edge</button><button class="btn" id="rim3">Click 3 on the edge</button><span class="small muted" id="discInfo"></span></div>
       </div></div>
       <div class="step"><div class="n">3</div><div>
-        <h3>Point out 3 of your buildings</h3>
+        <h3>Lock on</h3>
+        <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
+        <div class="status" id="autoStatus"></div>
+        <details style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
         <div class="muted small">Not your colony? Anyone's buildings work: in EVE right-click the planet → <b>Show other characters' networks</b>. <b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
         <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button></div>
         <div class="anchors" id="anchors"></div>
+        </details>
         <div class="status" id="lockStatus"></div>
       </div></div>
       <div class="step"><div class="n">4</div><div>
         <h3>Scan</h3>
-        <div class="muted small"><b>In EVE first:</b> in the planet's Scan panel drag both ends of the colour band right out to the ends (the widest band) and leave it there, so every scan uses the same scale. Then pick the resource EVE is showing here, press <b>Scan</b> and turn the planet slowly (about a quarter turn every few seconds) until the bar is full. Switch the resource in EVE and here for the next one without moving. Drifting? Pick a kind of building and click one.</div>
+        <div class="muted small"><b>Once per planet:</b> pick <b>Bare planet</b> below with EVE's scan on <b>No filter</b>, press Scan and turn the planet all the way round. The app learns the planet's own colours (lava, terrain) and takes them out of every resource scan. <b>Then, in EVE:</b> in the planet's Scan panel drag both ends of the colour band right out to the ends (the widest band) and leave it there, so every scan uses the same scale. Then pick the resource EVE is showing here, press <b>Scan</b> and turn the planet slowly (about a quarter turn every few seconds) until the bar is full. Switch the resource in EVE and here for the next one without moving. Drifting? Pick a kind of building and click one.</div>
         <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
         <div class="row" style="display: block"><div class="meter"><i id="cover"></i></div></div>
         <div class="status" id="scanStatus"></div>
@@ -126,6 +130,9 @@
   let planets = [], frame = null, frozen = false, disc = null, anchors = [], selected = null, facing = null;
   const maps = new Map(); // resource → engine map
   let running = false, prevGrey = null, lostRun = 0, painting = false;
+  const BARE = "__bare";
+  let bare = null, focal = null, autoBusy = false, autoAsked = 0, worker = null, workerId = 0;
+  try { worker = new Worker("piscan-worker.js"); } catch (e) { worker = null; }
 
   // ---------- clients and planets ----------
   async function loadClients() {
@@ -162,16 +169,48 @@
   }
   const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : "";
   const currentPlanet = () => planets.find((p) => String(p.planet_id) === $("planet").value) || null;
+  // The bare planet's colours, kept on this PC per planet (only the scanner needs them).
+  const bareKey = (p) => "piscan-bare-" + p.planet_id;
+  function loadBare(p) {
+    if (!p) return null;
+    try {
+      const text = localStorage.getItem(bareKey(p));
+      return text ? E.bareFromBytes(Uint8Array.from(atob(text), (c) => c.charCodeAt(0))) : null;
+    } catch (e) { return null; }
+  }
+  function storeBare() {
+    const p = currentPlanet();
+    if (!p || !bare) return;
+    const bytes = E.bareToBytes(bare);
+    let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
+    try { localStorage.setItem(bareKey(p), btoa(bin)); } catch (e) { /* kept for this visit */ }
+  }
+  /** Every colony on the planet as a layout to look for (buildings and heads). */
+  function colonies() {
+    const p = currentPlanet();
+    if (!p) return [];
+    const by = new Map();
+    p.pins.forEach((pin) => {
+      const owner = pin.owner || "colony";
+      if (!by.has(owner)) by.set(owner, []);
+      by.get(owner).push({ lat: pin.lat, lon: pin.lon });
+      (pin.heads || []).forEach((h) => by.get(owner).push({ lat: h.lat, lon: h.lon }));
+    });
+    return [...by.entries()].map(([owner, points]) => ({ owner, points }));
+  }
   function planetChanged() {
     const p = currentPlanet();
-    anchors = []; facing = null; selected = null; maps.clear(); prevGrey = null;
+    anchors = []; facing = null; selected = null; maps.clear(); prevGrey = null; focal = null;
     const res = $("resource"); res.innerHTML = "";
+    bare = loadBare(p);
+    res.append(new Option(`Bare planet (EVE on No filter)${bare ? ` · ${Math.round(E.bareCoverage(bare) * 100)}% recorded` : ""}`, BARE));
     (RESOURCES[p ? p.type : ""] || Object.values(RESOURCES).flat().filter((v, i, a) => a.indexOf(v) === i)).forEach((r) => {
       const had = p && (p.scans || []).find((s) => s.resource === r);
       res.append(new Option(r + (had ? ` (corp has ${Math.round(had.coverage * 100)}%)` : ""), r));
     });
     renderAnchors(); updateButtons(); drawFlat(); drawShot();
-    if (res.value) loadCorpScan(res.value);
+    if (bare && E.bareCoverage(bare) > 0.9 && res.options.length > 1) res.selectedIndex = 1;
+    if (res.value && res.value !== BARE) loadCorpScan(res.value);
     say("lockStatus", p ? `${p.pins.length} buildings known on ${p.name}.` : "");
   }
   function anchorList() {
@@ -215,7 +254,7 @@
     $("scan").textContent = running ? "Pause" : "Scan";
     $("scan").classList.toggle("on", running);
     const m = maps.get($("resource").value);
-    $("save").disabled = !(m && E.coverage(m) > 0);
+    $("save").disabled = $("resource").value === BARE || !(m && E.coverage(m) > 0);
     $("freeze").textContent = frozen ? "Unfreeze" : "Freeze";
     $("freeze").classList.toggle("on", frozen);
     $("discInfo").textContent = disc ? `centre ${Math.round(disc.cx)}, ${Math.round(disc.cy)} · radius ${Math.round(disc.r)} px` : "not set yet";
@@ -265,9 +304,13 @@
     }
   }
   function drawFlat() {
-    const m = maps.get($("resource").value);
+    const recordingBare = $("resource").value === BARE;
+    const m = recordingBare ? null : maps.get($("resource").value);
     const img = fctx.createImageData(E.GRID_W, E.GRID_H);
-    if (m) {
+    if (recordingBare && bare) {
+      const bytes = E.bareToBytes(bare);
+      for (let i = 0; i < E.GRID_W * E.GRID_H; i++) img.data.set([bytes[i * 3], bytes[i * 3 + 1], bytes[i * 3 + 2], 255], i * 4);
+    } else if (m) {
       const bytes = E.cells(m);
       for (let i = 0; i < bytes.length; i++) {
         const v = bytes[i];
@@ -289,9 +332,9 @@
       fctx.fillStyle = "#f0c040";
       p.pins.forEach((pin) => { const x = ((pin.lon % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) / (2 * Math.PI) * 720, y = pin.lat / Math.PI * 360; fctx.fillRect(x - 2, y - 2, 4, 4); });
     }
-    const cover = m ? E.coverage(m) : 0;
+    const cover = recordingBare ? (bare ? E.bareCoverage(bare) : 0) : m ? E.coverage(m) : 0;
     $("cover").style.width = Math.round(cover * 100) + "%";
-    $("flatLegend").innerHTML = `<span>Whole planet, north at the top. Dark = not seen yet. Yellow dots: your buildings.</span><span><b>${$("resource").value || ""}</b> ${Math.round(cover * 100)}% seen</span>`;
+    $("flatLegend").innerHTML = `<span>Whole planet, north at the top. Dark = not seen yet. Yellow dots: your buildings.</span><span><b>${recordingBare ? "Bare planet" : $("resource").value || ""}</b> ${Math.round(cover * 100)}% seen${!recordingBare && !(bare && E.bareCoverage(bare) > 0.5) ? " · no bare-planet recording yet (planet colours may read as resource)" : ""}</span>`;
   }
 
   // ---------- the planet's edge ----------
@@ -353,13 +396,14 @@
   shot.addEventListener("wheel", (e) => { if (!disc || facing) return; e.preventDefault(); disc.r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); facing = null; updateButtons(); drawShot(); }, { passive: false });
 
   $("freeze").addEventListener("click", async () => { frozen = !frozen; if (frozen && !frame) frame = await grab().catch(() => null); updateButtons(); drawShot(); });
-  $("clearAnchors").addEventListener("click", () => { if (disc) disc = { cx: disc.cx, cy: disc.cy, r: disc.r }; anchors = []; facing = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
+  $("clearAnchors").addEventListener("click", () => { if (disc) disc = { cx: disc.cx, cy: disc.cy, r: disc.r }; anchors = []; facing = null; focal = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
   $("lock").addEventListener("click", () => {
     const groups = new Map(kinds().map((k) => [k.kind, k.items]));
     const solved = E.solveMatching(anchors.map((a) => ({ px: a.px, py: a.py, candidates: groups.get(a.kind) || [] })), disc);
     if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
     facing = solved; prevGrey = null; frozen = false;
     disc = { ...disc, D: solved.D };
+    focal = isFinite(solved.D) ? disc.r * Math.sqrt(solved.D * solved.D - 1) : null;
     const miss = solved.error * 180 / Math.PI;
     const kind = miss < 1.5 ? "ok" : miss < 4 ? "warn" : "bad";
     const worst = solved.misses.indexOf(Math.max(...solved.misses));
@@ -368,7 +412,7 @@
       updateButtons(); drawShot();
       return say("lockStatus", `Those buildings are too close together to tell which way the planet faces (${(solved.spread * 180 / Math.PI).toFixed(0)}° apart). Add some far away: "Any command center" on other colonies works well.`, "bad");
     }
-    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings. The circle is locked now: don't zoom in EVE while scanning (Clear to start over).` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
+    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings.` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
     updateButtons(); drawShot();
   });
 
@@ -383,9 +427,56 @@
     } catch (e) { /* start fresh */ }
     drawFlat(); updateButtons();
   }
-  $("resource").addEventListener("change", () => { loadCorpScan($("resource").value); drawFlat(); updateButtons(); });
-  $("scan").addEventListener("click", () => { running = !running; prevGrey = null; lostRun = 0; frozen = false; updateButtons(); if (running) say("scanStatus", "Scanning: turn the planet slowly.", "ok"); });
+  $("resource").addEventListener("change", () => { if ($("resource").value !== BARE) loadCorpScan($("resource").value); drawFlat(); updateButtons(); });
+  $("scan").addEventListener("click", () => { if (running && $("resource").value === BARE) storeBare(); running = !running; prevGrey = null; lostRun = 0; frozen = false; updateButtons(); if (running) say("scanStatus", "Scanning: turn the planet slowly.", "ok"); });
   $("showHeat").addEventListener("change", drawShot);
+
+  // ---------- automatic lock-on ----------
+  function adoptPose(pose, how) {
+    facing = { Q: pose.Q, mirrored: pose.mirrored, misses: [] };
+    disc = { cx: disc.cx, cy: disc.cy, r: disc.r, D: pose.D };
+    focal = isFinite(pose.D) ? disc.r * Math.sqrt(pose.D * pose.D - 1) : null;
+    prevGrey = null;
+    say("autoStatus", `${how}: ${pose.owner}'s colony, ${pose.inliers} buildings line up. Green rings should sit on the buildings; Scan when ready.`, "ok");
+    updateButtons();
+  }
+  function autoStep(f) {
+    const now = Date.now();
+    const cols = colonies();
+    if (!cols.length) return say("autoStatus", "No corp buildings known on this planet: point out buildings yourself, or pick another planet.", "warn");
+    if (facing) {
+      // Locked: every few frames, pull back onto any network in view (no drift).
+      if (ticks % 3) return;
+      const markers = E.findMarkers(f.data.data, f.w, f.h, disc);
+      if (markers.length < 4) return;
+      const all = cols.flatMap((c) => c.points);
+      const refined = E.refineWithMarkers(markers, all, { Q: facing.Q, mirrored: facing.mirrored, D: disc.D }, disc, 9);
+      if (refined && refined.inliers >= 6) {
+        const moved = E.angle(E.apply(refined.Q, [0, 0, 1]), E.apply(facing.Q, [0, 0, 1]));
+        if (moved < 0.05) facing.Q = refined.Q;
+      }
+      return;
+    }
+    if (autoBusy || now - autoAsked < 1500) return;
+    const markers = E.findMarkers(f.data.data, f.w, f.h, disc);
+    if (markers.length < 5) return say("autoStatus", "Looking for buildings… click a command center in EVE so its network shows (zooming in helps).", "");
+    autoBusy = true; autoAsked = now;
+    say("autoStatus", `Matching ${markers.length} marks against ${cols.length} colonies…`, "");
+    const done = (pose) => {
+      autoBusy = false;
+      if (pose && pose.inliers >= 6 && pose.inliers >= pose.of * 0.35 && !facing) adoptPose(pose, "Locked on by itself");
+      else if (!facing) say("autoStatus", "No colony matched yet: click a command center in EVE so its network shows, or zoom in on one.", "warn");
+    };
+    const msg = { id: ++workerId, markers: markers.slice(0, 120).map((m) => ({ x: m.x, y: m.y })), colonies: cols, disc: { cx: disc.cx, cy: disc.cy, r: disc.r } };
+    if (worker) {
+      const id = msg.id;
+      const onMsg = (e) => { if (e.data.id !== id) return; worker.removeEventListener("message", onMsg); done(e.data.pose); };
+      worker.addEventListener("message", onMsg);
+      worker.postMessage(msg);
+    } else {
+      setTimeout(() => done(E.autoLock(msg.markers, cols, msg.disc)), 0);
+    }
+  }
 
   let ticks = 0;
   async function tick() {
@@ -396,6 +487,20 @@
       if (!frozen && $("client").value) {
         const f = await grab().catch(() => null);
         if (f) frame = f;
+        if (f && !disc && $("auto").checked) {
+          const rim = E.findRim(f.data.data, f.w, f.h, null);
+          if (rim) { disc = rim; updateButtons(); }
+        }
+        // Zoomed in EVE: the rim moves; with the camera's lens known, so does the distance.
+        if (f && facing && disc && focal && ticks % 3 === 0) {
+          const rim = E.findRim(f.data.data, f.w, f.h, disc);
+          if (rim && (Math.abs(rim.r - disc.r) > disc.r * 0.012 || Math.hypot(rim.cx - disc.cx, rim.cy - disc.cy) > disc.r * 0.012)) {
+            disc = { cx: rim.cx, cy: rim.cy, r: rim.r, D: Math.sqrt((focal / rim.r) ** 2 + 1) };
+            prevGrey = null;
+            updateButtons();
+          }
+        }
+        if (f && disc && $("auto").checked) autoStep(f);
         if (f && running && facing && disc) {
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
           let ok = true;
@@ -405,10 +510,18 @@
           }
           if (ok) {
             prevGrey = grey;
-            const m = mapFor($("resource").value);
-            E.paint(m, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3);
-            const hint = E.missingHint(m, facing.Q, facing.mirrored), cover = E.coverage(m);
-            say("scanStatus", cover > 0.97 ? "Whole planet seen: save it, or pick the next resource." : `${Math.round(cover * 100)}% seen. Still missing: ${hint || "a little here and there"}.`, "ok");
+            if ($("resource").value === BARE) {
+              if (!bare) bare = E.newBare();
+              E.paint(bare, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, "record");
+              const cover = E.bareCoverage(bare);
+              if (ticks % 20 === 0) storeBare();
+              say("scanStatus", cover > 0.97 ? "Bare planet recorded: switch EVE to a resource and pick it here." : `Bare planet ${Math.round(cover * 100)}% recorded. Still missing: ${E.missingHint({ weight: bare.weight }, facing.Q, facing.mirrored) || "a little here and there"}.`, "ok");
+            } else {
+              const m = mapFor($("resource").value);
+              E.paint(m, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, bare && E.bareCoverage(bare) > 0.2 ? bare : null);
+              const hint = E.missingHint(m, facing.Q, facing.mirrored), cover = E.coverage(m);
+              say("scanStatus", cover > 0.97 ? "Whole planet seen: save it, or pick the next resource." : `${Math.round(cover * 100)}% seen. Still missing: ${hint || "a little here and there"}.`, "ok");
+            }
           } else if (lostRun > 2) {
             prevGrey = grey; // start again from here; a building click fixes any jump
             say("scanStatus", "Lost the grip (turned too fast, or the picture changed). Turn slower; if the green rings are off, pick a building and click it.", "warn");
@@ -425,6 +538,7 @@
   $("save").addEventListener("click", async () => {
     const p = currentPlanet(), resource = $("resource").value, m = maps.get(resource);
     if (!p || !m) return;
+    E.fillHoles(m, 4);
     const bytes = E.cells(m);
     let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
     say("saveStatus", "Saving…");

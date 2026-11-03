@@ -149,5 +149,19 @@ check("and the buildings fit", nearSolve && nearSolve.error < 0.01);
 const rt = E.toSphere(E.toPicture([0.3, 0.5, Math.sqrt(1 - 0.34)], near).x, E.toPicture([0.3, 0.5, Math.sqrt(1 - 0.34)], near).y, near);
 check("picture ↔ planet round trip (close camera)", rt && Math.abs(rt[0] - 0.3) < 1e-9 && Math.abs(rt[1] - 0.5) < 1e-9);
 
+// Unmixing: a resource level laid over a lava-red planet comes back out.
+{
+  const base = [150, 60, 30];
+  const BAND = [[20, 14, 25], [21, 21, 40], [19, 36, 55], [18, 57, 49], [18, 75, 33], [37, 99, 7], [74, 112, 7], [118, 126, 6], [145, 138, 5], [161, 109, 12], [169, 58, 4], [179, 5, 3], [187, 43, 42], [195, 191, 190]];
+  let worst = 0;
+  for (const level of [0.2, 0.45, 0.7, 0.9]) {
+    const t = level * (BAND.length - 1), a = Math.floor(t), b = Math.min(BAND.length - 1, a + 1), f = t - a;
+    const c = [0, 1, 2].map((i) => 0.65 * base[i] + 0.35 * 1.6 * (BAND[a][i] * (1 - f) + BAND[b][i] * f));
+    worst = Math.max(worst, Math.abs(E.unmix(c[0], c[1], c[2], base[0], base[1], base[2]) - level));
+  }
+  check("unmixing finds the level under a lava-red planet", worst < 0.03);
+  check("glowing lava is skipped", E.unmix(250, 230, 120, 250, 220, 100) === null);
+}
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);

@@ -295,9 +295,62 @@
   function newMap() { return { sum: new Float32Array(GRID_W * GRID_H), weight: new Float32Array(GRID_W * GRID_H) }; }
 
   /** Paint one picture onto a resource's map: every disc pixel facing the camera well enough. */
-  function paint(map, rgba, width, height, disc, Q, mirrored, every) {
+  // EVE's scan colour band (sampled from the Scan panel), low → high, and how it's laid over
+  // the planet: what you see = (1 − OVERLAY) × planet + OVERLAY × BOOST × band colour.
+  const BAND = [[20, 14, 25], [21, 21, 40], [19, 36, 55], [18, 57, 49], [18, 75, 33], [37, 99, 7], [74, 112, 7], [118, 126, 6], [145, 138, 5], [161, 109, 12], [169, 58, 4], [179, 5, 3], [187, 43, 42], [195, 191, 190]];
+  const OVERLAY = 0.35, BOOST = 1.6, STEPS = 60;
+  const BAND_FINE = (() => {
+    const out = [];
+    for (let i = 0; i < STEPS; i++) {
+      const t = i / (STEPS - 1) * (BAND.length - 1), a = Math.floor(t), b = Math.min(BAND.length - 1, a + 1), f = t - a;
+      out.push([0, 1, 2].map((c) => OVERLAY * BOOST * (BAND[a][c] * (1 - f) + BAND[b][c] * f)));
+    }
+    return out;
+  })();
+  /**
+   * Resource level 0 … 1 at a pixel, knowing the bare planet's colour there: the band colour
+   * that, laid over the planet, gives what's on screen. null where the planet is too bright to
+   * see through (glowing lava).
+   */
+  function unmix(r, g, b, br, bg, bb) {
+    if (Math.max(br, bg, bb) > 215) return null;
+    const k = 1 - OVERLAY;
+    let best = Infinity, at = 0;
+    for (let i = 0; i < STEPS; i++) {
+      const c = BAND_FINE[i];
+      const e = (k * br + c[0] - r) ** 2 + (k * bg + c[1] - g) ** 2 + (k * bb + c[2] - b) ** 2;
+      if (e < best) { best = e; at = i; }
+    }
+    return best > 4000 ? null : at / (STEPS - 1);
+  }
+
+  /** The bare planet's colours (EVE on "No filter"), one cell per degree, for unmixing. */
+  function newBare() { return { rgb: new Float32Array(GRID_W * GRID_H * 3), weight: new Float32Array(GRID_W * GRID_H) }; }
+  function bareCoverage(bare) { return coverage({ weight: bare.weight }); }
+  function bareToBytes(bare) {
+    const out = new Uint8Array(GRID_W * GRID_H * 3);
+    for (let i = 0; i < GRID_W * GRID_H; i++) if (bare.weight[i] > 0) for (let c = 0; c < 3; c++) out[i * 3 + c] = Math.round(bare.rgb[i * 3 + c] / bare.weight[i]);
+    return out;
+  }
+  function bareFromBytes(bytes) {
+    const bare = newBare();
+    for (let i = 0; i < GRID_W * GRID_H; i++) {
+      if (!bytes[i * 3] && !bytes[i * 3 + 1] && !bytes[i * 3 + 2]) continue;
+      bare.weight[i] = 1;
+      for (let c = 0; c < 3; c++) bare.rgb[i * 3 + c] = bytes[i * 3 + c];
+    }
+    return bare;
+  }
+
+  /**
+   * Paint one picture onto a map: every disc pixel facing the camera well enough. With `bare`
+   * (a bare-planet map) it's a resource map, unmixed against the planet's own colours; with
+   * `bare === "record"`, `map` is a bare map being recorded.
+   */
+  function paint(map, rgba, width, height, disc, Q, mirrored, every, bare) {
     const Qt = transpose(Q), step = every || 2;
     let painted = 0;
+    const recording = bare === "record";
     const y0 = Math.max(0, Math.floor(disc.cy - disc.r)), y1 = Math.min(height - 1, Math.ceil(disc.cy + disc.r));
     const x0 = Math.max(0, Math.floor(disc.cx - disc.r)), x1 = Math.min(width - 1, Math.ceil(disc.cx + disc.r));
     for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) {
@@ -307,12 +360,46 @@
       if (square < 0.35) continue; // near the edge the picture is too squashed to trust
       const { lat, lon } = latLon(apply(Qt, v), mirrored);
       const row = Math.min(GRID_H - 1, Math.floor(lat / Math.PI * GRID_H)), col = Math.min(GRID_W - 1, Math.floor(lon / (2 * Math.PI) * GRID_W));
-      const k = (y * width + x) * 4, w = square * square;
-      map.sum[row * GRID_W + col] += heat(rgba[k], rgba[k + 1], rgba[k + 2]) * w;
-      map.weight[row * GRID_W + col] += w;
+      const cell = row * GRID_W + col, k = (y * width + x) * 4, w = square * square;
+      if (recording) {
+        map.rgb[cell * 3] += rgba[k] * w; map.rgb[cell * 3 + 1] += rgba[k + 1] * w; map.rgb[cell * 3 + 2] += rgba[k + 2] * w;
+        map.weight[cell] += w;
+        painted++;
+        continue;
+      }
+      let level;
+      if (bare && bare.weight[cell] > 0) {
+        const bw = bare.weight[cell];
+        level = unmix(rgba[k], rgba[k + 1], rgba[k + 2], bare.rgb[cell * 3] / bw, bare.rgb[cell * 3 + 1] / bw, bare.rgb[cell * 3 + 2] / bw);
+        if (level === null) continue;
+      } else {
+        level = heat(rgba[k], rgba[k + 1], rgba[k + 2]);
+      }
+      map.sum[cell] += level * w;
+      map.weight[cell] += w;
       painted++;
     }
     return painted;
+  }
+
+  /** Fill small holes (glowing lava, a missed patch) from the cells round them. */
+  function fillHoles(map, rounds) {
+    for (let round = 0; round < (rounds || 3); round++) {
+      const add = [];
+      for (let row = 0; row < GRID_H; row++) for (let col = 0; col < GRID_W; col++) {
+        const i = row * GRID_W + col;
+        if (map.weight[i] > 0) continue;
+        let s = 0, n = 0;
+        for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const r = row + dr;
+          if (r < 0 || r >= GRID_H) continue;
+          const j = r * GRID_W + ((col + dc + GRID_W) % GRID_W);
+          if (map.weight[j] > 0) { s += map.sum[j] / map.weight[j]; n++; }
+        }
+        if (n >= 3) add.push([i, s / n]);
+      }
+      for (const [i, v] of add) { map.sum[i] = v * 0.1; map.weight[i] = 0.1; }
+    }
   }
 
   /** The map as SeAT's bytes: 0 = not seen, 1 … 251 = heat 0 … 1. */
@@ -391,7 +478,18 @@
   function findRim(rgba, width, height, around) {
     const lum = (x, y) => { const k = ((y | 0) * width + (x | 0)) * 4; return 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2]; };
     const cx = around ? around.cx : width / 2, cy = around ? around.cy : height / 2;
-    const from = around ? around.r * 0.75 : 20, to = around ? around.r * 1.35 : Math.min(width, height) * 0.6;
+    const from = around ? around.r * 0.75 : 20, to = around ? around.r * 1.35 : Math.hypot(width, height) / 2;
+    // How dark "space" is here (nebulae make it brownish, not black): between the darkest picture
+    // corners and the planet's middle.
+    const sample = (x, y) => lum(Math.max(0, Math.min(width - 1, x)), Math.max(0, Math.min(height - 1, y)));
+    const corners = [];
+    for (let i = 0; i < 40; i++) { corners.push(sample(i * 5, i * 3), sample(width - 1 - i * 5, i * 3), sample(i * 5, height - 1 - i * 3), sample(width - 1 - i * 5, height - 1 - i * 3)); }
+    corners.sort((a, b) => a - b);
+    const spaceLevel = corners[Math.floor(corners.length * 0.5)];
+    let middle = 0, count = 0;
+    for (let dy = -30; dy <= 30; dy += 6) for (let dx = -30; dx <= 30; dx += 6) { middle += sample(cx + dx, cy + dy); count++; }
+    middle /= count;
+    const darkBelow = Math.max(18, spaceLevel + 0.22 * Math.max(0, middle - spaceLevel));
     // How dark space is here: the darkest tenth of a ring well outside the guess.
     const points = [];
     for (let i = 0; i < 72; i++) {
@@ -400,7 +498,7 @@
       for (let r = from; r < to; r += 2) {
         const x = cx + dx * r, y = cy + dy * r;
         if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) { edge = null; break; }
-        if (lum(x, y) < 18) { dark++; if (dark === 1) edge = r; if (dark >= 5 && inside) break; } else { dark = 0; edge = null; inside = true; }
+        if (lum(x, y) < darkBelow) { dark++; if (dark === 1) edge = r; if (dark >= 5 && inside) break; } else { dark = 0; edge = null; inside = true; }
       }
       if (edge && dark >= 5 && inside) points.push([cx + dx * edge, cy + dy * edge]);
     }
@@ -492,7 +590,141 @@
     return best;
   }
 
+  // ---- automatic lock-on from EVE's building markers ----
+  /**
+   * EVE's building markers in the picture: small dark dots (buildings, the dot in each head's
+   * disc) on a brighter planet. Returns [{x, y, strength}], close ones merged, inside the disc
+   * away from the rim.
+   */
+  function findMarkers(rgba, width, height, disc) {
+    // Dark specks on the planet: pixels well below their neighbourhood's average, grouped into
+    // small blobs (a building's dot, or the hollow ring EVE draws for one seen from afar).
+    const L = new Float32Array(width * height);
+    for (let i = 0; i < L.length; i++) L[i] = 0.3 * rgba[i * 4] + 0.59 * rgba[i * 4 + 1] + 0.11 * rgba[i * 4 + 2];
+    const W1 = width + 1, sum = new Float64Array(W1 * (height + 1));
+    for (let y = 0; y < height; y++) {
+      let row = 0;
+      for (let x = 0; x < width; x++) { row += L[y * width + x]; sum[(y + 1) * W1 + x + 1] = sum[y * W1 + x + 1] + row; }
+    }
+    const R = 7;
+    const mean = (x, y) => {
+      const xa = Math.max(0, x - R), xb = Math.min(width, x + R + 1), ya = Math.max(0, y - R), yb = Math.min(height, y + R + 1);
+      return (sum[yb * W1 + xb] - sum[ya * W1 + xb] - sum[yb * W1 + xa] + sum[ya * W1 + xa]) / ((xb - xa) * (yb - ya));
+    };
+    const r2 = (disc.r * 0.93) ** 2;
+    const dark = new Uint8Array(width * height);
+    const x0 = Math.max(1, Math.floor(disc.cx - disc.r)), x1 = Math.min(width - 2, Math.ceil(disc.cx + disc.r));
+    const y0 = Math.max(1, Math.floor(disc.cy - disc.r)), y1 = Math.min(height - 2, Math.ceil(disc.cy + disc.r));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if ((x - disc.cx) ** 2 + (y - disc.cy) ** 2 > r2) continue;
+      const m = mean(x, y);
+      if (m > 45 && L[y * width + x] < m - Math.max(18, m * 0.22)) dark[y * width + x] = 1;
+    }
+    const found = [];
+    const stack = [];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      if (!dark[y * width + x]) continue;
+      let n = 0, sx = 0, sy = 0, minX = x, maxX = x, minY = y, maxY = y, depth = 0;
+      stack.push(y * width + x); dark[y * width + x] = 0;
+      while (stack.length) {
+        const k = stack.pop(), px = k % width, py = (k - px) / width;
+        n++; sx += px; sy += py; depth += mean(px, py) - L[k];
+        if (px < minX) minX = px; if (px > maxX) maxX = px; if (py < minY) minY = py; if (py > maxY) maxY = py;
+        for (const nk of [k - 1, k + 1, k - width, k + width]) if (dark[nk]) { dark[nk] = 0; stack.push(nk); }
+        if (n > 400) break;
+      }
+      const w = maxX - minX + 1, h = maxY - minY + 1;
+      // A speck: a few pixels to a small ring, about as wide as tall (not a line or a big patch).
+      if (n < 3 || n > 120 || w > 16 || h > 16 || w > 3 * h || h > 3 * w) continue;
+      found.push({ x: sx / n, y: sy / n, strength: depth / n, n });
+    }
+    found.sort((a, b) => b.strength - a.strength);
+    return found.slice(0, 200);
+  }
+
+  /**
+   * Which way the planet faces, from markers alone: tries each colony's layout (buildings and
+   * heads) against the dots, two points at a time, and keeps the pose that lines up the most.
+   * colonies = [{ owner, points: [{ lat, lon }] }]. Returns { Q, D, mirrored, owner, inliers, of } or null.
+   */
+  function autoLock(markers, colonies, disc, options) {
+    const opts = options || {};
+    const Ds = opts.Ds || [Infinity, 6, 4, 3, 2.5, 2.1, 1.8, 1.6];
+    const mirrors = opts.mirrors || [true, false];
+    const tolPx = opts.tolPx || 6;
+    let best = null;
+    for (const D of Ds) {
+      const view = { ...disc, D };
+      const cams = markers.map((m) => toSphere(m.x, m.y, view)).map((v, i) => v && { v, m: markers[i] }).filter(Boolean);
+      if (cams.length < 3) continue;
+      // Pairs of dots far enough apart to pin a direction.
+      const dotPairs = [];
+      for (let i = 0; i < cams.length; i++) for (let j = i + 1; j < cams.length; j++) {
+        const d = Math.hypot(cams[i].m.x - cams[j].m.x, cams[i].m.y - cams[j].m.y);
+        if (d > 25) dotPairs.push([i, j, angle(cams[i].v, cams[j].v)]);
+      }
+      dotPairs.sort((a, b) => b[2] - a[2]);
+      const usePairs = dotPairs.slice(0, 400);
+      const tolAngle = (tolPx * 1.5) / disc.r;
+      for (const mirrored of mirrors) for (const colony of colonies) {
+        const pts = colony.points.map((p) => planetVector(p.lat, p.lon, mirrored));
+        if (pts.length < 3) continue;
+        const pinPairs = [];
+        for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) pinPairs.push([a, b, angle(pts[a], pts[b])]);
+        pinPairs.sort((p, q) => p[2] - q[2]);
+        for (const [i, j, dAng] of usePairs) {
+          // Pin pairs about as far apart as these two dots.
+          let lo = 0, hi = pinPairs.length;
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (pinPairs[mid][2] < dAng - tolAngle) lo = mid + 1; else hi = mid; }
+          for (let k = lo; k < pinPairs.length && pinPairs[k][2] <= dAng + tolAngle; k++) {
+            for (const [a, b] of [[pinPairs[k][0], pinPairs[k][1]], [pinPairs[k][1], pinPairs[k][0]]]) {
+              const ci = cams[i].v, cj = cams[j].v;
+              const Q = fitRotation([pts[a], pts[b], norm(cross(pts[a], pts[b]))], [ci, cj, norm(cross(ci, cj))]);
+              // Each dot counts once (a tight colony can't pile all its buildings on one dot).
+              let inliers = 0, err = 0;
+              const used = new Set();
+              for (const p of pts) {
+                const c = apply(Q, p);
+                const pic = toPicture(c, view);
+                if (!pic.front) continue;
+                let nearest = Infinity, which = -1;
+                for (let n = 0; n < markers.length; n++) {
+                  if (used.has(n)) continue;
+                  const m = markers[n], d = (m.x - pic.x) ** 2 + (m.y - pic.y) ** 2;
+                  if (d < nearest) { nearest = d; which = n; }
+                }
+                if (nearest < tolPx * tolPx) { inliers++; err += Math.sqrt(nearest); used.add(which); }
+              }
+              if (inliers >= 5 && (!best || inliers > best.inliers || (inliers === best.inliers && err < best.err))) {
+                best = { Q, D, mirrored, owner: colony.owner, inliers, of: pts.length, err };
+              }
+            }
+          }
+        }
+      }
+    }
+    if (!best) return null;
+    return refineWithMarkers(markers, colonies.find((c) => c.owner === best.owner).points, best, disc) || best;
+  }
+
+  /** Pull a pose onto the markers near where its buildings should be (every frame, no clicks). */
+  function refineWithMarkers(markers, points, pose, disc, tolPx) {
+    const tol = tolPx || 10;
+    const view = { ...disc, D: pose.D };
+    const pairs = [];
+    for (const p of points) {
+      const pv = planetVector(p.lat, p.lon, pose.mirrored), pic = toPicture(apply(pose.Q, pv), view);
+      if (!pic.front) continue;
+      let nearest = null, dist = tol * tol;
+      for (const m of markers) { const d = (m.x - pic.x) ** 2 + (m.y - pic.y) ** 2; if (d < dist) { dist = d; nearest = m; } }
+      if (nearest) { const cam = toSphere(nearest.x, nearest.y, view); if (cam) pairs.push([pv, cam]); }
+    }
+    if (pairs.length < 4) return null;
+    const Q = fitRotation(pairs.map((p) => p[0]), pairs.map((p) => p[1]));
+    return { ...pose, Q, inliers: pairs.length };
+  }
+
   const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
-    solveAnchors, solveAnchorsEitherWay, solveMatching, fitCircle, findRim, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint };
+    solveAnchors, solveAnchorsEitherWay, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);
