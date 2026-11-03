@@ -1,0 +1,22 @@
+// Patch 69/70: sound & graphics presets shared by Client tuning and New launch group.
+// Music always off; world (wormhole activations) and interface (alarms) never muted.
+  // Suggested values. Music always off; world (wormhole activations) and interface (alarms) never muted.
+const LOW = { textureQuality: 2, shaderQuality: 1, lodQuality: 1, shadowQuality: 0, reflectionQuality: 0, aoQuality: 0, postProcessingQuality: 0, volumetricQuality: 0, antiAliasing: 0, charTextureQuality: 2, dofEnabled: 0, charClothSimulation: 0, frameGeneration: false };
+const QUIET_MUSIC = { eveampGain: 0, useCombatMusic: 0, suppressTurret: 1 };
+window.DR_PRESETS = [
+    { id: "main", name: "Main (the one you fly)", why: "Good-looking, every warning loud, no music.",
+      values: { masterVolume: 0.8, worldVolume: 0.8, uiGain: 0.7, evevoiceGain: 0.9, ...QUIET_MUSIC,
+                textureQuality: 1, shaderQuality: 2, lodQuality: 2, shadowQuality: 1, reflectionQuality: 1, aoQuality: 1, postProcessingQuality: 1, volumetricQuality: 1, antiAliasing: 1, charTextureQuality: 1, dofEnabled: 0, charClothSimulation: 0, frameGeneration: false },
+      prefs: { bracketsAlwaysShowShipText: true } },
+    { id: "alt", name: "Alt / multibox", why: "Light on the PC; you still hear activations and alarms, a bit quieter.",
+      values: { masterVolume: 0.5, worldVolume: 0.7, uiGain: 0.6, evevoiceGain: 0.7, ...QUIET_MUSIC, ...LOW },
+      prefs: { bracketsAlwaysShowShipText: true } },
+    { id: "watch", name: "Hole watcher / scout", why: "Lightest graphics, world sound up so a wormhole activation is heard over everything.",
+      values: { masterVolume: 0.7, worldVolume: 1.0, uiGain: 0.8, evevoiceGain: 0.9, ...QUIET_MUSIC, ...LOW },
+      prefs: { bracketsAlwaysShowShipText: true } },
+    { id: "background", name: "Background (PI, industry, market)", why: "Lightest graphics, quiet but not silent: alarms still come through.",
+      values: { masterVolume: 0.35, worldVolume: 0.3, uiGain: 0.6, evevoiceGain: 0.6, ...QUIET_MUSIC, ...LOW },
+      prefs: {} },
+    { id: "sound", name: "Just kill the music", why: "Changes only music, combat music and turret noise; leaves everything else.",
+      values: { ...QUIET_MUSIC }, prefs: {} },
+  ];

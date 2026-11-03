@@ -41,7 +41,7 @@
   .motd { max-width: 478px; margin: 0 0 22px; padding: 10px 14px; border: 1px solid #5a2a14; border-radius: 10px;
           background: #1c120d; color: #f0c9a8; font-size: 14px; white-space: pre-wrap; text-align: center; }
   /* EVE client tools (coming): launch groups, multibox previews, client settings */
-  .tools { margin-top: 26px; display: grid; grid-template-columns: repeat(2, 330px); gap: 12px; }
+  .tools { margin-top: 26px; display: grid; grid-template-columns: repeat(3, 286px); gap: 12px; }
   @media (max-width: 960px) { .tools { grid-template-columns: repeat(1, 300px); } }
   .tools h2 { grid-column: 1 / -1; margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .8px;
               color: var(--muted); text-transform: uppercase; }
@@ -97,15 +97,19 @@
 
   <div class="tools">
     <h2>EVE clients</h2>
+    <button class="tool" data-tool="newgroup">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9M7.5 12h9"/></svg>
+      <div><b>New launch group<em>NEW</em></b><span>Pick characters, preset and keys: one page, its own profile</span></div>
+    </button>
     <button class="tool" data-tool="launch">
       <svg viewBox="0 0 24 24"><path d="M12 3c3 2.2 4.5 5.4 4.5 9.2L14 15h-4l-2.5-2.8C7.5 8.4 9 5.2 12 3z"/><circle cx="12" cy="9" r="1.6"/>
         <path d="M8.2 13.5L5 16.5l3 .5M15.8 13.5l3.2 3-3 .5M10.5 17.5L12 21l1.5-3.5"/></svg>
-      <div><b>Launch groups<em>NEW</em></b><span>Groups of clients; open the launcher for one</span></div>
+      <div><b>Launch groups</b><span>Groups of clients; open the launcher for one</span></div>
     </button>
     <button class="tool" data-tool="multibox">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.2"/><rect x="13" y="4" width="8" height="7" rx="1.2"/>
         <rect x="3" y="13" width="8" height="7" rx="1.2"/><rect x="13" y="13" width="8" height="7" rx="1.2"/></svg>
-      <div><b>Multibox previews<em>NEW</em></b><span>Live thumbnails of every client, click to switch</span></div>
+      <div><b>Multibox previews</b><span>Live thumbnails of every client, click to switch</span></div>
     </button>
     <button class="tool" data-tool="settings">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
@@ -113,13 +117,14 @@
     </button>
     <button class="tool" data-tool="tuning">
       <svg viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16"/><circle cx="5" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="7" r="2"/></svg>
-      <div><b>Client tuning<em>NEW</em></b><span>Sound, graphics and multibox presets, plus a setup guide</span></div>
+      <div><b>Client tuning</b><span>Sound, graphics and multibox presets, plus a setup guide</span></div>
     </button>
   </div>
   <div class="plinks">
     <button id="pEdit" title="Arrange previews: drag, resize from the corner, choose shown / click-through / opacity per client. Done locks them.">Edit preview layout</button>
     <button id="pClose">Close previews</button>
     <label title="See-through-ness of every preview at once (each client's own opacity still applies)">All previews <input type="range" id="pOpacity" min="10" max="100" step="5" value="100"> <span id="pOpacityVal">100%</span></label>
+    <label title="Open the previews by themselves when EVE clients start"><input type="checkbox" id="pAuto"> Open by themselves</label>
     <button id="pImport" title="Bring in thumbnail spots and cycle groups (with their pedal hotkeys) from your EVE-O Preview settings file">Import EVE-O Preview settings…</button>
   </div>
   <p class="soon" id="soon"></p>
@@ -165,6 +170,7 @@
       if (btn.dataset.tool === "launch") { location.href = "launch.html"; return; }
       if (btn.dataset.tool === "settings") { location.href = "profiles.html"; return; }
       if (btn.dataset.tool === "tuning") { location.href = "tuning.html"; return; }
+      if (btn.dataset.tool === "newgroup") { location.href = "newgroup.html"; return; }
       if (btn.dataset.tool === "multibox") {
         soon.textContent = "Opening a preview for each EVE client…";
         try {
@@ -187,6 +193,9 @@
     const pct = Math.round(((l && l.opacity) || 1) * 100);
     pOpacity.value = String(pct); pOpacityVal.textContent = pct + "%";
   }).catch(() => {});
+  const pAuto = document.getElementById("pAuto");
+  invoke("preview_layout").then(l => { pAuto.checked = !l || l.auto_open !== false; }).catch(() => {});
+  pAuto.addEventListener("change", () => invoke("set_previews_auto", { on: pAuto.checked }).catch(() => {}));
   pOpacity.addEventListener("input", () => {
     pOpacityVal.textContent = pOpacity.value + "%";
     invoke("set_previews_opacity", { opacity: Number(pOpacity.value) / 100 }).catch(() => {});

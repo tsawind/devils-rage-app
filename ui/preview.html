@@ -15,9 +15,10 @@
   /* The whole thumbnail: drag to move (edit mode) or click to bring the client forward. */
   #drag { position: fixed; inset: 0; z-index: 2; cursor: pointer; }
   body.edit #drag { cursor: move; }
-  #frame { position: fixed; inset: 0; border: 2px solid #a8181f; pointer-events: none; box-sizing: border-box; z-index: 4; }
+  /* Patch 70: no loud frame on every preview; only the client in front lights up. */
+  #frame { position: fixed; inset: 0; border: 1px solid #0006; pointer-events: none; box-sizing: border-box; z-index: 4; }
   body.edit #frame { border: 2px dashed #f0c040; }
-  body.through #frame { border-color: #3a6ea8; }
+  body.edit.through #frame { border-color: #3a6ea8; }
   /* The client in front right now. */
   body.active #frame { border: 3px solid #adff2f; }
   body.login #name { color: #f0c040; }
@@ -85,6 +86,9 @@
     document.getElementById("opacity").value = String(Math.round((m.opacity || 1) * 100));
   };
   invoke("preview_mode", { name }).then(window.__previewMode).catch(() => {});
+  // The app pushes the client in front the moment it changes (no waiting for a picture).
+  window.__previewActive = (front) => document.body.classList.toggle("active", front === name);
+  invoke("active_client").then(window.__previewActive).catch(() => {});
 
   async function tick() {
     if (stopped) return;
@@ -98,7 +102,6 @@
       // Give a minimized / closed client a moment before saying so.
       if (failures > 2) { msg.textContent = String(e || "no picture"); msg.hidden = false; }
     }
-    invoke("active_client").then((front) => document.body.classList.toggle("active", front === name)).catch(() => {});
     setTimeout(tick, 500);
   }
   tick();

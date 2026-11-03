@@ -75,11 +75,14 @@ pub struct Layout {
     /// Master opacity for every preview (multiplies each client's own), 0.1 – 1.0.
     #[serde(default = "one")]
     pub opacity: f64,
+    /// Patch 70: open the previews by themselves when EVE clients start.
+    #[serde(default = "yes")]
+    pub auto_open: bool,
 }
 
 impl Default for Layout {
     fn default() -> Self {
-        Layout { edit: false, clients: BTreeMap::new(), opacity: 1.0 }
+        Layout { edit: false, clients: BTreeMap::new(), opacity: 1.0, auto_open: true }
     }
 }
 
@@ -346,6 +349,61 @@ pub fn set_preview_client(app: AppHandle, name: String, enabled: Option<bool>, c
         }
     }
     Ok(())
+}
+
+/// Patch 70: open previews by themselves when EVE clients start (Home's switch).
+#[tauri::command]
+pub fn set_previews_auto(app: AppHandle, on: bool) {
+    with_layout(&app, |layout| layout.auto_open = on);
+    save_soon(&app);
+}
+
+/// Patch 70: watch the client in front and the clients open. The client in front is pushed to
+/// every preview the moment it changes (the green border no longer waits for a picture), and
+/// new EVE clients get their previews without anyone pressing a button.
+pub fn start_watch(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut front: Option<String> = None;
+        let mut front_handle: isize = 0;
+        let mut known: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut tick: u32 = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            let handle = crate::clipboard::foreground_handle();
+            if handle != front_handle {
+                front_handle = handle;
+                let now = crate::clipboard::foreground_client();
+                if now.is_some() && now != front {
+                    front = now.clone();
+                    push_active(&app, front.as_deref());
+                }
+            }
+            tick += 1;
+            if tick % 25 == 0 {
+                let open: std::collections::BTreeSet<String> = crate::clipboard::open_clients().into_iter().map(|(name, _)| name).collect();
+                let fresh = open.iter().any(|name| !known.contains(name));
+                known = open;
+                if fresh && with_layout(&app, |layout| layout.auto_open) {
+                    let app = app.clone();
+                    // Give a new client a moment to draw something before its preview opens.
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        let _ = open_previews(app);
+                    });
+                }
+            }
+        }
+    });
+}
+
+/// Tell every preview which client is in front now.
+pub fn push_active(app: &AppHandle, name: Option<&str>) {
+    let arg = serde_json::to_string(&name).unwrap_or_else(|_| "null".into());
+    for (label, window) in app.webview_windows() {
+        if label.starts_with(PREFIX) {
+            let _ = window.eval(format!("window.__previewActive && window.__previewActive({arg});"));
+        }
+    }
 }
 
 /// The master opacity for every preview at once (Home's slider).

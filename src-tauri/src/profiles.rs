@@ -94,7 +94,7 @@ fn cache_root() -> Option<PathBuf> {
     root.is_dir().then_some(root)
 }
 
-fn root() -> Result<PathBuf, String> {
+pub(crate) fn root() -> Result<PathBuf, String> {
     cache_root().ok_or_else(|| "Couldn't find EVE's settings folder (CCP\\EVE\\c_eve_sharedcache_tq_tranquility under your local app data).".to_string())
 }
 
@@ -122,7 +122,7 @@ fn modified_ms(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-fn clients_open() -> usize {
+pub(crate) fn clients_open() -> usize {
     crate::clipboard::open_eve_windows().len() + crate::clipboard::open_login_windows().len()
 }
 
@@ -157,7 +157,7 @@ pub struct Profile {
     pub modified: u64,
 }
 
-fn entries_in(dir: &Path, read: impl Fn(&str) -> Option<(Kind, u64)>) -> Vec<SettingsEntry> {
+pub(crate) fn entries_in(dir: &Path, read: impl Fn(&str) -> Option<(Kind, u64)>) -> Vec<SettingsEntry> {
     let mut out: Vec<SettingsEntry> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -296,7 +296,7 @@ fn copy_profile_files(from: &Path, to: &Path) -> Result<usize, String> {
 }
 
 /// Copy every profile's files (not the Browser caches) into a new dated backup folder.
-fn backup_all(root: &Path, note: &str) -> Result<String, String> {
+pub(crate) fn backup_all(root: &Path, note: &str) -> Result<String, String> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     let mut name = format!("{} UTC{note}", backup_name(now, 0));
     let mut n = 2;

@@ -62,18 +62,7 @@
   <button class="back" id="home">← Home</button>
 </header>
 <main>
-  <details class="card" id="guideCard" open>
-    <summary style="cursor: pointer"><b>Guide: set up a group of clients start to finish</b></summary>
-    <ol class="guide">
-      <li><b>Make the launch group.</b> <span class="link" data-go="accounts">Your accounts</span>: type a name (e.g. “Test Launch”) in the new-group box, Add, then tick it on a few characters on <b>different accounts</b> (the launcher starts one character per account).</li>
-      <li><b>See it in the app.</b> <span class="link" data-go="launch">Launch groups</span> → ↻ Refresh. Give it pedal keys (Next / Prev).</li>
-      <li><b>Build the baseline.</b> Start one of them through the EVE launcher, arrange windows, overview and shortcuts the way you want everyone, then <b>log out and close that client</b> (EVE saves its settings on close).</li>
-      <li><b>Copy it to the group.</b> With every client closed: <span class="link" data-go="settings">Client settings</span> → Set up a launch group → pick the group and the baseline → Copy to the group.</li>
-      <li><b>Tune sound and graphics.</b> Here: pick a preset below (Alt for the group, Main for your own client), pick the group's profiles, Apply. Music off, alarms and wormhole activations kept.</li>
-      <li><b>Match the EVE launcher once.</b> On the group's card in <span class="link" data-go="launch">Launch groups</span>, open “Set this group up in the EVE launcher” and follow it (same accounts, client profile numbers as shown).</li>
-      <li><b>Launch.</b> ▶ Open launcher, launch the group, then <span class="link" data-go="previews">Multibox previews</span> and cycle with the pedal.</li>
-    </ol>
-  </details>
+  <div class="card">Setting up a new group of clients? Use <span class="link" id="toNew" style="color: var(--red-hi); cursor: pointer; text-decoration: underline">New launch group</span>: it does everything on one page, in a profile folder of its own. This page tunes sound and graphics on profiles you already have.</div>
 
   <div class="warn" id="openWarn" hidden></div>
   <div class="warn" id="noRoot" hidden></div>
@@ -106,31 +95,13 @@
   </div>
 </main>
 
+<script src="presets.js"></script>
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
-  // Suggested values. Music always off; world (wormhole activations) and interface (alarms) never muted.
-  const LOW = { textureQuality: 2, shaderQuality: 1, lodQuality: 1, shadowQuality: 0, reflectionQuality: 0, aoQuality: 0, postProcessingQuality: 0, volumetricQuality: 0, antiAliasing: 0, charTextureQuality: 2, dofEnabled: 0, charClothSimulation: 0, frameGeneration: false };
-  const QUIET_MUSIC = { eveampGain: 0, useCombatMusic: 0, suppressTurret: 1 };
-  const PRESETS = [
-    { id: "main", name: "Main (the one you fly)", why: "Good-looking, every warning loud, no music.",
-      values: { masterVolume: 0.8, worldVolume: 0.8, uiGain: 0.7, evevoiceGain: 0.9, ...QUIET_MUSIC,
-                textureQuality: 1, shaderQuality: 2, lodQuality: 2, shadowQuality: 1, reflectionQuality: 1, aoQuality: 1, postProcessingQuality: 1, volumetricQuality: 1, antiAliasing: 1, charTextureQuality: 1, dofEnabled: 0, charClothSimulation: 0, frameGeneration: false },
-      prefs: { bracketsAlwaysShowShipText: true } },
-    { id: "alt", name: "Alt / multibox", why: "Light on the PC; you still hear activations and alarms, a bit quieter.",
-      values: { masterVolume: 0.5, worldVolume: 0.7, uiGain: 0.6, evevoiceGain: 0.7, ...QUIET_MUSIC, ...LOW },
-      prefs: { bracketsAlwaysShowShipText: true } },
-    { id: "watch", name: "Hole watcher / scout", why: "Lightest graphics, world sound up so a wormhole activation is heard over everything.",
-      values: { masterVolume: 0.7, worldVolume: 1.0, uiGain: 0.8, evevoiceGain: 0.9, ...QUIET_MUSIC, ...LOW },
-      prefs: { bracketsAlwaysShowShipText: true } },
-    { id: "background", name: "Background (PI, industry, market)", why: "Lightest graphics, quiet but not silent: alarms still come through.",
-      values: { masterVolume: 0.35, worldVolume: 0.3, uiGain: 0.6, evevoiceGain: 0.6, ...QUIET_MUSIC, ...LOW },
-      prefs: {} },
-    { id: "sound", name: "Just kill the music", why: "Changes only music, combat music and turret noise; leaves everything else.",
-      values: { ...QUIET_MUSIC }, prefs: {} },
-  ];
+  const PRESETS = window.DR_PRESETS;
   const GROUPS = [["Sound", "audio"], ["Graphics", "device-gfx"], ["Interface", "interface"]];
   const INTERFACE = ["UIScaleWindowed", "UIScaleFullscreen", "clientFontSize", "brightness"];
 
@@ -276,6 +247,7 @@
     } catch (e) { status(String(e), "bad"); }
   });
 
+  document.getElementById("toNew").addEventListener("click", () => { location.href = "newgroup.html"; });
   document.querySelectorAll("[data-go]").forEach(a => a.addEventListener("click", () => {
     const go = a.dataset.go;
     if (go === "launch") location.href = "launch.html";

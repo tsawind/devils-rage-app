@@ -13,6 +13,7 @@ mod capture;
 mod chatlog;
 mod clipboard;
 mod cycle;
+mod groupsetup;
 mod launch;
 mod clientaudio;
 mod commands;
@@ -364,10 +365,14 @@ pub fn run() {
             profiles::profiles_apply_group,
             profiles::tuning_read,
             profiles::tuning_apply,
+            groupsetup::group_setup_create,
+            groupsetup::group_setups,
+            groupsetup::group_setup_delete,
             launch::pause_cycle_hotkeys,
             launch::resume_cycle_hotkeys,
             previews::active_client,
             previews::set_previews_opacity,
+            previews::set_previews_auto,
             launch::open_launcher,
             launch::launcher_ready,
         ])
@@ -471,6 +476,7 @@ pub fn run() {
             clipboard::start(handle.clone());
             #[cfg(desktop)]
             launch::register_cycle_hotkeys(&handle);
+            previews::start_watch(handle.clone());
             appconfig::start(handle.clone());
 
             // "Skip this screen" ticked: go straight to the chosen site (your last map).

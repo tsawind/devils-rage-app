@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New launch group</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
+          --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --warn:#f0c040; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; user-select: none; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .grow { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  .back { background: none; border: 0; color: var(--muted); }
+  .back:hover { color: var(--text); }
+  main { flex: 1; overflow: auto; padding: 18px 20px 40px; max-width: 1000px; width: 100%; margin: 0 auto; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 14px 16px; margin-bottom: 12px; }
+  .step { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px 0; border-top: 1px solid #23232a; }
+  .step:first-of-type { border-top: 0; padding-top: 0; }
+  .step .n { width: 24px; height: 24px; border-radius: 50%; background: var(--red); text-align: center; line-height: 24px; font-size: 12px; font-weight: 700; }
+  .step h3 { margin: 0 0 6px; font-size: 14px; }
+  .muted { color: var(--muted); }
+  input[type=text], select { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 6px 10px; font: inherit; }
+  .btn { border: 1px solid var(--line); border-radius: 8px; background: #121216; color: var(--text); padding: 6px 12px; }
+  .btn:hover { border-color: var(--red-hi); }
+  .btn.red { border-color: var(--red); background: #1c0d0e; color: #f3c6c6; font-weight: 600; }
+  .btn.small { padding: 2px 9px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .accounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 6px; max-height: 330px; overflow: auto; padding-right: 4px; }
+  .acct { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+  .acct.on { border-color: var(--red-hi); background: #1f0b0e; }
+  .acct b { display: inline-block; min-width: 28px; color: var(--red-hi); }
+  .acct label { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px; cursor: pointer; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .choice { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; cursor: pointer; }
+  .choice span { color: var(--muted); font-size: 12px; display: block; }
+  .key { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 5px 10px; min-width: 110px; text-align: left; }
+  .key.listen { border-color: var(--warn); color: var(--warn); }
+  .status { min-height: 1.4em; margin-top: 8px; color: var(--muted); }
+  .status.ok { color: var(--ok); } .status.bad { color: #f08a8a; }
+  .done { border-color: #3c5a1a; }
+  .done ol { margin: 6px 0 0 18px; padding: 0; }
+  .done li { margin: 4px 0; }
+  .done code { background: #0d0d10; border: 1px solid var(--line); border-radius: 5px; padding: 0 6px; color: var(--ok); }
+  .made { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid #23232a; }
+  .made:first-child { border-top: 0; }
+  .made .grow { flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">DR</span>
+  <h1>New launch group</h1>
+  <span class="grow"></span>
+  <button class="back" id="home">← Home</button>
+</header>
+<main>
+  <p class="note">Everything on one page. The group gets a <b>client profile folder of its own</b>, built from a copy of your settings,
+     so the profiles you already have stay exactly as they are.</p>
+
+  <div class="card done" id="result" hidden></div>
+
+  <div class="card">
+    <div class="step"><div class="n">1</div><div>
+      <h3>Name</h3>
+      <input type="text" id="name" maxlength="30" placeholder="e.g. Roll Fleet" style="width: 260px">
+      <span class="muted" id="folderHint"></span>
+    </div></div>
+
+    <div class="step"><div class="n">2</div><div>
+      <h3>Characters <span class="muted" id="pickedCount"></span></h3>
+      <div class="row" style="margin-bottom: 6px"><input type="text" id="filter" placeholder="Find a character…" style="width: 220px">
+        <span class="muted">One per account: the EVE launcher starts one character per account.</span></div>
+      <div class="accounts" id="accounts"></div>
+    </div></div>
+
+    <div class="step"><div class="n">3</div><div>
+      <h3>Settings to start from</h3>
+      <div class="row">Copy sound, graphics and keys from <select id="baseline"></select></div>
+      <label class="choice"><input type="radio" name="chars" value="own" checked><div>Each character keeps its own windows, overview and module placement
+        <span>Safest: the new profile starts with each character's current layout.</span></div></label>
+      <label class="choice"><input type="radio" name="chars" value="baseline"><div>Everyone gets the baseline's windows and overview
+        <span>Identical clients. Module placement on ships comes from the baseline too.</span></div></label>
+    </div></div>
+
+    <div class="step"><div class="n">4</div><div>
+      <h3>Sound &amp; graphics</h3>
+      <select id="preset"></select>
+      <div class="muted" id="presetWhy" style="font-size: 12px; margin-top: 4px"></div>
+    </div></div>
+
+    <div class="step"><div class="n">5</div><div>
+      <h3>Pedal / hotkeys</h3>
+      <div class="row"><span id="keys"></span>
+        <label><input type="checkbox" id="logins"> also cycle clients at the login screen</label></div>
+    </div></div>
+
+    <div class="step"><div class="n">6</div><div>
+      <button class="btn red" id="create" disabled>Create the group</button>
+      <div class="status" id="status"></div>
+    </div></div>
+  </div>
+
+  <div class="card" id="madeCard" hidden>
+    <h3 style="margin: 0 0 6px; font-size: 14px">Groups made here</h3>
+    <div id="made"></div>
+  </div>
+</main>
+
+<script src="presets.js"></script>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const PRESETS = [...window.DR_PRESETS, { id: "keep", name: "Keep the baseline's sound & graphics", why: "Copies them as they are; nothing changed.", values: {}, prefs: {} }];
+
+  let accounts = [], pick = {}, keys = { forward: null, backward: null };
+
+  const folder = (name) => name.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 30);
+  function status(t, c) { $("status").textContent = t || ""; $("status").className = "status" + (c ? " " + c : ""); }
+  const picked = () => Object.values(pick).filter(Boolean);
+
+  function renderAccounts() {
+    const q = $("filter").value.trim().toLowerCase();
+    const host = $("accounts"); host.innerHTML = "";
+    accounts.forEach(a => {
+      if (q && !a.characters.some(c => c.name.toLowerCase().includes(q))) return;
+      const box = el("div", "acct" + (pick[a.nickname] ? " on" : ""));
+      box.append(el("b", null, a.nickname));
+      a.characters.forEach(c => {
+        const l = el("label");
+        const r = el("input"); r.type = "checkbox"; r.checked = pick[a.nickname] === c.id;
+        r.addEventListener("change", () => { pick[a.nickname] = r.checked ? c.id : null; render(); });
+        l.append(r, document.createTextNode(c.name));
+        box.append(l);
+      });
+      host.append(box);
+    });
+  }
+
+  function render() {
+    renderAccounts();
+    const ids = picked();
+    $("pickedCount").textContent = ids.length ? `· ${ids.length} picked` : "";
+    const nameOf = (id) => accounts.flatMap(a => a.characters).find(c => c.id === id)?.name || id;
+    const b = $("baseline"), keep = b.value;
+    b.innerHTML = "";
+    ids.forEach(id => b.append(new Option(nameOf(id), String(id))));
+    if (keep && ids.includes(Number(keep))) b.value = keep;
+    const f = folder($("name").value);
+    $("folderHint").textContent = f ? `→ client profile “${f}” (settings_${f})` : "";
+    $("create").disabled = !f || !ids.length;
+  }
+
+  function keyButton(label, onSet) {
+    const b = el("button", "key"); b.type = "button";
+    const show = (v) => { b.textContent = label + ": " + (v ? v.replace(/Key([A-Z])/g, "$1").replace(/Digit(\d)/g, "$1") : "—"); };
+    show(null);
+    b.addEventListener("click", () => {
+      b.classList.add("listen"); b.textContent = label + ": press a key…";
+      invoke("pause_cycle_hotkeys").catch(() => {});
+      const onKey = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (["ControlLeft", "ControlRight", "ShiftLeft", "ShiftRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"].includes(e.code)) return;
+        window.removeEventListener("keydown", onKey, true);
+        b.classList.remove("listen");
+        invoke("resume_cycle_hotkeys").catch(() => {});
+        if (e.code === "Escape") { onSet(null); show(null); return; }
+        const mods = []; if (e.ctrlKey) mods.push("Control"); if (e.altKey) mods.push("Alt"); if (e.shiftKey) mods.push("Shift"); if (e.metaKey) mods.push("Super");
+        const k = [...mods, e.code].join("+"); onSet(k); show(k);
+      };
+      window.addEventListener("keydown", onKey, true);
+    });
+    return b;
+  }
+
+  async function loadMade() {
+    const made = await invoke("group_setups").catch(() => []);
+    $("madeCard").hidden = !made.length;
+    const host = $("made"); host.innerHTML = "";
+    made.forEach(m => {
+      const row = el("div", "made");
+      row.append(el("b", null, m.name), el("span", "muted", `client profile “${m.profile}” · ${m.characters.length} characters`), el("span", "grow"));
+      const del = el("button", "btn small", "Delete");
+      del.addEventListener("click", async () => {
+        if (!confirm(`Delete “${m.name}”? It leaves Your accounts, and its profile folder is moved aside (not deleted). Your other profiles aren't touched.`)) return;
+        try { status(await invoke("group_setup_delete", { profile: m.profile }), "ok"); } catch (e) { status(String(e), "bad"); }
+        loadMade();
+      });
+      row.append(del);
+      host.append(row);
+    });
+  }
+
+  function showResult(r, name) {
+    const box = $("result"); box.hidden = false; box.innerHTML = "";
+    box.append(el("h3", null, `✓ “${name}” is ready`));
+    box.lastChild.style.margin = "0";
+    const ol = el("ol");
+    const li1 = el("li"); li1.innerHTML = `In the EVE launcher: <b>⚙ Settings → EVE Online → Launch Groups</b>, type <code></code> and <b>Create</b>.`;
+    li1.querySelector("code").textContent = name; ol.append(li1);
+    r.accounts.forEach(a => {
+      const li = el("li"); li.innerHTML = `Add account <b></b> (<span></span>) and set its <b>Client profile</b> to <code></code>.`;
+      li.querySelectorAll("b")[0].textContent = a.account; li.querySelector("span").textContent = a.characters.join(", "); li.querySelector("code").textContent = r.profile;
+      ol.append(li);
+    });
+    const last = el("li"); last.textContent = "Launch the group. Previews open by themselves when the clients start; cycle with your pedal keys."; ol.append(last);
+    box.append(ol);
+    const row = el("div", "row"); row.style.marginTop = "10px";
+    const open = el("button", "btn red", "▶ Open the EVE launcher");
+    open.addEventListener("click", () => invoke("open_launcher").catch(e => status(String(e), "bad")));
+    row.append(open, el("span", "muted", "If “" + r.profile + "” isn't in its Client profile list, close and reopen the launcher once."));
+    box.append(row);
+    box.scrollIntoView({ behavior: "smooth" });
+  }
+
+  $("create").addEventListener("click", async () => {
+    const name = $("name").value.trim();
+    const p = PRESETS.find(x => x.id === $("preset").value) || PRESETS[0];
+    const setup = {
+      name, character_ids: picked(), baseline_id: Number($("baseline").value),
+      characters_from: document.querySelector("input[name=chars]:checked").value,
+      values: p.values, prefs: p.prefs,
+      forward_hotkey: keys.forward, backward_hotkey: keys.backward, login_screens: $("logins").checked,
+    };
+    $("create").disabled = true;
+    status("Making the group, its profile folder and settings…");
+    try {
+      const r = await invoke("group_setup_create", { setup });
+      status("");
+      showResult(r, name);
+      loadMade();
+    } catch (e) { status(String(e), "bad"); }
+    render();
+  });
+
+  $("name").addEventListener("input", render);
+  $("filter").addEventListener("input", renderAccounts);
+  $("preset").addEventListener("change", () => { $("presetWhy").textContent = (PRESETS.find(x => x.id === $("preset").value) || {}).why || ""; });
+  $("home").addEventListener("click", () => { location.href = "index.html"; });
+
+  (async () => {
+    PRESETS.forEach(p => $("preset").append(new Option(p.name, p.id)));
+    $("preset").value = "alt"; $("presetWhy").textContent = PRESETS.find(x => x.id === "alt").why;
+    $("keys").append(keyButton("Next", (k) => { keys.forward = k; }), keyButton("Prev", (k) => { keys.backward = k; }));
+    try { await invoke("seat_refresh"); } catch (e) { status("Your accounts: " + e, "bad"); }
+    accounts = (await invoke("seat_launch_groups").catch(() => ({ accounts: [] }))).accounts || [];
+    render();
+    loadMade();
+  })();
+</script>
+</body>
+</html>

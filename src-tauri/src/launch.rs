@@ -258,7 +258,7 @@ pub fn all_groups(app: &AppHandle) -> Vec<Group> {
 
 /// Patch 66b: the app asks SeAT itself, signed in as you (the SeAT page's own cookies), instead
 /// of waiting for the Your accounts page to hand the groups over.
-fn seat_session(app: &AppHandle) -> Result<(String, Option<String>), String> {
+pub(crate) fn seat_session(app: &AppHandle) -> Result<(String, Option<String>), String> {
     let view = app.get_webview(crate::PAGES_VIEW).ok_or("the app's page view isn't open")?;
     let url: tauri::Url = crate::SEAT_URL.parse().map_err(|e| format!("{e}"))?;
     let cookies = view.cookies_for_url(url).map_err(|e| e.to_string())?;
@@ -289,7 +289,7 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-async fn fetch_seat(app: &AppHandle) -> Result<SeatData, String> {
+pub(crate) async fn fetch_seat(app: &AppHandle) -> Result<SeatData, String> {
     let (cookies, _) = seat_session(app)?;
     let response = reqwest::Client::new()
         .get(format!("{}/devilsrage/launch-groups.json", crate::SEAT_URL))
@@ -511,6 +511,7 @@ mod hotkeys {
                 Some(handle) => crate::capture::focus_handle(handle),
                 None => crate::capture::focus_client(&next),
             };
+            crate::previews::push_active(app, Some(&next).filter(|n| !n.starts_with("login:")).map(String::as_str));
             log::info!("cycle {}: brought {next} forward", group.name);
         }
     }

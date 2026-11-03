@@ -372,6 +372,18 @@ pub fn foreground_client() -> Option<String> {
     None
 }
 
+/// The window in front (a handle), cheap enough to ask many times a second.
+#[cfg(windows)]
+pub fn foreground_handle() -> isize {
+    // SAFETY: a plain Win32 call with no arguments.
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() as isize }
+}
+
+#[cfg(not(windows))]
+pub fn foreground_handle() -> isize {
+    0
+}
+
 #[cfg(not(windows))]
 pub fn open_eve_windows() -> Vec<(String, isize)> {
     Vec::new()
