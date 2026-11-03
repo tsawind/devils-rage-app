@@ -77,6 +77,7 @@
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
+        <div class="small" style="margin-bottom: 6px"><b>Easiest:</b> in EVE double-click the planet (your command center jumps to the middle), then zoom <b>all the way out</b>, press <b>Find edge</b>, then <button class="btn red" id="dcLock">Lock on: double-clicked</button></div>
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
         <div class="status" id="autoStatus"></div>
         <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
@@ -554,7 +555,8 @@
   // One building is enough: EVE's planet camera never rolls, so the planet's axis always stands
   // upright on screen. Which way up (and which way longitude counts) is remembered once known;
   // Flip tries the other ways if the green rings sit wrong.
-  const POLE_WAYS = [{ up: true, mirrored: false }, { up: false, mirrored: false }, { up: true, mirrored: true }, { up: false, mirrored: true }];
+  // First: what EVE does (checked against SeAT positions: north up, longitude counted the other way round).
+  const POLE_WAYS = [{ up: true, mirrored: true }, { up: false, mirrored: true }, { up: true, mirrored: false }, { up: false, mirrored: false }];
   // EVE's lens, measured on two recordings (tracking fits best there): focal length 829 px in a
   // 1280-px-wide picture, the same at every zoom. The distance follows from the planet's size.
   const LENS_AT_1280 = 829;
@@ -576,6 +578,28 @@
     say("lockStatus", "Locked on from one building. With your network showing in EVE, the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
     updateButtons(); drawShot();
   }
+  // EVE's double-click puts your command center in the middle; zooming all the way out from there
+  // always lands on the same view (measured on two recordings, identical to the pixel): the command
+  // center then sits 7.5° from the planet's middle, toward the lower right (32° below the right
+  // horizontal). With north standing straight up, that's a lock with no clicks.
+  const DC_ANGLE = 7.52 * Math.PI / 180, DC_DIR = 32.1 * Math.PI / 180;
+  $("dcLock").addEventListener("click", () => {
+    const me = $("client").value;
+    const cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
+    if (!cc) return say("lockStatus", `${me || "This character"} has no command center on this planet.`, "warn");
+    if (!disc || !frame) return say("lockStatus", "Zoom all the way out and press Find edge first.", "warn");
+    disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
+    const v = [Math.sin(DC_ANGLE) * Math.cos(DC_DIR), -Math.sin(DC_ANGLE) * Math.sin(DC_DIR), Math.cos(DC_ANGLE)];
+    const at = E.toPicture(v, disc), way = loadPole();
+    const Q = E.lockOne({ px: at.x, py: at.y, lat: cc.lat, lon: cc.lon }, disc, way.mirrored, way.up);
+    if (!Q) return say("lockStatus", "Couldn't lock: is the edge set?", "bad");
+    facing = { Q, mirrored: way.mirrored, misses: [], owners: [me], one: { groups: new Map([[cc.kind, [cc]]]), way } };
+    anchors = [{ kind: cc.kind, px: at.x, py: at.y }];
+    focal = lensPx(); forgetTrack(); frozen = false; mapMisses = 0; say("autoStatus", "");
+    checkMapAgainstLock();
+    say("lockStatus", "Locked on from the double-click view. Click a building in EVE so your network shows: the green rings should sit on it. (Only right if you double-clicked and then zoomed all the way out.)", "ok");
+    renderAnchors(); updateButtons(); drawShot();
+  });
   $("flip").addEventListener("click", () => {
     if (!facing || !facing.one) return;
     const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);
