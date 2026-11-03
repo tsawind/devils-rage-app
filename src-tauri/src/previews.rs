@@ -382,6 +382,20 @@ pub fn start_watch(app: AppHandle) {
             if tick % 25 == 0 {
                 let open: std::collections::BTreeSet<String> = crate::clipboard::open_clients().into_iter().map(|(name, _)| name).collect();
                 let fresh = open.iter().any(|name| !known.contains(name));
+                // A client that has closed takes its preview with it (outside edit mode; it comes
+                // back by itself when that client starts again).
+                if !with_layout(&app, |layout| layout.edit) {
+                    for (label, window) in app.webview_windows() {
+                        if !label.starts_with(PREFIX) {
+                            continue;
+                        }
+                        if let Some(name) = name_of_window(&window) {
+                            if !open.contains(&name) && !known.contains(&name) {
+                                let _ = window.destroy();
+                            }
+                        }
+                    }
+                }
                 known = open;
                 if fresh && with_layout(&app, |layout| layout.auto_open) {
                     let app = app.clone();
