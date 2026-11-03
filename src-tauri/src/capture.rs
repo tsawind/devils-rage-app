@@ -134,6 +134,25 @@ pub fn client_jpeg(name: &str, width: u32, quality: u8) -> Result<Vec<u8>, Strin
     encode(&picture, quality).map_err(str::to_string)
 }
 
+/// One EVE client's picture as raw RGBA (no JPEG round trip), for the PI scan: width, height, pixels.
+pub fn client_rgba(name: &str, width: u32) -> Result<(u32, u32, Vec<u8>), String> {
+    let (_, handle) = crate::clipboard::open_clients()
+        .into_iter()
+        .find(|(open, _)| open == name)
+        .ok_or_else(|| "that EVE client is closed".to_string())?;
+    let mut picture = grab::picture(handle, width).map_err(str::to_string)?;
+    bgra_to_rgba(&mut picture.bgra);
+    Ok((picture.width, picture.height, picture.bgra))
+}
+
+/// Swap blue and red and make every pixel opaque, in place.
+pub fn bgra_to_rgba(pixels: &mut [u8]) {
+    for px in pixels.chunks_exact_mut(4) {
+        px.swap(0, 2);
+        px[3] = 255;
+    }
+}
+
 /// Whether a window handle is minimized (for the previews).
 pub fn minimized_handle(handle: isize) -> bool {
     grab::minimized(handle)
@@ -289,6 +308,13 @@ mod tests {
         assert_eq!(wanted(Some("640"), Some("60")), (640, 60));
         assert_eq!(wanted(Some("99999"), Some("5")), (MAX_WIDTH, 30));
         assert_eq!(wanted(Some("x"), Some("y")), (MAX_WIDTH, QUALITY));
+    }
+
+    #[test]
+    fn swaps_to_rgba() {
+        let mut px = vec![1, 2, 3, 0, 10, 20, 30, 7];
+        super::bgra_to_rgba(&mut px);
+        assert_eq!(px, vec![3, 2, 1, 255, 30, 20, 10, 255]);
     }
 
     #[test]

@@ -377,6 +377,7 @@ pub fn run() {
             piscan::piscan_record_stop,
             piscan::piscan_recording,
             piscan::piscan_record_note,
+            piscan::piscan_frame,
             groupsetup::group_setups,
             groupsetup::group_setup_delete,
             launch::pause_cycle_hotkeys,

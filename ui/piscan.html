@@ -77,6 +77,7 @@
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
+        <div class="small" style="margin-bottom: 6px"><b>Easiest:</b> in EVE double-click the planet (your command center jumps to the middle), then <button class="btn red" id="homeLock">Lock on: double-clicked</button> Then zoom all the way out in EVE and press <b>Find edge</b>.</div>
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
         <div class="status" id="autoStatus"></div>
         <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
@@ -265,7 +266,7 @@
   function updateButtons() {
     $("lock").disabled = !(disc && anchors.length >= 1);
     $("flip").hidden = !(facing && facing.one);
-    $("scan").disabled = !facing;
+    $("scan").disabled = !facing || !!facing.needEdge;
     $("scan").textContent = running ? "Pause" : "Scan";
     $("scan").classList.toggle("on", running);
     const m = maps.get($("resource").value);
@@ -279,6 +280,16 @@
   async function grab() {
     const name = $("client").value;
     if (!name) return null;
+    // Raw pixels straight from the app (fast); the JPEG path is the fallback.
+    const raw = await invoke("piscan_frame", { name, width: 1280 }).catch(() => null);
+    if (raw && raw.byteLength > 8) {
+      const buf = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer, head = new DataView(buf);
+      const w = head.getUint32(0, true), h = head.getUint32(4, true);
+      const data = new ImageData(new Uint8ClampedArray(buf, 8, w * h * 4), w, h);
+      if (shot.width !== w || shot.height !== h) { shot.width = w; shot.height = h; }
+      const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").putImageData(data, 0, 0);
+      return { img: c, data, w, h };
+    }
     const url = await invoke("preview_frame", { name, width: 1280, quality: 88 });
     const img = new Image();
     await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = url; });
@@ -374,7 +385,13 @@
   /** A new edge: keeps the lock after a zoom (same facing, new distance), else starts over. */
   function setEdge(c) {
     if (!c || c.r < 40) { say("lockStatus", "That's too close to the middle: click on the planet's edge.", "bad"); return; }
+    if (facing && !focal) {
+      // Locked in the double-click view (no edge there): the lens comes from an earlier lock, else a usual value.
+      let lens = null; try { lens = Number(localStorage.getItem("piscan-focal")) || null; } catch {}
+      focal = lens || c.r * Math.sqrt(3 * 3 - 1);
+    }
     if (facing && focal) {
+      facing.needEdge = false;
       disc = { cx: c.cx, cy: c.cy, r: c.r, D: Math.sqrt((focal / c.r) ** 2 + 1) };
       forgetTrack();
       say("lockStatus", "Edge set again; still locked on.", "ok");
@@ -468,11 +485,37 @@
     say("lockStatus", "Locked on from one building. Click your command center in EVE so its network shows: the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
     updateButtons(); drawShot();
   }
+  // EVE's double-click (and first-open) view: your command center dead centre. No clicks, no edge needed yet.
+  function lockHome(way) {
+    const me = $("client").value;
+    const cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
+    if (!cc) return say("lockStatus", `${me || "This character"} has no command center on this planet: point out a building instead.`, "warn");
+    if (!frame) return say("lockStatus", "No picture from that client yet.", "warn");
+    way = way || loadPole();
+    const centre = { cx: frame.w / 2, cy: frame.h / 2, r: Math.min(frame.w, frame.h) / 3, D: 3 };
+    const Q = E.lockOne({ px: centre.cx, py: centre.cy, lat: cc.lat, lon: cc.lon }, centre, way.mirrored, way.up);
+    if (!Q) return say("lockStatus", "Couldn't lock from the middle of the picture.", "bad");
+    facing = { Q, mirrored: way.mirrored, misses: [], owners: [me], one: { home: true, way }, needEdge: true };
+    focal = null; forgetTrack(); frozen = false; say("autoStatus", "");
+    disc = centre;
+    say("lockStatus", "Locked on with your command center in the middle. Now zoom all the way out in EVE (whole planet in view) and press Find edge or Click the edge: it keeps the lock. Click the command center in EVE so its network shows: green rings should sit on your buildings, else press Flip.", "ok");
+    updateButtons(); drawShot();
+  }
+  $("homeLock").addEventListener("click", () => lockHome());
   $("flip").addEventListener("click", () => {
     if (!facing || !facing.one) return;
     const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);
     const next = POLE_WAYS[(at + 1) % POLE_WAYS.length];
     savePole(next);
+    if (facing.one.home) {
+      // Turn the same way the new way would have from the double-click view: re-solve at the current facing's CC spot.
+      const me = $("client").value, cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
+      const at2 = cc && disc ? E.toPicture(E.apply(facing.Q, E.planetVector(cc.lat, cc.lon, facing.mirrored)), disc) : null;
+      if (!at2 || !at2.front) return say("lockStatus", "Flip needs your command center in view: double-click the planet in EVE and press Lock on: double-clicked again.", "warn");
+      const Q = E.lockOne({ px: at2.x, py: at2.y, lat: cc.lat, lon: cc.lon }, disc, next.mirrored, next.up);
+      if (Q) { facing = { ...facing, Q, mirrored: next.mirrored, one: { home: true, way: next } }; forgetTrack(); drawShot(); say("lockStatus", "Flipped. Green rings on your buildings? Then scan.", "ok"); }
+      return;
+    }
     lockFromOne(facing.one.groups, next);
   });
 
@@ -510,7 +553,8 @@
     if (!cols.length) return say("autoStatus", `${me || "This character"} has no colony on this planet: point out a building yourself (Other people's buildings too), or pick another planet.`, "warn");
     if (facing) {
       // Locked: every few frames, pull back onto any network in view (no drift).
-      if (ticks % 3) return;
+      if (now - lastRefine < 350) return;
+      lastRefine = now;
       const markers = E.findMarkers(f.data.data, f.w, f.h, disc);
       if (markers.length < 4) return;
       const mine = cols.filter((c) => (facing.owners || []).includes(c.owner)).flatMap((c) => c.points);
@@ -544,10 +588,10 @@
     }
   }
 
-  let ticks = 0, lastRim = null;
+  let ticks = 0, lastRim = null, lastRefine = 0, lastRimCheck = 0, lastStore = 0;
   async function tick() {
     ticks++;
-    if (painting || (!running && ticks % 4)) return;
+    if (painting || (!running && ticks % 5)) return;
     painting = true;
     try {
       if (!frozen && $("client").value) {
@@ -555,7 +599,8 @@
         if (f) frame = f;
         if (f && !disc && $("auto").checked && ticks % 8 === 0) say("autoStatus", "Set the edge first: Click the edge, then click once on the planet's edge.", "warn");
         // Zoomed in EVE: the rim moves; with the camera's lens known, so does the distance.
-        if (f && facing && disc && focal && $("follow").checked && ticks % 3 === 0) {
+        if (f && facing && disc && focal && $("follow").checked && Date.now() - lastRimCheck > 250) {
+          lastRimCheck = Date.now();
           const rim = E.rimRadius(f.data.data, f.w, f.h, disc.r);
           const steady = rim && lastRim && Math.abs(rim.r - lastRim) < disc.r * 0.01;
           lastRim = rim ? rim.r : null;
@@ -602,7 +647,7 @@
               if (!bare) bare = E.newBare();
               E.paint(bare, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, "record");
               const cover = E.bareCoverage(bare);
-              if (ticks % 20 === 0) storeBare();
+              if (Date.now() - lastStore > 3000) { lastStore = Date.now(); storeBare(); }
               say("scanStatus", cover > 0.97 ? "Bare planet recorded: switch EVE to a resource and pick it here." : `Bare planet ${Math.round(cover * 100)}% recorded. Still missing: ${E.missingHint({ weight: bare.weight }, facing.Q, facing.mirrored) || "a little here and there"}.`, "ok");
             } else {
               const m = mapFor($("resource").value);
@@ -619,7 +664,7 @@
       }
     } finally { painting = false; }
   }
-  setInterval(tick, 120);
+  setInterval(tick, 40); // as fast as pictures come (a tick still running skips the next)
 
   // ---------- save ----------
   $("save").addEventListener("click", async () => {

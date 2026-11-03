@@ -81,6 +81,28 @@ pub async fn piscan_save(app: AppHandle, planet_id: u64, resource: String, chara
     Ok(body["message"].as_str().unwrap_or("Saved.").to_string())
 }
 
+/// The client's picture for the scan, raw: 8 bytes (width, height as little-endian u32) then
+/// RGBA pixels. Skips the JPEG encode/decode the previews use, so the scan sees more pictures a
+/// second (smaller turns between them track more surely). Nothing leaves the PC.
+#[tauri::command]
+pub async fn piscan_frame(name: String, width: Option<u32>) -> Result<tauri::ipc::Response, String> {
+    let w = width.unwrap_or(1280).clamp(320, 1600);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (width, height, rgba) = crate::capture::client_rgba(&name, w)?;
+        Ok(tauri::ipc::Response::new(frame_bytes(width, height, &rgba)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn frame_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + rgba.len());
+    out.extend_from_slice(&width.to_le_bytes());
+    out.extend_from_slice(&height.to_le_bytes());
+    out.extend_from_slice(rgba);
+    out
+}
+
 // ---- Recording (for tuning the scan on real pictures) ----------------------------------------
 // The scan page's Record button: the client's picture 3 times a second, saved as JPEGs with a
 // notes file (what the page had selected), next to the app's logs. Nothing leaves the PC.
@@ -150,7 +172,14 @@ pub fn piscan_record_note(note: serde_json::Value) {
 
 #[cfg(test)]
 mod tests {
-    use super::segment;
+    use super::{frame_bytes, segment};
+
+    #[test]
+    fn frame_has_size_then_pixels() {
+        let out = frame_bytes(2, 1, &[1, 2, 3, 255, 4, 5, 6, 255]);
+        assert_eq!(&out[..8], &[2, 0, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(out.len(), 16);
+    }
 
     #[test]
     fn segments_encode_spaces() {
