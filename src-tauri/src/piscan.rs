@@ -103,6 +103,29 @@ fn frame_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Delete the corp's scan of one planet and resource (yours, or any for a leader).
+#[tauri::command]
+pub async fn piscan_delete(app: AppHandle, planet_id: u64, resource: String) -> Result<(), String> {
+    let (cookies, xsrf) = crate::launch::seat_session(&app)?;
+    let xsrf = xsrf.ok_or("SeAT's session is missing: open the PI tab once, then try again")?;
+    let response = client()
+        .post(format!("{}/devilsrage/pi/scans/{planet_id}/{}/delete", crate::SEAT_URL, segment(&resource)))
+        .header("Accept", "application/json")
+        .header("Cookie", cookies)
+        .header("X-XSRF-TOKEN", xsrf)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    if status.is_success() || status == reqwest::StatusCode::NOT_FOUND {
+        Ok(())
+    } else {
+        Err(format!("SeAT answered {status}"))
+    }
+}
+
 // ---- Recording (for tuning the scan on real pictures) ----------------------------------------
 // The scan page's Record button: the client's picture 3 times a second, saved as JPEGs with a
 // notes file (what the page had selected), next to the app's logs. Nothing leaves the PC.

@@ -200,6 +200,114 @@
   /** Which way up the pole stands for a facing (true = north up on screen). */
   function northUp(Q) { return apply(Q, [0, 0, 1])[1] >= 0; }
 
+  // ---- EVE's camera: two numbers ----
+  // The camera never rolls, so where the planet faces is just a spin about its own axis (yaw)
+  // and how far that axis tips toward you (pitch; 0 = axis straight up the screen, ±90° = a
+  // pole facing you, beyond = upside down). Q(yaw, pitch) = Rx(pitch) · B · Rz(yaw), where B
+  // stands the planet's axis up the screen.
+  const STAND = rotationAbout([1, 0, 0], -Math.PI / 2);
+  function poseQ(yaw, pitch) { return mul(rotationAbout([1, 0, 0], pitch), mul(STAND, rotationAbout([0, 0, 1], yaw))); }
+  function poseOf(Q) {
+    const pitch = Math.atan2(Q[8], Q[5]);
+    const M = mul(transpose(mul(rotationAbout([1, 0, 0], pitch), STAND)), Q);
+    return { yaw: Math.atan2(M[3], M[0]), pitch };
+  }
+  /** The nearest facing EVE's camera can actually have (no roll). */
+  function upright(Q) { const p = poseOf(Q); return poseQ(p.yaw, p.pitch); }
+
+  // ---- finding the facing on the planet map ----
+  // The planet doesn't change: once its bare colours are recorded, any picture of it can be
+  // placed by trying facings and keeping the one whose map colours match the picture best.
+  // No piling-up error, and a lost grip is found again by searching the whole planet.
+  /** Points to compare: camera-space directions with their picture brightness. */
+  function samplePoints(rgba, width, height, disc, count, coarse) {
+    const out = [], area = Math.PI * disc.r * disc.r, gap = Math.max(2, Math.sqrt(area / (count || 700)));
+    for (let y = disc.cy - disc.r; y < disc.cy + disc.r; y += gap) for (let x = disc.cx - disc.r; x < disc.cx + disc.r; x += gap) {
+      const v = toSphere(x, y, disc);
+      if (!v || facingOf(v, disc) < 0.4) continue;
+      const xi = Math.round(x), yi = Math.round(y);
+      if (xi < 1 || yi < 1 || xi >= width - 1 || yi >= height - 1) continue;
+      const lum = (px, py) => { const k = (Math.min(height - 1, Math.max(0, py)) * width + Math.min(width - 1, Math.max(0, px))) * 4; return 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2]; };
+      // Coarse (for searching the whole planet): broader spots and surroundings, a wider match.
+      const inner = coarse ? Math.max(2, Math.round(disc.r * 0.03)) : 1, istep = Math.max(1, inner >> 1);
+      let g = 0, gn = 0;
+      for (let dy = -inner; dy <= inner; dy += istep) for (let dx = -inner; dx <= inner; dx += istep) { g += lum(xi + dx, yi + dy); gn++; }
+      g /= gn;
+      // Fine detail only (the spot minus its surroundings, ~2.5° across): EVE's scan colours are
+      // smooth, the rock and lava pattern isn't, so this matches with or without a filter on.
+      const ring = Math.max(4, Math.round(disc.r * (coarse ? 0.13 : 0.045)));
+      let around = 0, n = 0;
+      for (let dy = -ring; dy <= ring; dy += Math.max(1, ring >> 2)) for (let dx = -ring; dx <= ring; dx += Math.max(1, ring >> 2)) { around += lum(xi + dx, yi + dy); n++; }
+      out.push({ v, g: g - around / n });
+    }
+    return out;
+  }
+  /** The bare map as brightness per cell (NaN where not recorded). */
+  function bareGrey(bare, coarse) {
+    const lum = new Float32Array(GRID_W * GRID_H), out = new Float32Array(GRID_W * GRID_H);
+    for (let i = 0; i < GRID_W * GRID_H; i++) {
+      const w = bare.weight[i];
+      lum[i] = w > 0 ? (0.3 * bare.rgb[i * 3] + 0.59 * bare.rgb[i * 3 + 1] + 0.11 * bare.rgb[i * 3 + 2]) / w : NaN;
+    }
+    // Same fine detail as the picture: each cell minus the cells round it (±2, wrapping east-west).
+    for (let row = 0; row < GRID_H; row++) for (let col = 0; col < GRID_W; col++) {
+      const i = row * GRID_W + col;
+      if (lum[i] !== lum[i]) { out[i] = NaN; continue; }
+      let s = 0, n = 0;
+      for (let dr = -2; dr <= 2; dr++) { const r = row + dr; if (r < 0 || r >= GRID_H) continue; for (let dc = -2; dc <= 2; dc++) { const v = lum[r * GRID_W + (col + dc + GRID_W) % GRID_W]; if (v === v) { s += v; n++; } } }
+      out[i] = lum[i] - s / n;
+    }
+    if (!coarse) return out;
+    // Coarse: each cell's ±1 average minus its ±6 surroundings.
+    const box = (src, rad, row, col) => { let s2 = 0, n2 = 0; for (let dr = -rad; dr <= rad; dr++) { const r = row + dr; if (r < 0 || r >= GRID_H) continue; for (let dc = -rad; dc <= rad; dc++) { const v = src[r * GRID_W + (col + dc + GRID_W) % GRID_W]; if (v === v) { s2 += v; n2++; } } } return n2 ? s2 / n2 : NaN; };
+    const wide = new Float32Array(GRID_W * GRID_H);
+    for (let row = 0; row < GRID_H; row++) for (let col = 0; col < GRID_W; col++) {
+      const i = row * GRID_W + col;
+      wide[i] = lum[i] !== lum[i] ? NaN : box(lum, 1, row, col) - box(lum, 6, row, col);
+    }
+    return wide;
+  }
+  /** How well a facing explains the picture: correlation of brightness, -1 … 1 (null: too little of the map seen). */
+  function poseScore(points, grey, Q, mirrored) {
+    const Qt = transpose(Q);
+    let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    for (const p of points) {
+      const { lat, lon } = latLon(apply(Qt, p.v), mirrored);
+      const row = Math.min(GRID_H - 1, Math.floor(lat / Math.PI * GRID_H)), col = Math.min(GRID_W - 1, Math.floor(lon / (2 * Math.PI) * GRID_W));
+      const m = grey[row * GRID_W + col];
+      if (m !== m) continue;
+      n++; sa += p.g; sb += m; saa += p.g * p.g; sbb += m * m; sab += p.g * m;
+    }
+    if (n < points.length * 0.5 || n < 40) return null;
+    const va = saa - sa * sa / n, vb = sbb - sb * sb / n;
+    return va > 0 && vb > 0 ? (sab - sa * sb / n) / Math.sqrt(va * vb) : null;
+  }
+  /** Best facing near a guess: a grid of yaw/pitch tries, then finer around the best. */
+  function alignToMap(points, grey, mirrored, around, span, step) {
+    let best = null;
+    const tryAt = (yaw, pitch) => { const s = poseScore(points, grey, poseQ(yaw, pitch), mirrored); if (s !== null && (!best || s > best.score)) best = { yaw, pitch, score: s }; };
+    for (let dy = -span; dy <= span + 1e-9; dy += step) for (let dp = -span; dp <= span + 1e-9; dp += step) tryAt(around.yaw + dy, around.pitch + dp);
+    if (!best) return null;
+    const fine = step / 4, c = { ...best };
+    for (let dy = -step; dy <= step + 1e-9; dy += fine) for (let dp = -step; dp <= step + 1e-9; dp += fine) tryAt(c.yaw + dy, c.pitch + dp);
+    return best;
+  }
+  /** Lost: search the whole planet (coarse), then refine. Returns the best and how clearly it beat the rest. */
+  function findOnMap(points, grey, mirrored) {
+    const step = 4 * Math.PI / 180, found = [];
+    for (let yaw = -Math.PI; yaw < Math.PI; yaw += step) for (let pitch = -Math.PI; pitch < Math.PI; pitch += step) {
+      const s = poseScore(points, grey, poseQ(yaw, pitch), mirrored);
+      if (s !== null) found.push({ yaw, pitch, score: s });
+    }
+    if (!found.length) return null;
+    found.sort((a, b) => b.score - a.score);
+    const top = found[0];
+    // The runner-up that isn't just next door to the best: how sure the find is.
+    const other = found.find((f) => angle(apply(poseQ(f.yaw, f.pitch), [0, 0, 1]), apply(poseQ(top.yaw, top.pitch), [0, 0, 1])) > 0.25);
+    const best = alignToMap(points, grey, mirrored, top, step, step / 2) || top;
+    return { ...best, margin: best.score - (other ? other.score : 0) };
+  }
+
   // ---- tracking ----
   // A frame for tracking: the disc cropped and scaled to SIZE × SIZE grey values.
   const SIZE = 256;
@@ -799,6 +907,6 @@
   }
 
   const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
-    solveAnchors, solveAnchorsEitherWay, lockOne, northUp, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
+    solveAnchors, solveAnchorsEitherWay, lockOne, northUp, poseQ, poseOf, upright, samplePoints, bareGrey, poseScore, alignToMap, findOnMap, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);

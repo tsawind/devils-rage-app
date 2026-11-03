@@ -90,7 +90,7 @@
       </div></div>
       <div class="step"><div class="n">4</div><div>
         <h3>Scan</h3>
-        <div class="muted small"><b>Once per planet:</b> pick <b>Bare planet</b> below with EVE's scan on <b>No filter</b>, press Scan and turn the planet all the way round. The app learns the planet's own colours (lava, terrain) and takes them out of every resource scan. <b>Then, in EVE:</b> in the planet's Scan panel drag both ends of the colour band right out to the ends (the widest band) and leave it there, so every scan uses the same scale. Then pick the resource EVE is showing here, press <b>Scan</b> and turn the planet slowly (about a quarter turn every few seconds) until the bar is full. Switch the resource in EVE and here for the next one without moving. Drifting? Pick a kind of building and click one.</div>
+        <div class="muted small"><b>Once per planet:</b> zoomed all the way out, EVE on <b>No filter</b>, pick <b>Bare planet</b> below, press Scan and turn the planet all the way round (top and bottom too). Every picture is placed on that map, so it can't slide; lose it and it finds itself again. <b>After that, no lock needed:</b> open the planet, set the edge, and the app finds where it is on its own. <b>Then for each resource:</b> in EVE's Scan panel drag both ends of the colour band right out (and leave them), pick the same resource here, press <b>Scan</b>, turn the planet round once, <b>Save to SeAT</b>.</div>
         <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
         <div class="row" style="display: block"><div class="meter"><i id="cover"></i></div></div>
         <div class="status" id="scanStatus"></div>
@@ -98,7 +98,7 @@
       <div class="step"><div class="n">5</div><div>
         <h3>Save for the corp</h3>
         <div class="muted small">Adds to what the corp already has for this planet and resource (the Corp map tab on the PI screen shows it, with the best places to put two extractors).</div>
-        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button></div>
+        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button> <button class="btn" id="wipe" hidden title="Delete every scan the corp has of this planet (made with older versions that slid while scanning)">Delete this planet's old scans</button></div>
         <div class="status" id="saveStatus"></div>
       </div></div>
     </div>
@@ -138,6 +138,17 @@
   // every ~11° with where the planet faced (to pick up again after losing the grip), and the
   // picture right after a loss (to tell a filter switch from a fast spin).
   let lastStep = null, keys = [], lost = null, keyTry = 0;
+  // The bare map as the reference every picture is placed on (refreshed while it's still being recorded).
+  const DEG = Math.PI / 180;
+  let refCache = null, refAt = 0, lastFind = 0;
+  function mapRef() {
+    if (!bare || E.bareCoverage(bare) < 0.15) return null;
+    const recording = $("resource").value === BARE;
+    if (!refCache || refCache.bare !== bare || (recording && Date.now() - refAt > 1500)) {
+      refCache = { bare, fine: E.bareGrey(bare), coarse: E.bareGrey(bare, true) }; refAt = Date.now();
+    }
+    return refCache;
+  }
   function forgetTrack() { prevGrey = null; lastStep = null; keys = []; lost = null; lostRun = 0; }
   const BARE = "__bare";
   let bare = null, focal = null, autoBusy = false, autoAsked = 0, worker = null, workerId = 0;
@@ -179,20 +190,27 @@
   const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : "";
   const currentPlanet = () => planets.find((p) => String(p.planet_id) === $("planet").value) || null;
   // The bare planet's colours, kept on this PC per planet (only the scanner needs them).
-  const bareKey = (p) => "piscan-bare-" + p.planet_id;
+  // v2: maps from before every picture was placed on the map slid while recording; not reused.
+  const bareKey = (p) => "piscan-bare2-" + p.planet_id;
+  let bareMirrored = false;
   function loadBare(p) {
     if (!p) return null;
     try {
       const text = localStorage.getItem(bareKey(p));
+      bareMirrored = localStorage.getItem(bareKey(p) + "-mirrored") === "1";
       return text ? E.bareFromBytes(Uint8Array.from(atob(text), (c) => c.charCodeAt(0))) : null;
     } catch (e) { return null; }
+  }
+  function forgetBare() {
+    const p = currentPlanet(); bare = null; refCache = null;
+    try { if (p) { localStorage.removeItem(bareKey(p)); localStorage.removeItem(bareKey(p) + "-mirrored"); } } catch {}
   }
   function storeBare() {
     const p = currentPlanet();
     if (!p || !bare) return;
     const bytes = E.bareToBytes(bare);
     let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
-    try { localStorage.setItem(bareKey(p), btoa(bin)); } catch (e) { /* kept for this visit */ }
+    try { localStorage.setItem(bareKey(p), btoa(bin)); localStorage.setItem(bareKey(p) + "-mirrored", facing && facing.mirrored ? "1" : "0"); } catch (e) { /* kept for this visit */ }
   }
   /** Every colony on the planet as a layout to look for (buildings and heads). */
   function colonies() {
@@ -240,14 +258,16 @@
     const by = new Map();
     anchorList().forEach((a) => { if (!by.has(a.kind)) by.set(a.kind, []); by.get(a.kind).push(a); });
     const p = currentPlanet();
-    const mineNames = new Set(((p && p.characters) || []).filter((c) => c.mine).map((c) => c.name));
-    const isMine = (items) => items.some((a) => mineNames.has(a.owner));
+    // Only the character in this EVE client: that's whose buildings EVE draws.
+    const me = $("client").value;
+    const isMine = (items) => items.some((a) => a.owner === me);
     let list = [...by.entries()].map(([kind, items]) => ({ kind, items, mine: isMine(items) }))
       .sort((a, b) => Number(b.mine) - Number(a.mine) || a.items.length - b.items.length || a.kind.localeCompare(b.kind));
-    if (!($("othersPins") && $("othersPins").checked) && list.some((k) => k.mine)) list = list.filter((k) => k.mine);
-    // Every colony's command center, whoever's it is: EVE shows them all, and they're spread out.
+    const others = $("othersPins") && $("othersPins").checked;
+    if (!others) list = list.filter((k) => k.mine);
+    // Other people's command centers (EVE shows those with "Show other characters' networks").
     const centers = anchorList().filter((a) => /Command Center$/.test(a.kind));
-    if (centers.length > 1) list.unshift({ kind: "Any command center", items: centers });
+    if (others && centers.length > 1) list.unshift({ kind: "Any command center", items: centers });
     return list;
   }
   function renderAnchors() {
@@ -270,6 +290,8 @@
     $("scan").classList.toggle("on", running);
     const m = maps.get($("resource").value);
     $("save").disabled = $("resource").value === BARE || !(m && E.coverage(m) > 0);
+    const planetNow = currentPlanet();
+    $("wipe").hidden = !(planetNow && (planetNow.scans || []).length);
     $("freeze").textContent = frozen ? "Unfreeze" : "Freeze";
     $("freeze").classList.toggle("on", frozen);
     $("discInfo").textContent = disc ? `centre ${Math.round(disc.cx)}, ${Math.round(disc.cy)} · radius ${Math.round(disc.r)} px` : "not set yet";
@@ -495,6 +517,7 @@
     const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);
     const next = POLE_WAYS[(at + 1) % POLE_WAYS.length];
     savePole(next);
+    if (bare) { forgetBare(); say("scanStatus", "Flipped: the bare map recorded the other way round was cleared; record it again.", "warn"); }
     lockFromOne(facing.one.groups, next);
   });
 
@@ -589,37 +612,52 @@
             updateButtons();
           }
         }
-        if (f && disc && $("auto").checked) autoStep(f);
+        // A bare map of this planet already recorded: no lock needed, find where the picture sits on it.
+        if (f && disc && !facing && bare && Date.now() - lastFind > 700) {
+          lastFind = Date.now();
+          const ref = mapRef();
+          if (ref) {
+            if (!isFinite(disc.D)) disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) }, focal = lensPx();
+            const found = E.findOnMap(E.samplePoints(f.data.data, f.w, f.h, disc, 300, true), ref.coarse, bareMirrored);
+            if (found && found.score >= 0.55 && found.margin >= 0.15) {
+              const r = E.alignToMap(E.samplePoints(f.data.data, f.w, f.h, disc, 600), ref.fine, bareMirrored, found, 1 * DEG, 0.5 * DEG) || found;
+              facing = { Q: E.poseQ(r.yaw, r.pitch), mirrored: bareMirrored, misses: [], owners: [$("client").value] };
+              focal = lensPx(); forgetTrack();
+              say("lockStatus", "Found on your bare planet map: no lock needed. Pick the resource EVE shows and press Scan.", "ok");
+              updateButtons();
+            } else say("lockStatus", "Looking for this view on your bare planet map… (zoomed all the way out, edge set)", "");
+          }
+        }
+        if (f && disc && $("auto").checked && !facing) autoStep(f);
         if (f && running && facing && disc) {
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
-          let ok = true;
-          if (lost) {
-            ok = false; lostRun++;
-            // Back over ground already seen (or the start, after a double-click in EVE)? A few kept pictures per tick.
-            for (let n = 0; n < Math.min(6, keys.length) && !ok; n++) {
-              const k = keys[keyTry++ % keys.length], t = E.trackRotation(k.grey, grey, disc.D);
-              if (t) { facing.Q = E.mul(t.R, k.Q); ok = true; }
-            }
-            // Lost while holding still and still holding still: the picture changed (EVE filter), not the planet.
-            if (!ok && lost.still && lostRun <= 8) {
-              const t = E.trackRotation(lost.grey, grey, disc.D);
-              if (t && t.moved < 0.017) { keys = []; ok = true; }
-              else if (!t || t.moved >= 0.017) lost.still = false;
-            }
-            if (ok) { lost = null; lostRun = 0; lastStep = null; }
-          } else if (prevGrey) {
+          // 1) A first guess from the last picture (EVE's camera can't roll: keep it upright).
+          let tracked = false;
+          if (prevGrey) {
             const t = (lastStep && E.trackRotation(prevGrey, grey, disc.D, { guess: lastStep })) || E.trackRotation(prevGrey, grey, disc.D);
-            if (t) { facing.Q = E.mul(t.R, facing.Q); lastStep = t.R; lostRun = 0; }
-            else {
-              ok = false; lostRun = 1;
-              const before = lastStep ? Math.acos(Math.max(-1, Math.min(1, (lastStep[0] + lastStep[4] + lastStep[8] - 1) / 2))) : 0;
-              lost = { grey, still: before < 0.017 }; lastStep = null;
+            if (t) { facing.Q = E.upright(E.mul(t.R, facing.Q)); lastStep = t.R; tracked = true; } else lastStep = null;
+          }
+          // 2) Placed on the bare planet map: no piling-up error; lost → found again anywhere on the planet.
+          let ok = tracked || !prevGrey, placed = false;
+          const ref = mapRef();
+          if (ref) {
+            const pts = E.samplePoints(f.data.data, f.w, f.h, disc, 600);
+            const near = E.alignToMap(pts, ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
+            if (near && near.score >= 0.55) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; }
+            else if (near || !tracked) {
+              ok = false;
+              if (Date.now() - lastFind > 300) {
+                lastFind = Date.now();
+                const found = E.findOnMap(E.samplePoints(f.data.data, f.w, f.h, disc, 300, true), ref.coarse, facing.mirrored);
+                if (found && found.score >= 0.5 && found.margin >= 0.15) {
+                  const r = E.alignToMap(pts, ref.fine, facing.mirrored, found, 1 * DEG, 0.5 * DEG) || found;
+                  facing.Q = E.poseQ(r.yaw, r.pitch); ok = true; placed = true; lastStep = null;
+                }
+              }
             }
           }
-          if (ok && (!keys.length || keys.every((k) => E.angle(E.apply(k.Q, [0, 0, 1]), E.apply(facing.Q, [0, 0, 1])) > 0.2))) {
-            keys.push({ grey, Q: facing.Q.slice() });
-            if (keys.length > 60) keys.splice(1, 1); // keep the first (where the scan started)
-          }
+          lost = ok ? null : { grey };
+          if (!ok) prevGrey = grey;
           if (ok) {
             prevGrey = grey;
             if ($("resource").value === BARE) {
@@ -634,8 +672,8 @@
               const hint = E.missingHint(m, facing.Q, facing.mirrored), cover = E.coverage(m);
               say("scanStatus", cover > 0.97 ? "Whole planet seen: save it, or pick the next resource." : `${Math.round(cover * 100)}% seen. Still missing: ${hint || "a little here and there"}.`, "ok");
             }
-          } else if (lost) {
-            say("scanStatus", "Lost the grip (turned too fast): painting is paused. Turn back to a part already scanned and it picks up by itself, or double-click the planet in EVE to go back to where the scan started.", "warn");
+          } else {
+            say("scanStatus", ref ? "Finding where this is on the planet map… (painting paused until it's sure)" : "Lost the grip (turned too fast): painting is paused. Record the bare planet first and it can't get lost; for now, turn slower or click one of your buildings.", "warn");
           }
           drawFlat(); updateButtons();
         }
@@ -660,6 +698,17 @@
     } catch (e) { say("saveStatus", String(e), "bad"); }
   });
 
+  $("wipe").addEventListener("click", async () => {
+    const p = currentPlanet();
+    if (!p || !(p.scans || []).length) return;
+    say("saveStatus", "Deleting…");
+    try {
+      for (const sc of p.scans) await invoke("piscan_delete", { planetId: p.planet_id, resource: sc.resource });
+      p.scans = []; [...maps.keys()].forEach((k) => maps.delete(k));
+      say("saveStatus", `Deleted the corp's old scans of ${p.name}.`, "ok");
+      planetChanged();
+    } catch (e) { say("saveStatus", String(e), "bad"); }
+  });
   $("client").addEventListener("change", () => { frame = null; fillPlanets(); });
   $("planet").addEventListener("change", planetChanged);
   $("others").addEventListener("change", fillPlanets);
