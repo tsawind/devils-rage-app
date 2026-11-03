@@ -66,6 +66,7 @@
         <div class="muted small">In EVE: open the planet, turn on the scan for a resource. This page only watches the picture; it never clicks or types in EVE.</div>
         <div class="row"><select id="client"></select><button class="btn" id="reload" title="Look for clients and your planets again">↻</button></div>
         <div class="row"><select id="planet" style="width: 100%"></select></div>
+        <div class="row"><button class="btn" id="record" title="Saves this client's picture 3 times a second (up to 2 minutes) on this PC, so the scan can be tuned on real pictures">● Record for tuning</button><span class="small muted" id="recordSaid"></span></div>
         <label class="small muted"><input type="checkbox" id="others"> Show the other planets here (scan them using a corp mate's buildings)</label>
       </div></div>
       <div class="step"><div class="n">2</div><div>
@@ -574,6 +575,25 @@
   $("planet").addEventListener("change", planetChanged);
   $("others").addEventListener("change", fillPlanets);
   $("othersPins").addEventListener("change", renderAnchors);
+  // Recording: frames saved by the app; the page notes what it had selected every second.
+  let recordTimer = null;
+  $("record").addEventListener("click", async () => {
+    if (await invoke("piscan_recording").catch(() => false)) { await invoke("piscan_record_stop").catch(() => {}); return; }
+    const name = $("client").value;
+    if (!name) return say("recordSaid", "Pick a client first.", "warn");
+    try {
+      await invoke("piscan_record_start", { name, seconds: 120 });
+      const started = Date.now();
+      $("record").textContent = "■ Stop recording";
+      recordTimer = setInterval(async () => {
+        const p = currentPlanet();
+        invoke("piscan_record_note", { note: { ms: Date.now() - started, planet: p && p.name, resource: $("resource").value, disc, locked: !!facing, Q: facing && facing.Q, mirrored: facing && facing.mirrored } }).catch(() => {});
+        const on = await invoke("piscan_recording").catch(() => false);
+        $("recordSaid").textContent = on ? `recording… ${Math.round((Date.now() - started) / 1000)} s` : "Saved. Tell Claude it's done.";
+        if (!on) { clearInterval(recordTimer); $("record").textContent = "● Record for tuning"; }
+      }, 1000);
+    } catch (e) { say("recordSaid", String(e), "bad"); }
+  });
   $("reload").addEventListener("click", async () => { await loadClients(); await loadPlanets(); });
   (async () => { await loadClients(); await loadPlanets(); drawShot(); })();
 })();

@@ -4,7 +4,9 @@
 //! These commands talk to SeAT with the app's own sign-in: the pilot's planets with every
 //! building's position (the anchors), and the corp's scans to read and add to.
 
-use tauri::AppHandle;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager};
 
 fn client() -> reqwest::Client {
     reqwest::Client::new()
@@ -77,6 +79,73 @@ pub async fn piscan_save(app: AppHandle, planet_id: u64, resource: String, chara
         return Err(body["message"].as_str().map(str::to_string).unwrap_or_else(|| format!("SeAT answered {status}")));
     }
     Ok(body["message"].as_str().unwrap_or("Saved.").to_string())
+}
+
+// ---- Recording (for tuning the scan on real pictures) ----------------------------------------
+// The scan page's Record button: the client's picture 3 times a second, saved as JPEGs with a
+// notes file (what the page had selected), next to the app's logs. Nothing leaves the PC.
+
+static RECORDING: AtomicBool = AtomicBool::new(false);
+static NOTES: Mutex<Vec<serde_json::Value>> = Mutex::new(Vec::new());
+
+fn recordings_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path().app_local_data_dir().map(|d| d.join("recordings")).map_err(|e| e.to_string())
+}
+
+/// Start recording a client (stops by itself after `seconds`, at most 3 minutes).
+#[tauri::command]
+pub fn piscan_record_start(app: AppHandle, name: String, seconds: Option<u64>) -> Result<String, String> {
+    if RECORDING.swap(true, Ordering::SeqCst) {
+        return Err("Already recording.".into());
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let dir = recordings_dir(&app)?.join(format!("scan-{stamp}"));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    NOTES.lock().unwrap().clear();
+    let limit = seconds.unwrap_or(120).clamp(5, 180);
+    let out = dir.clone();
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let mut n = 0u32;
+        while RECORDING.load(Ordering::SeqCst) && started.elapsed().as_secs() < limit {
+            let t0 = std::time::Instant::now();
+            if let Ok(jpeg) = crate::capture::client_jpeg(&name, 1280, 85) {
+                n += 1;
+                let _ = std::fs::write(out.join(format!("frame-{n:04}-{}ms.jpg", started.elapsed().as_millis())), jpeg);
+            }
+            let spent = t0.elapsed();
+            if spent < std::time::Duration::from_millis(333) {
+                std::thread::sleep(std::time::Duration::from_millis(333) - spent);
+            }
+        }
+        RECORDING.store(false, Ordering::SeqCst);
+        let notes = std::mem::take(&mut *NOTES.lock().unwrap());
+        let _ = std::fs::write(out.join("notes.json"), serde_json::to_string_pretty(&serde_json::json!({ "client": name, "frames": n, "notes": notes })).unwrap_or_default());
+        log::info!("scan recording: {n} frames in {}", out.display());
+    });
+    Ok(dir.display().to_string())
+}
+
+/// Stop recording.
+#[tauri::command]
+pub fn piscan_record_stop() {
+    RECORDING.store(false, Ordering::SeqCst);
+}
+
+#[tauri::command]
+pub fn piscan_recording() -> bool {
+    RECORDING.load(Ordering::SeqCst)
+}
+
+/// What the page has selected (planet, resource, edge, lock), kept with the recording.
+#[tauri::command]
+pub fn piscan_record_note(note: serde_json::Value) {
+    if RECORDING.load(Ordering::SeqCst) {
+        let mut notes = NOTES.lock().unwrap();
+        if notes.len() < 2000 {
+            notes.push(note);
+        }
+    }
 }
 
 #[cfg(test)]
