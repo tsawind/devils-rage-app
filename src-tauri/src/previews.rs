@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent,
+};
 
 /// Label every preview window shares a prefix, so we can find and close them together.
 const PREFIX: &str = "preview-";
@@ -62,7 +65,15 @@ pub struct ClientPrefs {
 
 impl Default for ClientPrefs {
     fn default() -> Self {
-        ClientPrefs { enabled: true, click_through: false, opacity: 1.0, x: None, y: None, w: None, h: None }
+        ClientPrefs {
+            enabled: true,
+            click_through: false,
+            opacity: 1.0,
+            x: None,
+            y: None,
+            w: None,
+            h: None,
+        }
     }
 }
 
@@ -82,7 +93,12 @@ pub struct Layout {
 
 impl Default for Layout {
     fn default() -> Self {
-        Layout { edit: false, clients: BTreeMap::new(), opacity: 1.0, auto_open: true }
+        Layout {
+            edit: false,
+            clients: BTreeMap::new(),
+            opacity: 1.0,
+            auto_open: true,
+        }
     }
 }
 
@@ -90,7 +106,10 @@ static LAYOUT: Mutex<Option<Layout>> = Mutex::new(None);
 static SAVE_PENDING: AtomicBool = AtomicBool::new(false);
 
 fn layout_path(app: &AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join("previews.json"))
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| dir.join("previews.json"))
 }
 
 fn with_layout<T>(app: &AppHandle, f: impl FnOnce(&mut Layout) -> T) -> T {
@@ -114,7 +133,9 @@ fn save_soon(app: &AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(600));
         SAVE_PENDING.store(false, Ordering::SeqCst);
-        let text = with_layout(&app, |layout| serde_json::to_string_pretty(layout).unwrap_or_default());
+        let text = with_layout(&app, |layout| {
+            serde_json::to_string_pretty(layout).unwrap_or_default()
+        });
         if let Some(path) = layout_path(&app) {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
@@ -128,7 +149,9 @@ fn save_soon(app: &AppHandle) {
 }
 
 fn prefs_for(app: &AppHandle, name: &str) -> ClientPrefs {
-    with_layout(app, |layout| layout.clients.get(name).cloned().unwrap_or_default())
+    with_layout(app, |layout| {
+        layout.clients.get(name).cloned().unwrap_or_default()
+    })
 }
 
 fn edit_mode(app: &AppHandle) -> bool {
@@ -153,7 +176,10 @@ fn apply_mode(app: &AppHandle, window: &WebviewWindow, name: &str) {
     let prefs = prefs_for(app, name);
     let edit = edit_mode(app);
     let _ = window.set_ignore_cursor_events(!edit && prefs.click_through);
-    let _ = window.eval(format!("window.__previewMode && window.__previewMode({});", mode_json(app, name)));
+    let _ = window.eval(format!(
+        "window.__previewMode && window.__previewMode({});",
+        mode_json(app, name)
+    ));
 }
 
 // ---- Commands -------------------------------------------------------------------------------
@@ -170,7 +196,11 @@ pub fn preview_clients() -> Vec<serde_json::Value> {
 /// One client's picture as a data URL, for its preview window to draw. The capture and JPEG
 /// encode run on a blocking thread so a preview never stalls the UI thread.
 #[tauri::command]
-pub async fn preview_frame(name: String, width: Option<u32>, quality: Option<u8>) -> Result<String, String> {
+pub async fn preview_frame(
+    name: String,
+    width: Option<u32>,
+    quality: Option<u8>,
+) -> Result<String, String> {
     let w = width.unwrap_or(480).clamp(120, 1280);
     let q = quality.unwrap_or(70).clamp(30, 90);
     tauri::async_runtime::spawn_blocking(move || {
@@ -212,12 +242,17 @@ pub fn preview_layout(app: AppHandle) -> Layout {
 /// UI thread until each webview is ready, which froze the whole app), so this returns at once.
 #[tauri::command]
 pub fn open_previews(app: AppHandle) -> Result<usize, String> {
+    AUTO_PAUSED.store(false, std::sync::atomic::Ordering::Relaxed);
     let clients = crate::clipboard::open_clients();
     if clients.is_empty() {
         return Err("No EVE clients are open.".to_string());
     }
     let edit = edit_mode(&app);
-    let wanted: Vec<String> = clients.into_iter().map(|(name, _)| name).filter(|name| edit || prefs_for(&app, name).enabled).collect();
+    let wanted: Vec<String> = clients
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| edit || prefs_for(&app, name).enabled)
+        .collect();
     let count = wanted.len();
     for name in &wanted {
         if let Some(existing) = app.get_webview_window(&label_for(name)) {
@@ -239,7 +274,10 @@ pub fn open_previews(app: AppHandle) -> Result<usize, String> {
 fn build_preview(app: &AppHandle, name: &str) {
     let label = label_for(name);
     let prefs = prefs_for(app, name);
-    let init = format!("window.__PREVIEW_NAME__ = {};", serde_json::Value::String(name.to_string()));
+    let init = format!(
+        "window.__PREVIEW_NAME__ = {};",
+        serde_json::Value::String(name.to_string())
+    );
     let url = format!("preview.html?name={}", urlencode(name));
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .initialization_script(init)
@@ -263,7 +301,10 @@ fn build_preview(app: &AppHandle, name: &str) {
         }
     };
     if let (Some(w), Some(h)) = (prefs.w, prefs.h) {
-        let _ = window.set_size(PhysicalSize::new(w.max(MIN_SIZE.0 as u32), h.max(MIN_SIZE.1 as u32)));
+        let _ = window.set_size(PhysicalSize::new(
+            w.max(MIN_SIZE.0 as u32),
+            h.max(MIN_SIZE.1 as u32),
+        ));
     }
     if let (Some(x), Some(y)) = (prefs.x, prefs.y) {
         let _ = window.set_position(PhysicalPosition::new(x, y));
@@ -315,9 +356,11 @@ pub fn set_preview_edit(app: AppHandle, on: bool) -> Result<(), String> {
         if !label.starts_with(PREFIX) {
             continue;
         }
-        let Some(name) = name_of_window(&window) else { continue };
+        let Some(name) = name_of_window(&window) else {
+            continue;
+        };
         if !on && !prefs_for(&app, &name).enabled {
-            let _ = window.destroy();
+            destroy_all(&app, vec![window]);
             continue;
         }
         apply_mode(&app, &window, &name);
@@ -327,7 +370,13 @@ pub fn set_preview_edit(app: AppHandle, on: bool) -> Result<(), String> {
 
 /// Change one client's preview: shown, click-through, opacity.
 #[tauri::command]
-pub fn set_preview_client(app: AppHandle, name: String, enabled: Option<bool>, click_through: Option<bool>, opacity: Option<f64>) -> Result<(), String> {
+pub fn set_preview_client(
+    app: AppHandle,
+    name: String,
+    enabled: Option<bool>,
+    click_through: Option<bool>,
+    opacity: Option<f64>,
+) -> Result<(), String> {
     with_layout(&app, |layout| {
         let prefs = layout.clients.entry(name.clone()).or_default();
         if let Some(enabled) = enabled {
@@ -343,7 +392,7 @@ pub fn set_preview_client(app: AppHandle, name: String, enabled: Option<bool>, c
     save_soon(&app);
     if let Some(window) = app.get_webview_window(&label_for(&name)) {
         if !edit_mode(&app) && !prefs_for(&app, &name).enabled {
-            let _ = window.destroy();
+            destroy_all(&app, vec![window]);
         } else {
             apply_mode(&app, &window, &name);
         }
@@ -386,23 +435,25 @@ pub fn start_watch(app: AppHandle) {
             // Every 0.4 s: a client that has closed takes its preview with it (gone two checks in
             // a row, so a title change while logging in doesn't count). Not in edit mode; the
             // preview comes back by itself when that client starts again.
-            let open: std::collections::BTreeSet<String> = crate::clipboard::open_clients().into_iter().map(|(name, _)| name).collect();
+            let open: std::collections::BTreeSet<String> = crate::clipboard::open_clients()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
             if !with_layout(&app, |layout| layout.edit) {
                 let gone: Vec<WebviewWindow> = app
                     .webview_windows()
                     .into_iter()
                     .filter(|(label, _)| label.starts_with(PREFIX))
                     .map(|(_, window)| window)
-                    .filter(|window| name_of_window(window).is_some_and(|name| !open.contains(&name) && !last_open.contains(&name)))
+                    .filter(|window| {
+                        name_of_window(window)
+                            .is_some_and(|name| !open.contains(&name) && !last_open.contains(&name))
+                    })
                     .collect();
                 if !gone.is_empty() {
                     // Windows are closed on the main thread: closing one from this watcher
                     // thread left its frame on screen with a dead page inside.
-                    let _ = app.run_on_main_thread(move || {
-                        for window in gone {
-                            let _ = window.destroy();
-                        }
-                    });
+                    destroy_all(&app, gone);
                 }
             }
             last_open = open.clone();
@@ -410,7 +461,10 @@ pub fn start_watch(app: AppHandle) {
             if tick % 25 == 0 {
                 let fresh = open.iter().any(|name| !known.contains(name));
                 known = open;
-                if fresh && with_layout(&app, |layout| layout.auto_open) {
+                if fresh
+                    && !AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed)
+                    && with_layout(&app, |layout| layout.auto_open)
+                {
                     let app = app.clone();
                     // Give a new client a moment to draw something before its preview opens.
                     tauri::async_runtime::spawn(async move {
@@ -428,7 +482,9 @@ pub fn push_active(app: &AppHandle, name: Option<&str>) {
     let arg = serde_json::to_string(&name).unwrap_or_else(|_| "null".into());
     for (label, window) in app.webview_windows() {
         if label.starts_with(PREFIX) {
-            let _ = window.eval(format!("window.__previewActive && window.__previewActive({arg});"));
+            let _ = window.eval(format!(
+                "window.__previewActive && window.__previewActive({arg});"
+            ));
         }
     }
 }
@@ -448,7 +504,10 @@ pub fn set_previews_opacity(app: AppHandle, opacity: f64) {
 /// Resize the calling preview (its corner handle in edit mode), in physical pixels.
 #[tauri::command]
 pub fn preview_resize(window: WebviewWindow, width: u32, height: u32) {
-    let _ = window.set_size(PhysicalSize::new(width.max(MIN_SIZE.0 as u32), height.max(MIN_SIZE.1 as u32)));
+    let _ = window.set_size(PhysicalSize::new(
+        width.max(MIN_SIZE.0 as u32),
+        height.max(MIN_SIZE.1 as u32),
+    ));
 }
 
 /// Close one preview (its own ✕). In edit mode this also turns that client's preview off.
@@ -456,28 +515,56 @@ pub fn preview_resize(window: WebviewWindow, width: u32, height: u32) {
 pub fn close_preview(app: AppHandle, window: WebviewWindow) {
     if edit_mode(&app) {
         if let Some(name) = name_of_window(&window) {
-            with_layout(&app, |layout| layout.clients.entry(name).or_default().enabled = false);
+            with_layout(&app, |layout| {
+                layout.clients.entry(name).or_default().enabled = false
+            });
             save_soon(&app);
         }
     }
-    let _ = window.destroy();
+    destroy_all(&app, vec![window]);
 }
 
-/// Close every preview window (and leave edit mode).
+/// Close every preview window (and leave edit mode). New clients don't bring previews back
+/// until Open previews is pressed again.
 #[tauri::command]
 pub fn close_previews(app: AppHandle) {
+    AUTO_PAUSED.store(true, std::sync::atomic::Ordering::Relaxed);
     with_layout(&app, |layout| layout.edit = false);
     save_soon(&app);
-    for (label, window) in app.webview_windows() {
-        if label.starts_with(PREFIX) {
+    let all = app
+        .webview_windows()
+        .into_iter()
+        .filter(|(label, _)| label.starts_with(PREFIX))
+        .map(|(_, w)| w)
+        .collect();
+    destroy_all(&app, all);
+}
+
+/// Set by Close previews, cleared by Open previews: stops new clients opening previews meanwhile.
+static AUTO_PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Hide straight away, then destroy on the main thread (a destroy from elsewhere can leave the
+/// frame up with "failed to acquire webview reference" inside).
+fn destroy_all(app: &AppHandle, windows: Vec<WebviewWindow>) {
+    if windows.is_empty() {
+        return;
+    }
+    for window in &windows {
+        let _ = window.hide();
+    }
+    let _ = app.run_on_main_thread(move || {
+        for window in windows {
             let _ = window.destroy();
         }
-    }
+    });
 }
 
 /// Which character a preview window shows (from its title "Name · preview").
 fn name_of_window(window: &WebviewWindow) -> Option<String> {
-    window.title().ok().and_then(|title| title.strip_suffix(" · preview").map(str::to_string))
+    window
+        .title()
+        .ok()
+        .and_then(|title| title.strip_suffix(" · preview").map(str::to_string))
 }
 
 /// Pick an EVE-O Preview config file and bring in its thumbnail spots / sizes and its cycle
@@ -487,7 +574,10 @@ pub async fn import_eveo(app: AppHandle) -> Result<String, String> {
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;
-        app2.dialog().file().add_filter("EVE-O Preview settings", &["json"]).blocking_pick_file()
+        app2.dialog()
+            .file()
+            .add_filter("EVE-O Preview settings", &["json"])
+            .blocking_pick_file()
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -495,8 +585,10 @@ pub async fn import_eveo(app: AppHandle) -> Result<String, String> {
         return Ok("Nothing picked.".to_string());
     };
     let path = file.into_path().map_err(|e| e.to_string())?;
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("not an EVE-O Preview file: {e}"))?;
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("couldn't read {}: {e}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("not an EVE-O Preview file: {e}"))?;
     let imported = parse_eveo(&value);
 
     let spots = imported.spots.len();
@@ -525,7 +617,9 @@ pub async fn import_eveo(app: AppHandle) -> Result<String, String> {
         .collect();
     let group_count = groups.len();
     crate::launch::merge_imported(&app, groups)?;
-    Ok(format!("Imported {spots} preview spots and {group_count} cycle group(s) with their hotkeys."))
+    Ok(format!(
+        "Imported {spots} preview spots and {group_count} cycle group(s) with their hotkeys."
+    ))
 }
 
 // ---- EVE-O Preview import (pure, tested) -----------------------------------------------------
@@ -557,8 +651,13 @@ pub struct EveoImport {
 
 /// "EVE - !Tsawind" -> "Tsawind"; plain "EVE" and placeholders -> None.
 fn character_of(title: &str) -> Option<String> {
-    let name = title.strip_prefix("EVE - ")?.trim().trim_start_matches('!').trim();
-    let junk = name.is_empty() || name.starts_with("Example Toon") || name.starts_with("cycle group");
+    let name = title
+        .strip_prefix("EVE - ")?
+        .trim()
+        .trim_start_matches('!')
+        .trim();
+    let junk =
+        name.is_empty() || name.starts_with("Example Toon") || name.starts_with("cycle group");
     (!junk).then(|| name.to_string())
 }
 
@@ -585,29 +684,59 @@ fn hotkey(list: Option<&serde_json::Value>) -> Option<String> {
 pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
     let mut out = EveoImport::default();
 
-    let (default_w, default_h) = config.get("ThumbnailSize").and_then(|v| v.as_str()).and_then(pair).unwrap_or((320, 200));
+    let (default_w, default_h) = config
+        .get("ThumbnailSize")
+        .and_then(|v| v.as_str())
+        .and_then(pair)
+        .unwrap_or((320, 200));
     let sizes: BTreeMap<String, (i64, i64)> = config
         .get("PerClientThumbnailSize")
         .and_then(|v| v.as_object())
-        .map(|map| map.iter().filter_map(|(title, size)| Some((character_of(title)?, pair(size.as_str()?)?))).collect())
+        .map(|map| {
+            map.iter()
+                .filter_map(|(title, size)| Some((character_of(title)?, pair(size.as_str()?)?)))
+                .collect()
+        })
         .unwrap_or_default();
     if let Some(flat) = config.get("FlatLayout").and_then(|v| v.as_object()) {
         for (title, spot) in flat {
-            let (Some(name), Some((x, y))) = (character_of(title), spot.as_str().and_then(pair)) else { continue };
+            let (Some(name), Some((x, y))) = (character_of(title), spot.as_str().and_then(pair))
+            else {
+                continue;
+            };
             if out.spots.iter().any(|known| known.name == name) {
                 continue;
             }
             let (w, h) = sizes.get(&name).copied().unwrap_or((default_w, default_h));
-            out.spots.push(Spot { name, x: x as i32, y: y as i32, w: w.max(MIN_SIZE.0 as i64) as u32, h: h.max(MIN_SIZE.1 as i64) as u32 });
+            out.spots.push(Spot {
+                name,
+                x: x as i32,
+                y: y as i32,
+                w: w.max(MIN_SIZE.0 as i64) as u32,
+                h: h.max(MIN_SIZE.1 as i64) as u32,
+            });
         }
     }
 
     // EVE-O's single spot for a client at the login screen becomes our "Login 1" spot.
-    if let Some((x, y)) = config.get("LoginThumbnailLocation").and_then(|v| v.as_str()).and_then(pair) {
+    if let Some((x, y)) = config
+        .get("LoginThumbnailLocation")
+        .and_then(|v| v.as_str())
+        .and_then(pair)
+    {
         let name = crate::clipboard::login_label(0);
         if !out.spots.iter().any(|known| known.name == name) {
-            let (w, h) = (default_w.max(MIN_SIZE.0 as i64) as u32, default_h.max(MIN_SIZE.1 as i64) as u32);
-            out.spots.push(Spot { name, x: x as i32, y: y as i32, w, h });
+            let (w, h) = (
+                default_w.max(MIN_SIZE.0 as i64) as u32,
+                default_h.max(MIN_SIZE.1 as i64) as u32,
+            );
+            out.spots.push(Spot {
+                name,
+                x: x as i32,
+                y: y as i32,
+                w,
+                h,
+            });
         }
     }
 
@@ -616,14 +745,26 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
 
     let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
     for number in 1..=5u32 {
-        let Some(order) = config.get(format!("CycleGroup{number}ClientsOrder")).and_then(|v| v.as_object()) else { continue };
+        let Some(order) = config
+            .get(format!("CycleGroup{number}ClientsOrder"))
+            .and_then(|v| v.as_object())
+        else {
+            continue;
+        };
         let mut ranked: Vec<(i64, usize, String, bool)> = order
             .iter()
             .enumerate()
             .filter_map(|(i, (title, rank))| {
                 // EVE-O's bare "EVE" entry = clients at the login / character-select screen.
-                let name = if title.trim() == "EVE" { crate::cycle::LOGIN_SCREENS.to_string() } else { character_of(title)? };
-                let off = title.trim().strip_prefix("EVE - ").is_some_and(|rest| rest.trim_start().starts_with('!'));
+                let name = if title.trim() == "EVE" {
+                    crate::cycle::LOGIN_SCREENS.to_string()
+                } else {
+                    character_of(title)?
+                };
+                let off = title
+                    .trim()
+                    .strip_prefix("EVE - ")
+                    .is_some_and(|rest| rest.trim_start().starts_with('!'));
                 Some((rank.as_i64().unwrap_or(i64::MAX), i, name, off))
             })
             .collect();
@@ -639,15 +780,30 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
             }
         }
         // "!Name" switches a character off unless the group also lists it plainly.
-        let skipped: Vec<String> = members.iter().filter(|name| !on.contains(*name)).cloned().collect();
+        let skipped: Vec<String> = members
+            .iter()
+            .filter(|name| !on.contains(*name))
+            .cloned()
+            .collect();
         if members.is_empty() {
             continue;
         }
         // A key can only drive one group; the lower-numbered group keeps it (EVE-O's order).
-        let mut claim = |key: Option<String>| key.filter(|k| claimed.insert(k.to_ascii_uppercase()));
-        let forward = claim(hotkey(config.get(format!("CycleGroup{number}ForwardHotkeys"))));
-        let backward = claim(hotkey(config.get(format!("CycleGroup{number}BackwardHotkeys"))));
-        out.groups.push(CycleGroup { number, forward, backward, members, skipped });
+        let mut claim =
+            |key: Option<String>| key.filter(|k| claimed.insert(k.to_ascii_uppercase()));
+        let forward = claim(hotkey(
+            config.get(format!("CycleGroup{number}ForwardHotkeys")),
+        ));
+        let backward = claim(hotkey(
+            config.get(format!("CycleGroup{number}BackwardHotkeys")),
+        ));
+        out.groups.push(CycleGroup {
+            number,
+            forward,
+            backward,
+            members,
+            skipped,
+        });
     }
     out
 }
@@ -657,7 +813,9 @@ pub fn parse_eveo(config: &serde_json::Value) -> EveoImport {
 fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()
@@ -667,12 +825,24 @@ fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
         out.push(CHARS[(n >> 18 & 63) as usize] as char);
         out.push(CHARS[(n >> 12 & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { CHARS[(n >> 6 & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { CHARS[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            CHARS[(n >> 6 & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            CHARS[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -704,7 +874,8 @@ mod tests {
 
     #[test]
     fn old_layout_files_still_load() {
-        let layout: Layout = serde_json::from_str(r#"{"clients":{"Tsawind":{"x":10,"y":20}}}"#).unwrap();
+        let layout: Layout =
+            serde_json::from_str(r#"{"clients":{"Tsawind":{"x":10,"y":20}}}"#).unwrap();
         let prefs = &layout.clients["Tsawind"];
         assert!(prefs.enabled);
         assert!(!prefs.click_through);
@@ -716,7 +887,10 @@ mod tests {
     #[test]
     fn reads_character_names_from_eveo_titles() {
         assert_eq!(character_of("EVE - !Tsawind").as_deref(), Some("Tsawind"));
-        assert_eq!(character_of("EVE - The NocnitsaZ").as_deref(), Some("The NocnitsaZ"));
+        assert_eq!(
+            character_of("EVE - The NocnitsaZ").as_deref(),
+            Some("The NocnitsaZ")
+        );
         assert_eq!(character_of("EVE"), None);
         assert_eq!(character_of("EVE - Example Toon 1"), None);
         assert_eq!(character_of("EVE - cycle group 4"), None);
@@ -740,9 +914,27 @@ mod tests {
         assert_eq!(
             import.spots,
             vec![
-                Spot { name: "Login 1".into(), x: 900, y: 1100, w: 100, h: 50 },
-                Spot { name: "LuigiSquirrel".into(), x: 1311, y: 1767, w: 100, h: 50 },
-                Spot { name: "Tsawind".into(), x: 1211, y: 1368, w: 300, h: 160 },
+                Spot {
+                    name: "Login 1".into(),
+                    x: 900,
+                    y: 1100,
+                    w: 100,
+                    h: 50
+                },
+                Spot {
+                    name: "LuigiSquirrel".into(),
+                    x: 1311,
+                    y: 1767,
+                    w: 100,
+                    h: 50
+                },
+                Spot {
+                    name: "Tsawind".into(),
+                    x: 1211,
+                    y: 1368,
+                    w: 300,
+                    h: 160
+                },
             ]
         );
         // Group 1's bare "EVE" entry is the login screens, cycled with F15.
@@ -753,7 +945,10 @@ mod tests {
         assert_eq!(group.number, 3);
         assert_eq!(group.forward.as_deref(), Some("F13"));
         assert_eq!(group.backward, None);
-        assert_eq!(group.members, vec!["Tsawind", "Darkness Holder", "LuigiSquirrel"]);
+        assert_eq!(
+            group.members,
+            vec!["Tsawind", "Darkness Holder", "LuigiSquirrel"]
+        );
         // "!LuigiSquirrel" only: off. "!Tsawind" also listed plainly: on.
         assert_eq!(group.skipped, vec!["LuigiSquirrel"]);
     }

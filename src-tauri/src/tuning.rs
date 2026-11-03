@@ -21,41 +21,198 @@ pub struct Lever {
     /// "volume" (0 … 1), "switch" (0 / 1), "bool" (false / true), "level" (whole number), "scale" (0.5 … 2)
     pub kind: &'static str,
     pub label: &'static str,
+    /// For "level": the values EVE accepts, best looking first, with their names.
+    pub choices: &'static [(i64, &'static str)],
 }
+
+const HML_0_HIGH: &[(i64, &str)] = &[(0, "High"), (1, "Medium"), (2, "Low")];
+const HML_3_HIGH: &[(i64, &str)] = &[(3, "High"), (2, "Medium"), (1, "Low")];
+const HLO_2_HIGH: &[(i64, &str)] = &[(2, "High"), (1, "Low"), (0, "Off")];
+const HMLO_3_HIGH: &[(i64, &str)] = &[(3, "High"), (2, "Medium"), (1, "Low"), (0, "Off")];
+const FONT: &[(i64, &str)] = &[(2, "Large"), (1, "Medium"), (0, "Small")];
+const VOL: &[(i64, &str)] = &[(2, "High"), (1, "Medium"), (0, "Low")];
+const NONE: &[(i64, &str)] = &[];
 
 pub const LEVERS: &[Lever] = &[
     // Sound: keep what matters (wormhole activations are world sound, alarms are UI and Aura).
-    Lever { section: "audio", key: "masterVolume", kind: "volume", label: "Master volume" },
-    Lever { section: "audio", key: "worldVolume", kind: "volume", label: "World (ships, gates, wormhole activations)" },
-    Lever { section: "audio", key: "uiGain", kind: "volume", label: "Interface (alarms, warnings, notifications)" },
-    Lever { section: "audio", key: "evevoiceGain", kind: "volume", label: "Aura voice (warnings)" },
-    Lever { section: "audio", key: "eveampGain", kind: "volume", label: "Music" },
-    Lever { section: "audio", key: "useCombatMusic", kind: "switch", label: "Combat music" },
-    Lever { section: "audio", key: "suppressTurret", kind: "switch", label: "Quiet turret sounds" },
+    Lever {
+        section: "audio",
+        key: "masterVolume",
+        kind: "volume",
+        label: "Master volume",
+        choices: NONE,
+    },
+    Lever {
+        section: "audio",
+        key: "worldVolume",
+        kind: "volume",
+        label: "World (ships, gates, wormhole activations)",
+        choices: NONE,
+    },
+    Lever {
+        section: "audio",
+        key: "uiGain",
+        kind: "volume",
+        label: "Interface (alarms, warnings, notifications)",
+        choices: NONE,
+    },
+    Lever {
+        section: "audio",
+        key: "evevoiceGain",
+        kind: "volume",
+        label: "Aura voice (warnings)",
+        choices: NONE,
+    },
+    Lever {
+        section: "audio",
+        key: "eveampGain",
+        kind: "volume",
+        label: "Music",
+        choices: NONE,
+    },
+    Lever {
+        section: "audio",
+        key: "useCombatMusic",
+        kind: "switch",
+        label: "Combat music",
+        choices: NONE,
+    },
+    Lever {
+        section: "audio",
+        key: "suppressTurret",
+        kind: "switch",
+        label: "Quiet turret sounds",
+        choices: NONE,
+    },
     // Graphics: lower = lighter on the PC (alts don't need the pretty).
-    Lever { section: "device", key: "textureQuality", kind: "level", label: "Texture quality (0 high · 1 medium · 2 low)" },
-    Lever { section: "device", key: "shaderQuality", kind: "level", label: "Shader quality (1 low · 2 medium · 3 high)" },
-    Lever { section: "device", key: "lodQuality", kind: "level", label: "Level of detail (1 low · 2 medium · 3 high)" },
-    Lever { section: "device", key: "shadowQuality", kind: "level", label: "Shadows (0 off · 1 low · 2 high)" },
-    Lever { section: "device", key: "reflectionQuality", kind: "level", label: "Reflections (0 off … 3 high)" },
-    Lever { section: "device", key: "aoQuality", kind: "level", label: "Ambient occlusion (0 off … 2 high)" },
-    Lever { section: "device", key: "postProcessingQuality", kind: "level", label: "Post-processing (0 off … 2 high)" },
-    Lever { section: "device", key: "volumetricQuality", kind: "level", label: "Volumetrics, nebula clouds (0 low … 2 high)" },
-    Lever { section: "device", key: "antiAliasing", kind: "level", label: "Anti-aliasing (0 off … 3 high)" },
-    Lever { section: "device", key: "charTextureQuality", kind: "level", label: "Character textures (0 high … 2 low)" },
-    Lever { section: "device", key: "dofEnabled", kind: "switch", label: "Depth of field" },
-    Lever { section: "device", key: "charClothSimulation", kind: "switch", label: "Cloth simulation (character screen)" },
-    Lever { section: "device", key: "frameGeneration", kind: "bool", label: "Frame generation" },
-    Lever { section: "device", key: "brightness", kind: "scale", label: "Brightness" },
+    Lever {
+        section: "device",
+        key: "textureQuality",
+        kind: "level",
+        label: "Texture quality",
+        choices: HML_0_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "shaderQuality",
+        kind: "level",
+        label: "Shader quality",
+        choices: HML_3_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "lodQuality",
+        kind: "level",
+        label: "Level of detail",
+        choices: HML_3_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "shadowQuality",
+        kind: "level",
+        label: "Shadows",
+        choices: HLO_2_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "reflectionQuality",
+        kind: "level",
+        label: "Reflections",
+        choices: HMLO_3_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "aoQuality",
+        kind: "level",
+        label: "Ambient occlusion",
+        choices: HLO_2_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "postProcessingQuality",
+        kind: "level",
+        label: "Post-processing",
+        choices: HLO_2_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "volumetricQuality",
+        kind: "level",
+        label: "Volumetrics, nebula clouds",
+        choices: VOL,
+    },
+    Lever {
+        section: "device",
+        key: "antiAliasing",
+        kind: "level",
+        label: "Anti-aliasing",
+        choices: HMLO_3_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "charTextureQuality",
+        kind: "level",
+        label: "Character textures",
+        choices: HML_0_HIGH,
+    },
+    Lever {
+        section: "device",
+        key: "dofEnabled",
+        kind: "switch",
+        label: "Depth of field",
+        choices: NONE,
+    },
+    Lever {
+        section: "device",
+        key: "charClothSimulation",
+        kind: "switch",
+        label: "Cloth simulation (character screen)",
+        choices: NONE,
+    },
+    Lever {
+        section: "device",
+        key: "frameGeneration",
+        kind: "bool",
+        label: "Frame generation",
+        choices: NONE,
+    },
+    Lever {
+        section: "device",
+        key: "brightness",
+        kind: "scale",
+        label: "Brightness",
+        choices: NONE,
+    },
     // Interface.
-    Lever { section: "device", key: "UIScaleWindowed", kind: "scale", label: "Interface scale (windowed)" },
-    Lever { section: "device", key: "UIScaleFullscreen", kind: "scale", label: "Interface scale (full screen)" },
-    Lever { section: "ui", key: "clientFontSize", kind: "level", label: "Font size (0 small · 1 medium · 2 large)" },
+    Lever {
+        section: "device",
+        key: "UIScaleWindowed",
+        kind: "scale",
+        label: "Interface scale (windowed)",
+        choices: NONE,
+    },
+    Lever {
+        section: "device",
+        key: "UIScaleFullscreen",
+        kind: "scale",
+        label: "Interface scale (full screen)",
+        choices: NONE,
+    },
+    Lever {
+        section: "ui",
+        key: "clientFontSize",
+        kind: "level",
+        label: "Font size",
+        choices: FONT,
+    },
 ];
 
 /// prefs.ini switches worth offering (the rest of that file is the client's own plumbing).
 pub const PREFS: &[(&str, &str)] = &[
-    ("bracketsAlwaysShowShipText", "Always show ship names on brackets"),
+    (
+        "bracketsAlwaysShowShipText",
+        "Always show ship names on brackets",
+    ),
     ("breakpadUpload", "Send crash reports to CCP"),
 ];
 
@@ -66,10 +223,22 @@ pub fn lever(key: &str) -> Option<&'static Lever> {
 /// A value written the way EVE writes it ("0.7", "1", "false"); None when it doesn't fit the lever.
 pub fn format_value(lever: &Lever, value: &serde_json::Value) -> Option<String> {
     match lever.kind {
-        "volume" => value.as_f64().filter(|v| (0.0..=1.0).contains(v)).map(|v| trim_float(v)),
-        "scale" => value.as_f64().filter(|v| (0.5..=2.0).contains(v)).map(|v| trim_float(v)),
-        "switch" => value.as_i64().filter(|v| *v == 0 || *v == 1).map(|v| v.to_string()),
-        "level" => value.as_i64().filter(|v| (0..=4).contains(v)).map(|v| v.to_string()),
+        "volume" => value
+            .as_f64()
+            .filter(|v| (0.0..=1.0).contains(v))
+            .map(|v| trim_float(v)),
+        "scale" => value
+            .as_f64()
+            .filter(|v| (0.5..=2.0).contains(v))
+            .map(|v| trim_float(v)),
+        "switch" => value
+            .as_i64()
+            .filter(|v| *v == 0 || *v == 1)
+            .map(|v| v.to_string()),
+        "level" => value
+            .as_i64()
+            .filter(|v| lever.choices.is_empty() || lever.choices.iter().any(|(c, _)| c == v))
+            .map(|v| v.to_string()),
         "bool" => value.as_bool().map(|v| v.to_string()),
         _ => None,
     }
@@ -78,12 +247,19 @@ pub fn format_value(lever: &Lever, value: &serde_json::Value) -> Option<String> 
 fn trim_float(v: f64) -> String {
     let text = format!("{:.2}", (v * 100.0).round() / 100.0);
     let text = text.trim_end_matches('0');
-    if text.ends_with('.') { format!("{text}0") } else { text.to_string() }
+    if text.ends_with('.') {
+        format!("{text}0")
+    } else {
+        text.to_string()
+    }
 }
 
 /// Now as a Windows file time (100 ns since 1601), the stamp EVE puts next to each value.
 pub fn file_time_now() -> u64 {
-    let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     (unix / 100) as u64 + 116_444_736_000_000_000
 }
 
@@ -97,7 +273,9 @@ pub fn read_values(text: &str) -> BTreeMap<String, String> {
             continue;
         }
         let trimmed = line.trim_start();
-        let Some((key, rest)) = trimmed.split_once(": [") else { continue };
+        let Some((key, rest)) = trimmed.split_once(": [") else {
+            continue;
+        };
         if let Some(l) = lever(key).filter(|l| l.section == section) {
             if let Some((_, value)) = rest.trim_end_matches(']').split_once(", ") {
                 out.insert(l.key.to_string(), value.trim().to_string());
@@ -116,13 +294,18 @@ pub fn set_value(text: &str, lever: &Lever, value: &str, stamp: u64) -> String {
     let mut in_section = false;
     for (i, line) in lines.iter().enumerate() {
         if !line.starts_with(' ') {
-            in_section = line == &format!("{}:", lever.section) || line == &format!("{}: {{}}", lever.section);
+            in_section = line == &format!("{}:", lever.section)
+                || line == &format!("{}: {{}}", lever.section);
             if in_section {
                 section_at = Some(i);
             }
             continue;
         }
-        if in_section && line.trim_start().starts_with(&format!("{}: [", lever.key)) && line.starts_with("  ") && !line.starts_with("   ") {
+        if in_section
+            && line.trim_start().starts_with(&format!("{}: [", lever.key))
+            && line.starts_with("  ")
+            && !line.starts_with("   ")
+        {
             lines[i] = line_for;
             return join(lines, text);
         }
@@ -177,7 +360,12 @@ pub fn read_prefs(text: &str) -> BTreeMap<String, String> {
 }
 
 /// Apply levers and prefs to one profile folder. Returns how many values changed.
-pub fn apply_to(dir: &Path, values: &BTreeMap<String, serde_json::Value>, prefs: &BTreeMap<String, bool>, stamp: u64) -> Result<usize, String> {
+pub fn apply_to(
+    dir: &Path,
+    values: &BTreeMap<String, serde_json::Value>,
+    prefs: &BTreeMap<String, bool>,
+    stamp: u64,
+) -> Result<usize, String> {
     let mut changed = 0;
     if !values.is_empty() {
         let path = dir.join("core_public__.yaml");
@@ -185,7 +373,8 @@ pub fn apply_to(dir: &Path, values: &BTreeMap<String, serde_json::Value>, prefs:
         let before = read_values(&text);
         for (key, value) in values {
             let lever = lever(key).ok_or_else(|| format!("{key} isn't a setting we change"))?;
-            let formatted = format_value(lever, value).ok_or_else(|| format!("{} can't be {value}", lever.label))?;
+            let formatted = format_value(lever, value)
+                .ok_or_else(|| format!("{} can't be {value}", lever.label))?;
             if before.get(key) != Some(&formatted) {
                 text = set_value(&text, lever, &formatted, stamp);
                 changed += 1;
@@ -254,19 +443,42 @@ mod tests {
     #[test]
     fn values_must_fit_the_lever() {
         let vol = lever("masterVolume").unwrap();
-        assert_eq!(format_value(vol, &serde_json::json!(0.7)).as_deref(), Some("0.7"));
-        assert_eq!(format_value(vol, &serde_json::json!(0)).as_deref(), Some("0.0"));
+        assert_eq!(
+            format_value(vol, &serde_json::json!(0.7)).as_deref(),
+            Some("0.7")
+        );
+        assert_eq!(
+            format_value(vol, &serde_json::json!(0)).as_deref(),
+            Some("0.0")
+        );
         assert_eq!(format_value(vol, &serde_json::json!(1.5)), None);
-        assert_eq!(format_value(lever("useCombatMusic").unwrap(), &serde_json::json!(2)), None);
-        assert_eq!(format_value(lever("frameGeneration").unwrap(), &serde_json::json!(false)).as_deref(), Some("false"));
+        assert_eq!(
+            format_value(lever("useCombatMusic").unwrap(), &serde_json::json!(2)),
+            None
+        );
+        assert_eq!(
+            format_value(lever("frameGeneration").unwrap(), &serde_json::json!(false)).as_deref(),
+            Some("false")
+        );
     }
 
     #[test]
     fn prefs_lines_are_switched_or_added() {
         let text = "bracketsAlwaysShowShipText=0\nport=26000";
-        assert_eq!(set_pref(text, "bracketsAlwaysShowShipText", "1"), "bracketsAlwaysShowShipText=1\nport=26000");
-        assert_eq!(set_pref("port=26000", "breakpadUpload", "0"), "port=26000\nbreakpadUpload=0");
-        assert_eq!(read_prefs(text).get("bracketsAlwaysShowShipText").map(String::as_str), Some("0"));
+        assert_eq!(
+            set_pref(text, "bracketsAlwaysShowShipText", "1"),
+            "bracketsAlwaysShowShipText=1\nport=26000"
+        );
+        assert_eq!(
+            set_pref("port=26000", "breakpadUpload", "0"),
+            "port=26000\nbreakpadUpload=0"
+        );
+        assert_eq!(
+            read_prefs(text)
+                .get("bracketsAlwaysShowShipText")
+                .map(String::as_str),
+            Some("0")
+        );
         assert!(read_prefs(text).get("port").is_none());
     }
 

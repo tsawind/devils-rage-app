@@ -150,7 +150,8 @@
         w.append(r, o); return w;
       }
       const s = el("select");
-      const opts = l.kind === "switch" ? [[0, "off"], [1, "on"]] : l.kind === "bool" ? [[false, "off"], [true, "on"]] : [[0, "0"], [1, "1"], [2, "2"], [3, "3"]];
+      const opts = l.kind === "switch" ? [[0, "off"], [1, "on"]] : l.kind === "bool" ? [[false, "off"], [true, "on"]] : (l.choices && l.choices.length ? l.choices.map(([v, n]) => [v, n]) : [[0, "0"], [1, "1"], [2, "2"], [3, "3"]]);
+      if (cur !== undefined && !opts.some(([v]) => v === cur)) opts.push([cur, cur + " (not a real setting)"]);
       opts.forEach(([v, lab]) => s.append(new Option(lab, JSON.stringify(v))));
       s.value = JSON.stringify(cur ?? opts[0][0]);
       s.addEventListener("change", () => { values[l.key] = JSON.parse(s.value); renderLevers(); });
@@ -159,7 +160,7 @@
     const groups = [["Sound", (l) => l.section === "audio"], ["Graphics", (l) => l.section === "device" && !["UIScaleWindowed", "UIScaleFullscreen", "brightness"].includes(l.key)], ["Interface", (l) => l.section === "ui" || ["UIScaleWindowed", "UIScaleFullscreen", "brightness"].includes(l.key)]];
     groups.forEach(([title, test]) => {
       section(title);
-      levers.filter(test).forEach(l => row(l.label, values[l.key] !== undefined, (on) => { if (on) values[l.key] = l.kind === "volume" ? 0.5 : l.kind === "scale" ? 1 : l.kind === "bool" ? false : 0; else delete values[l.key]; renderLevers(); }, control(l)));
+      levers.filter(test).forEach(l => row(l.label, values[l.key] !== undefined, (on) => { if (on) values[l.key] = l.kind === "volume" ? 0.5 : l.kind === "scale" ? 1 : l.kind === "bool" ? false : (l.choices && l.choices.length ? l.choices[l.choices.length - 1][0] : 0); else delete values[l.key]; renderLevers(); }, control(l)));
     });
     section("prefs.ini");
     prefsList.forEach(p => {
