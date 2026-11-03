@@ -70,9 +70,9 @@
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
-        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Zoomed in EVE after locking on? Press Click 3 on the edge again: it keeps the lock and works out the new distance.</div>
-        <div class="row"><button class="btn red" id="rim3">Click 3 on the edge</button><button class="btn" id="fit">Find edge (guess)</button><span class="small muted" id="discInfo"></span></div>
-        <label class="small muted" title="Off: if you zoom in EVE, press Click 3 on the edge again (it keeps the lock). On: the app looks for the edge itself, which can latch onto a lava glow."><input type="checkbox" id="follow"> Follow zoom by itself (not on lava)</label>
+        <div class="muted small">EVE always puts the planet in the middle of the window, so only its size is needed: <b>Click the edge</b>, then click once anywhere on the planet's edge. Mouse wheel over the picture fine-tunes it. Zoomed in EVE after locking on? Click the edge again: it keeps the lock and works out the new distance.</div>
+        <div class="row"><button class="btn red" id="rim3">Click the edge</button><button class="btn" id="fit">Find edge</button><span class="small muted" id="discInfo"></span></div>
+        <label class="small muted" title="Off: if you zoom in EVE, press Click 3 on the edge again (it keeps the lock). On: the app looks for the edge itself, which can latch onto a lava glow."><input type="checkbox" id="follow" checked> Follow zoom by itself</label>
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
@@ -352,17 +352,30 @@
   $("rim3").addEventListener("click", async () => {
     if (!frame) frame = await grab().catch(() => null);
     rimMode = true; rimClicks = []; frozen = true;
-    say("lockStatus", "Click three points on the planet's edge, spread round it.", "warn");
+    say("lockStatus", "Click once on the planet's edge.", "warn");
     updateButtons(); drawShot();
   });
   $("fit").addEventListener("click", async () => {
     if (!frame) frame = await grab().catch(() => null);
     if (!frame) return say("lockStatus", "No picture from that client.", "bad");
-    const c = E.findRim(frame.data.data, frame.w, frame.h, null);
-    if (!c) return say("lockStatus", "Couldn't find the edge: drag the circle onto the planet and use the mouse wheel to size it.", "warn");
-    disc = c; facing = null; anchors = []; renderAnchors(); updateButtons(); drawShot();
-    say("lockStatus", "Edge found. Now point out three buildings.", "ok");
+    const c = E.rimRadius(frame.data.data, frame.w, frame.h, null);
+    if (!c) return say("lockStatus", "Couldn't find the edge: use Click the edge.", "warn");
+    setEdge(c);
   });
+
+  /** A new edge: keeps the lock after a zoom (same facing, new distance), else starts over. */
+  function setEdge(c) {
+    if (!c || c.r < 40) { say("lockStatus", "That's too close to the middle: click on the planet's edge.", "bad"); return; }
+    if (facing && focal) {
+      disc = { cx: c.cx, cy: c.cy, r: c.r, D: Math.sqrt((focal / c.r) ** 2 + 1) };
+      prevGrey = null;
+      say("lockStatus", "Edge set again; still locked on.", "ok");
+    } else {
+      disc = { cx: c.cx, cy: c.cy, r: c.r }; facing = null; anchors = []; renderAnchors();
+      say("lockStatus", "Edge set. Now lock on.", "ok");
+    }
+    updateButtons(); drawShot();
+  }
 
   // ---------- clicks on the picture ----------
   const toImage = (e) => { const r = shot.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * shot.width, y: (e.clientY - r.top) / r.height * shot.height }; };
@@ -370,19 +383,9 @@
   shot.addEventListener("mousedown", (e) => {
     const p = toImage(e);
     if (rimMode) {
-      rimClicks.push([p.x, p.y]);
-      if (rimClicks.length === 3) {
-        const c = E.circleFrom3(...rimClicks);
-        rimMode = false; rimClicks = [];
-        if (c && c.r > 40 && facing && focal) {
-          // Re-set the edge after a zoom: same facing, new distance from the camera's lens.
-          disc = { cx: c.cx, cy: c.cy, r: c.r, D: Math.sqrt((focal / c.r) ** 2 + 1) };
-          prevGrey = null;
-          say("lockStatus", "Edge set again; still locked on.", "ok");
-        } else if (c && c.r > 40) { disc = c; facing = null; anchors = []; renderAnchors(); say("lockStatus", "Edge set. Now lock on.", "ok"); }
-        else say("lockStatus", "Those three points don't make a circle: try again, spread round the rim.", "bad");
-      }
-      updateButtons(); drawShot();
+      rimMode = false; rimClicks = []; frozen = false;
+      const cx = shot.width / 2, cy = shot.height / 2;
+      setEdge({ cx, cy, r: Math.hypot(p.x - cx, p.y - cy) });
       return;
     }
     if (disc && !facing && Math.hypot(p.x - disc.cx, p.y - disc.cy) < disc.r * 0.08 && !selected) { dragging = { dx: p.x - disc.cx, dy: p.y - disc.cy }; return; }
@@ -407,7 +410,7 @@
   shot.addEventListener("mouseleave", () => { mouse = null; if (frozen || rimMode) drawShot(); });
   window.addEventListener("mousemove", (e) => { if (!dragging || !disc) return; const p = toImage(e); disc.cx = p.x - dragging.dx; disc.cy = p.y - dragging.dy; facing = null; updateButtons(); drawShot(); });
   window.addEventListener("mouseup", () => { dragging = null; });
-  shot.addEventListener("wheel", (e) => { if (!disc || facing) return; e.preventDefault(); disc.r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); facing = null; updateButtons(); drawShot(); }, { passive: false });
+  shot.addEventListener("wheel", (e) => { if (!disc) return; e.preventDefault(); const r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); if (facing) setEdge({ cx: disc.cx, cy: disc.cy, r }); else { disc.r = r; updateButtons(); drawShot(); } }, { passive: false });
 
   $("freeze").addEventListener("click", async () => { frozen = !frozen; if (frozen && !frame) frame = await grab().catch(() => null); updateButtons(); drawShot(); });
   $("clearAnchors").addEventListener("click", () => { if (disc) disc = { cx: disc.cx, cy: disc.cy, r: disc.r }; anchors = []; facing = null; focal = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
@@ -497,7 +500,7 @@
     }
   }
 
-  let ticks = 0;
+  let ticks = 0, lastRim = null;
   async function tick() {
     ticks++;
     if (painting || (!running && ticks % 4)) return;
@@ -506,11 +509,13 @@
       if (!frozen && $("client").value) {
         const f = await grab().catch(() => null);
         if (f) frame = f;
-        if (f && !disc && $("auto").checked && ticks % 8 === 0) say("autoStatus", "Set the edge first: Click 3 on the edge.", "warn");
+        if (f && !disc && $("auto").checked && ticks % 8 === 0) say("autoStatus", "Set the edge first: Click the edge, then click once on the planet's edge.", "warn");
         // Zoomed in EVE: the rim moves; with the camera's lens known, so does the distance.
         if (f && facing && disc && focal && $("follow").checked && ticks % 3 === 0) {
-          const rim = E.findRim(f.data.data, f.w, f.h, disc);
-          if (rim && (Math.abs(rim.r - disc.r) > disc.r * 0.012 || Math.hypot(rim.cx - disc.cx, rim.cy - disc.cy) > disc.r * 0.012)) {
+          const rim = E.rimRadius(f.data.data, f.w, f.h, disc.r);
+          const steady = rim && lastRim && Math.abs(rim.r - lastRim) < disc.r * 0.01;
+          lastRim = rim ? rim.r : null;
+          if (steady && Math.abs(rim.r - disc.r) > disc.r * 0.012) {
             disc = { cx: rim.cx, cy: rim.cy, r: rim.r, D: Math.sqrt((focal / rim.r) ** 2 + 1) };
             prevGrey = null;
             updateButtons();

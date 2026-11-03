@@ -509,6 +509,46 @@
     return circle;
   }
 
+  /**
+   * EVE always puts the planet in the middle of the client window, so only the radius is
+   * unknown: along rays from the middle, where the picture drops from planet to space and
+   * stays dark. Median over the rays (a lava glow or a window on top spoils only a few).
+   * With `near`, only looks within ±20 % of that radius (following a zoom).
+   */
+  function rimRadius(rgba, width, height, near) {
+    const cx = width / 2, cy = height / 2;
+    const lum = (x, y) => { const k = ((y | 0) * width + (x | 0)) * 4; return 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2]; };
+    const maxR = Math.hypot(width, height) / 2;
+    const from = near ? near * 0.8 : 30, to = near ? near * 1.2 : maxR;
+    const found = [];
+    for (let i = 0; i < 120; i++) {
+      const a = (i / 120) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
+      const prof = [];
+      for (let r = from - 8; r < to + 12; r += 2) {
+        const x = cx + dx * r, y = cy + dy * r;
+        if (x < 0 || y < 0 || x >= width || y >= height) break;
+        prof.push([r, lum(x, y)]);
+      }
+      if (prof.length < 12) continue;
+      // The outermost place where it drops and then stays as dark as space: dark lava rock and
+      // shadows inside the planet drop too, but brighten again further out.
+      const tail = prof.slice(-6).reduce((m, p) => m + p[1], 0) / 6;
+      let at = null;
+      for (let k = prof.length - 12; k >= 4; k--) {
+        if (prof[k][0] < from || prof[k][0] > to) continue;
+        const inside = (prof[k - 4][1] + prof[k - 3][1] + prof[k - 2][1]) / 3;
+        let outside = 0;
+        for (let j = k + 2; j < Math.min(prof.length, k + 12); j++) outside = Math.max(outside, prof[j][1]);
+        if (inside - outside > 12 && outside < tail + 25) { at = prof[k][0]; break; }
+      }
+      if (at !== null) found.push(at);
+    }
+    if (found.length < 15) return null;
+    found.sort((a, b) => a - b);
+    // The outer edge of EVE's atmosphere / lava glow sits about 3 % outside the surface.
+    return { cx, cy, r: found[Math.floor(found.length / 2)] * 0.97 };
+  }
+
   /** The circle through three clicks on the rim. */
   function circleFrom3(a, b, c) {
     const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
@@ -725,6 +765,6 @@
   }
 
   const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
-    solveAnchors, solveAnchorsEitherWay, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
+    solveAnchors, solveAnchorsEitherWay, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);
