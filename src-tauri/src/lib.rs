@@ -22,6 +22,7 @@ mod parsec;
 mod previews;
 mod profiles;
 mod scanner;
+mod seatsync;
 mod settings;
 #[cfg(desktop)]
 mod updates;
@@ -309,8 +310,10 @@ pub fn run() {
     }
 
     // Cameras: each EVE client's picture for the mapper's share page (capture.rs).
-    builder = builder.register_asynchronous_uri_scheme_protocol(capture::SCHEME, |_ctx, request, responder| {
-        std::thread::spawn(move || responder.respond(capture::handle(request)));
+    builder = builder.register_asynchronous_uri_scheme_protocol(capture::SCHEME, |ctx, request, responder| {
+        let app = ctx.app_handle().clone();
+        // Patch 66: /launch-… is SeAT handing over launch groups; the rest is camera capture.
+        std::thread::spawn(move || responder.respond(if seatsync::wants(&request) { seatsync::handle(&app, request) } else { capture::handle(request) }));
     });
 
     builder
@@ -345,6 +348,9 @@ pub fn run() {
             launch::save_launch_groups,
             launch::launch_known_characters,
             launch::launch_status,
+            launch::seat_launch_groups,
+            launch::save_seat_group_prefs,
+            launch::all_launch_groups,
             profiles::profiles_scan,
             profiles::profiles_names,
             profiles::profiles_label,

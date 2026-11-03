@@ -101,7 +101,11 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-  let scan = null, names = {}, groups = [], ticked = new Set();
+  let scan = null, names = {}, groups = [], ticked = new Set(), accounts = [];
+  // Patch 66: account "29" in Your accounts uses client profile settings_29.
+  const accountFor = (p) => accounts.find(a => a.profile === p.name);
+  const autoLabel = (p) => { const a = accountFor(p); return a ? `Account ${a.nickname} · ${a.characters.map(c => c.name).join(", ")}` : ""; };
+  const labelOf = (p) => p.label || autoLabel(p);
 
   const when = (ms) => ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
   const who = (entry) => entry.kind === "char" ? (names[entry.id] || "Character " + entry.id) : "Account " + entry.id;
@@ -111,7 +115,8 @@
   async function load() {
     try { scan = await invoke("profiles_scan"); }
     catch (e) { $("noRoot").textContent = String(e); $("noRoot").hidden = false; return; }
-    groups = await invoke("launch_groups").catch(() => []);
+    groups = await invoke("all_launch_groups").catch(() => []);
+    accounts = (await invoke("seat_launch_groups").catch(() => ({ accounts: [] }))).accounts || [];
     const ids = [...new Set([...scan.profiles.flatMap(p => p.chars.map(c => c.id)), ...scan.templates.filter(t => t.kind === "char").map(t => t.id)])];
     render();
     names = Object.assign(names, await invoke("profiles_names", { ids }).catch(() => ({})));
@@ -134,7 +139,7 @@
     }
     scan.profiles.forEach(p => {
       if (!p.chars.length && !p.users.length) return;
-      const og = document.createElement("optgroup"); og.label = "settings_" + p.name + (p.label ? " · " + p.label : "");
+      const og = document.createElement("optgroup"); og.label = "settings_" + p.name + (labelOf(p) ? " · " + labelOf(p) : "");
       [...p.chars, ...p.users].forEach(e => og.append(new Option(`${who(e)} — ${e.kind === "char" ? "character" : "account"}, ${when(e.modified)}`, `settings_${p.name}/${e.file}`)));
       src.append(og);
     });
@@ -151,7 +156,8 @@
     scan.profiles.forEach(p => {
       const card = el("div", "card prof");
       const h = el("h3"); h.append(el("span", "num", "settings_" + p.name), el("span", "muted", when(p.modified)));
-      const label = el("input", "label"); label.type = "text"; label.placeholder = "Whose / what for (e.g. Tsawind account, Roll fleet)"; label.value = p.label || "";
+      const label = el("input", "label"); label.type = "text"; label.placeholder = autoLabel(p) || "Whose / what for (e.g. Tsawind account, Roll fleet)"; label.value = p.label || "";
+      label.title = autoLabel(p) ? "From Your accounts: " + autoLabel(p) + ". Type to name it yourself." : "";
       label.addEventListener("change", () => invoke("profiles_label", { profile: p.name, label: label.value }).then(() => { p.label = label.value; render(); }).catch(e => status(String(e), "bad")));
       const list = el("div", "who");
       const entries = kind() === "user" ? p.users : p.chars;
@@ -172,7 +178,7 @@
 
     const cf = $("cloneFrom"), ckeep = cf.value;
     cf.innerHTML = "";
-    scan.profiles.forEach(p => cf.append(new Option("settings_" + p.name + (p.label ? " · " + p.label : ""), p.name)));
+    scan.profiles.forEach(p => cf.append(new Option("settings_" + p.name + (labelOf(p) ? " · " + labelOf(p) : ""), p.name)));
     if (ckeep) cf.value = ckeep;
 
     const b = $("backups"); b.innerHTML = "";

@@ -55,6 +55,14 @@
   .status { color: var(--muted); font-size: 13px; min-height: 1.4em; margin-top: 6px; }
   .del { color: var(--muted); border: 0; background: none; }
   .del:hover { color: var(--red-hi); }
+  h2.sec { font-size: 15px; margin: 18px 0 8px; display: flex; align-items: center; gap: 10px; }
+  h2.sec .muted { font-weight: 400; font-size: 12px; color: var(--muted); }
+  .kind { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
+  details.check { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  details.check summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  details.check ol { margin: 6px 0 0 18px; padding: 0; font-size: 13px; }
+  details.check li { margin: 3px 0; }
+  details.check .ok { color: #adff2f; }
   .empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 22px; text-align: center; }
 </style>
 </head>
@@ -75,6 +83,13 @@
   </div>
 
   <p class="legend">Bright = open now · dim = not running · <i>green ring</i> = the client in front</p>
+
+  <h2 class="sec">From Your accounts <span class="muted" id="seatWhen"></span><span class="grow"></span><button class="btn small" id="editSeat">Edit in Your accounts</button></h2>
+  <div class="empty" id="seatEmpty" hidden>Open <b>Your accounts</b> once (top bar) and the app picks up your accounts and launch groups.
+     Make groups there (tied to your accounts and characters); pedal keys and on/off switches stay on this PC.</div>
+  <div id="seatGroups"></div>
+
+  <h2 class="sec">Only on this PC <span class="muted">e.g. imported from EVE-O Preview. Open Your accounts to bring them into SeAT.</span></h2>
   <div id="groups"></div>
   <div class="empty" id="empty" hidden>No groups yet. Add one below.</div>
 
@@ -94,7 +109,10 @@
 
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
+  let seat = { accounts: [], groups: [], syncedAt: 0, seat: "" };
+
   async function load() {
+    seat = await invoke("seat_launch_groups").catch(() => seat);
     groups = await invoke("launch_groups").catch(() => []);
     openClients = await invoke("launch_known_characters").catch(() => []);
     const ready = await invoke("launcher_ready").catch(() => false);
@@ -109,7 +127,81 @@
 
   function status(t) { document.getElementById("status").textContent = t || ""; }
 
+  // Patch 66: SeAT's launch groups, with this PC's pedal keys, switches and login screens.
+  function chipFor(name, skipped, onToggle) {
+    const live = name === LOGIN ? logins > 0 : openClients.includes(name);
+    const front = name === LOGIN ? /^Login \d+$/.test(active || "") : active === name;
+    const chip = el("span", "chip" + (live ? "" : " off") + (front ? " front" : "") + (skipped ? " skip" : ""));
+    const sw = el("button", "sw");
+    sw.title = skipped ? "Off: the pedal skips this one. Click to turn on." : "On: in the cycle. Click to skip it.";
+    sw.addEventListener("click", onToggle);
+    chip.append(sw, el("b", null, name));
+    if (name === LOGIN) chip.append(el("span", "n", logins ? `${logins} open` : "none open"));
+    return chip;
+  }
+
+  function renderSeat() {
+    const host = document.getElementById("seatGroups");
+    host.innerHTML = "";
+    document.getElementById("seatEmpty").hidden = seat.groups.length > 0;
+    document.getElementById("seatWhen").textContent = seat.syncedAt ? "updated " + new Date(seat.syncedAt * 1000).toLocaleString() : "";
+    const accountOf = new Map(seat.accounts.map(a => [a.nickname, a]));
+    seat.groups.forEach(({ group: g, prefs }) => {
+      const save = () => invoke("save_seat_group_prefs", { id: g.id, prefs }).catch(e => status("Couldn't save: " + e));
+      prefs.skipped = prefs.skipped || [];
+      const card = el("div", "group");
+      const top = el("div", "top");
+      const title = el("b", null, g.name); title.style.fontSize = "16px"; title.style.flex = "1";
+      top.append(title, el("span", "kind", g.kind === "own" ? "yours" : g.kind === "corp-slot" ? "corp slot" : "★ corp group"));
+      const members = el("div", "members");
+      if (!g.members.length) members.append(el("span", "chip off", "No characters ticked yet: tick this group on characters in Your accounts"));
+      const toggle = (m) => () => { prefs.skipped = prefs.skipped.includes(m) ? prefs.skipped.filter(v => v !== m) : [...prefs.skipped, m]; save(); render(); };
+      g.members.forEach(m => members.append(chipFor(m.name, prefs.skipped.includes(m.name), toggle(m.name))));
+      if (prefs.login_screens) members.append(chipFor(LOGIN, prefs.skipped.includes(LOGIN), toggle(LOGIN)));
+      const opts = el("div", "add");
+      const ls = el("label"); ls.style.fontSize = "13px"; ls.style.color = "var(--muted)";
+      const lsBox = el("input"); lsBox.type = "checkbox"; lsBox.checked = !!prefs.login_screens;
+      lsBox.addEventListener("change", () => { prefs.login_screens = lsBox.checked; save(); render(); });
+      ls.append(lsBox, document.createTextNode(" also cycle clients at the login screen"));
+      opts.append(ls);
+      const cyc = el("div", "add");
+      cyc.append(el("span", "note", "Pedal / hotkey:"));
+      cyc.append(
+        keyButton("Next", prefs.forward_hotkey, (k) => { prefs.forward_hotkey = k; save(); }),
+        keyButton("Prev", prefs.backward_hotkey, (k) => { prefs.backward_hotkey = k; save(); }),
+      );
+      // The EVE launcher can't be set from here (its groups sit in its encrypted file), so a checklist.
+      const accounts = [];
+      g.members.forEach(m => { if (!accounts.includes(m.account)) accounts.push(m.account); });
+      const check = el("details", "check");
+      const running = g.members.length > 0 && g.members.every(m => openClients.includes(m.name));
+      check.append(el("summary", null, running ? "✓ All running now · EVE launcher setup" : `Set this group up in the EVE launcher (${accounts.length} account${accounts.length === 1 ? "" : "s"})`));
+      const ol = el("ol");
+      ol.append(el("li", null, `EVE launcher → ⚙ Settings → EVE Online → Launch Groups → Add launch group “${g.name}” → Create.`));
+      accounts.forEach(nick => {
+        const a = accountOf.get(nick);
+        const chars = g.members.filter(m => m.account === nick).map(m => m.name).join(", ");
+        const li = el("li", null, `Add account ${nick} (${chars})` + (a && a.profile ? ` · client profile ${a.profile} (settings_${a.profile})` : ""));
+        if (g.members.filter(m => m.account === nick).every(m => openClients.includes(m.name))) li.append(el("span", "ok", " ✓ running"));
+        ol.append(li);
+      });
+      ol.append(el("li", null, "Back here: ▶ Open launcher, launch the group, then use the pedal."));
+      check.append(ol);
+      const row = el("div", "row");
+      const open = el("button", "btn red", "▶ Open launcher");
+      open.addEventListener("click", async () => {
+        status("Opening the EVE launcher…");
+        try { await invoke("open_launcher"); status(`Launcher opened: launch “${g.name}” there.`); }
+        catch (e) { status(String(e)); document.getElementById("pathWarn").hidden = false; }
+      });
+      row.append(open);
+      card.append(top, members, opts, cyc, row, check);
+      host.append(card);
+    });
+  }
+
   function render() {
+    renderSeat();
     const host = document.getElementById("groups");
     host.innerHTML = "";
     document.getElementById("empty").hidden = groups.length > 0;
@@ -222,6 +314,7 @@
     groups.push({ id: uid(), name: "New group", members: [] });
     save(); render();
   });
+  document.getElementById("editSeat").addEventListener("click", () => { location.href = (seat.seat || "https://seatdevilsrage.duckdns.org") + "/devilsrage/your-accounts"; });
   document.getElementById("home").addEventListener("click", () => { location.href = "index.html"; });
   document.getElementById("setPath").addEventListener("click", () => { location.href = "settings.html"; });
 

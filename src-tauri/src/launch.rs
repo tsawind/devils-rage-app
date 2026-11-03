@@ -98,6 +98,201 @@ pub fn merge_imported(app: &AppHandle, imported: Vec<Group>) -> Result<usize, St
     Ok(count)
 }
 
+// ---- Patch 66: launch groups from SeAT (Your accounts) ------------------------------------
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SeatCharacter {
+    pub id: u64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SeatAccount {
+    pub id: u64,
+    pub nickname: String,
+    /// The client profile number it stands for ("29" → settings_29).
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default)]
+    pub order: u32,
+    #[serde(default)]
+    pub characters: Vec<SeatCharacter>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SeatMember {
+    pub name: String,
+    pub account: String,
+    #[serde(default)]
+    pub character_id: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SeatGroup {
+    pub id: u64,
+    pub name: String,
+    /// own | corp | corp-slot (Main / Second / Third).
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub members: Vec<SeatMember>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SeatData {
+    #[serde(default)]
+    pub synced_at: i64,
+    #[serde(default)]
+    pub accounts: Vec<SeatAccount>,
+    #[serde(default)]
+    pub groups: Vec<SeatGroup>,
+}
+
+/// What this PC adds to a SeAT group: pedal keys, switched-off members, login screens.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GroupPrefs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_hotkey: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backward_hotkey: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
+    #[serde(default)]
+    pub login_screens: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SeatPrefs {
+    #[serde(default)]
+    groups: std::collections::BTreeMap<String, GroupPrefs>,
+}
+
+fn config_file(app: &AppHandle, name: &str) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|dir| dir.join(name))
+}
+
+fn write_json(path: PathBuf, value: &impl Serialize) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+pub fn load_seat(app: &AppHandle) -> SeatData {
+    config_file(app, "seat-groups.json").and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn load_prefs(app: &AppHandle) -> SeatPrefs {
+    config_file(app, "seat-group-prefs.json").and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// The Your accounts page handed us fresh groups (seatsync.rs).
+pub fn store_seat(app: &AppHandle, data: &SeatData) -> Result<(), String> {
+    write_json(config_file(app, "seat-groups.json").ok_or("no config folder")?, data)?;
+    log::info!("launch groups from SeAT: {} accounts, {} groups", data.accounts.len(), data.groups.len());
+    #[cfg(desktop)]
+    register_cycle_hotkeys(app);
+    Ok(())
+}
+
+/// The groups made on this PC, for SeAT to bring in (names only; login screens aren't characters).
+pub fn local_for_import(app: &AppHandle) -> Vec<serde_json::Value> {
+    load(app)
+        .groups
+        .into_iter()
+        .map(|g| {
+            let members: Vec<String> = g.members.into_iter().filter(|m| m != crate::cycle::LOGIN_SCREENS && !g.skipped.contains(m)).collect();
+            serde_json::json!({ "name": g.name, "members": members })
+        })
+        .filter(|g| g["members"].as_array().is_some_and(|m| !m.is_empty()))
+        .collect()
+}
+
+/// After SeAT took them: keep a copy (launch-groups.imported.json) and clear the PC's list,
+/// carrying each group's pedal keys over to the SeAT group of the same name.
+pub fn retire_local(app: &AppHandle) -> Result<(), String> {
+    let local = load(app).groups;
+    let seat = load_seat(app);
+    let mut prefs = load_prefs(app);
+    for group in &local {
+        if let Some(target) = seat.groups.iter().find(|s| s.name == group.name || s.name == format!("{} (mine)", group.name)) {
+            let entry = prefs.groups.entry(target.id.to_string()).or_default();
+            entry.forward_hotkey = entry.forward_hotkey.take().or(group.forward_hotkey.clone());
+            entry.backward_hotkey = entry.backward_hotkey.take().or(group.backward_hotkey.clone());
+            entry.login_screens = entry.login_screens || group.members.iter().any(|m| m == crate::cycle::LOGIN_SCREENS);
+        }
+    }
+    write_json(config_file(app, "seat-group-prefs.json").ok_or("no config folder")?, &prefs)?;
+    if let Some(path) = store_path(app) {
+        if path.exists() {
+            let _ = std::fs::copy(&path, path.with_file_name("launch-groups.imported.json"));
+        }
+        write_json(path, &Groups { groups: Vec::new() })?;
+    }
+    #[cfg(desktop)]
+    register_cycle_hotkeys(app);
+    Ok(())
+}
+
+/// Every group the pedal can cycle: SeAT's (with this PC's keys and switches), then the PC's own.
+pub fn all_groups(app: &AppHandle) -> Vec<Group> {
+    let prefs = load_prefs(app).groups;
+    let mut out: Vec<Group> = load_seat(app)
+        .groups
+        .into_iter()
+        .map(|g| {
+            let p = prefs.get(&g.id.to_string()).cloned().unwrap_or_default();
+            let mut members: Vec<String> = g.members.into_iter().map(|m| m.name).collect();
+            if p.login_screens {
+                members.push(crate::cycle::LOGIN_SCREENS.to_string());
+            }
+            Group { id: format!("seat-{}", g.id), name: g.name, members, skipped: p.skipped, forward_hotkey: p.forward_hotkey, backward_hotkey: p.backward_hotkey }
+        })
+        .collect();
+    out.extend(load(app).groups);
+    out
+}
+
+/// SeAT's accounts and groups with this PC's settings for each, for the Launch groups page.
+#[tauri::command]
+pub fn seat_launch_groups(app: AppHandle) -> serde_json::Value {
+    let seat = load_seat(&app);
+    let prefs = load_prefs(&app).groups;
+    let groups: Vec<serde_json::Value> = seat
+        .groups
+        .iter()
+        .map(|g| serde_json::json!({ "group": g, "prefs": prefs.get(&g.id.to_string()).cloned().unwrap_or_default() }))
+        .collect();
+    serde_json::json!({ "syncedAt": seat.synced_at, "accounts": seat.accounts, "groups": groups, "seat": crate::SEAT_URL })
+}
+
+/// Save this PC's settings for one SeAT group.
+#[tauri::command]
+pub fn save_seat_group_prefs(app: AppHandle, id: u64, prefs: GroupPrefs) -> Result<(), String> {
+    let mut all = load_prefs(&app);
+    let clean = GroupPrefs {
+        forward_hotkey: prefs.forward_hotkey.filter(|h| !h.trim().is_empty()),
+        backward_hotkey: prefs.backward_hotkey.filter(|h| !h.trim().is_empty()),
+        skipped: prefs.skipped.into_iter().take(150).collect(),
+        login_screens: prefs.login_screens,
+    };
+    crate::cycle::forget(&format!("seat-{id}"));
+    all.groups.insert(id.to_string(), clean);
+    write_json(config_file(&app, "seat-group-prefs.json").ok_or("no config folder")?, &all)?;
+    #[cfg(desktop)]
+    register_cycle_hotkeys(&app);
+    Ok(())
+}
+
+/// Every group (SeAT's and this PC's), e.g. for Client settings' "tick a launch group".
+#[tauri::command]
+pub fn all_launch_groups(app: AppHandle) -> Vec<Group> {
+    all_groups(&app)
+}
+
 /// Characters to build groups from: the EVE clients open now (so you pick who you actually run).
 #[tauri::command]
 pub fn launch_known_characters() -> Vec<String> {
@@ -167,7 +362,7 @@ pub fn launcher_ready(app: AppHandle) -> bool {
 /// shortcuts; when one fires, brings the next open client in that group to the front.
 #[cfg(desktop)]
 mod hotkeys {
-    use super::{load, Group};
+    use super::{all_groups, Group};
     use std::collections::HashSet;
     use std::str::FromStr;
     use std::sync::Mutex;
@@ -182,9 +377,15 @@ mod hotkeys {
         let _ = gs.unregister_all();
         let mut bound = BOUND.lock().unwrap();
         bound.clear();
-        for group in load(app).groups {
+        let mut taken: HashSet<String> = HashSet::new();
+        for group in all_groups(app) {
             for (hotkey, forward) in [(group.forward_hotkey.as_deref(), true), (group.backward_hotkey.as_deref(), false)] {
                 let Some(hotkey) = hotkey.filter(|h| !h.trim().is_empty()) else { continue };
+                // One key drives one group: the first one listed (SeAT's, then this PC's) keeps it.
+                if !taken.insert(hotkey.to_ascii_uppercase()) {
+                    log::warn!("cycle hotkey {hotkey} is already used by another group; {} skipped", group.name);
+                    continue;
+                }
                 match Shortcut::from_str(hotkey) {
                     Ok(shortcut) => {
                         if gs.register(shortcut).is_ok() {
@@ -204,7 +405,7 @@ mod hotkeys {
     pub fn fired(app: &AppHandle, shortcut: &Shortcut) {
         let hit = BOUND.lock().unwrap().iter().find(|(s, _, _)| s == shortcut).map(|(_, id, fwd)| (id.clone(), *fwd));
         let Some((group_id, forward)) = hit else { return };
-        let group: Option<Group> = load(app).groups.into_iter().find(|g| g.id == group_id);
+        let group: Option<Group> = all_groups(app).into_iter().find(|g| g.id == group_id);
         let Some(group) = group else { return };
         let logins = crate::clipboard::open_login_windows();
         let active: Vec<String> = group.members.iter().filter(|m| !group.skipped.contains(m)).cloned().collect();
