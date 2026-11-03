@@ -80,7 +80,7 @@
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
         <div class="status" id="autoStatus"></div>
         <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
-        <div class="small" style="margin-bottom: 4px"><b>Quickest:</b> zoomed all the way out with the edge set, click your command center in EVE so its network shows (it sits on the dotted line between your extractor hubs). <b>Freeze</b>, pick your <b>Command Center</b> below, click it on the picture, <b>Lock on</b>. Rings on the wrong side? <b>Flip</b> (it remembers).</div>
+        <div class="small" style="margin-bottom: 4px"><b>Quickest:</b> zoomed all the way out with the edge set, click one of your buildings in EVE so your network shows. <b>Freeze</b>, pick one of your buildings that's listed <b>×1</b> (your <b>Launchpad</b>, the rocket icon, is easy to spot), click it on the picture, <b>Lock on</b>. Rings on the wrong side? <b>Flip</b> (it remembers).</div>
         <div class="muted small">Not your colony? Anyone's buildings work: in EVE right-click the planet → <b>Show other characters' networks</b>. <b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
         <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button><button class="btn" id="flip" hidden title="Locked from one building: if the green rings sit wrong, try the other way round">Flip</button></div>
         <label class="small muted"><input type="checkbox" id="othersPins"> Other people's buildings too</label>
@@ -487,7 +487,7 @@
     facing = { Q, mirrored: way.mirrored, misses: [], owners: [items[0].owner].filter(Boolean), one: { groups, way } };
     focal = disc.r * Math.sqrt(disc.D * disc.D - 1);
     forgetTrack(); frozen = false; say("autoStatus", "");
-    say("lockStatus", "Locked on from one building. Click your command center in EVE so its network shows: the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
+    say("lockStatus", "Locked on from one building. With your network showing in EVE, the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
     updateButtons(); drawShot();
   }
   $("flip").addEventListener("click", () => {
