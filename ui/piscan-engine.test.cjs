@@ -101,5 +101,22 @@ const back = E.fromCells(bytes);
 check("a map comes back from its bytes", E.cells(back).every((v, i) => Math.abs(v - bytes[i]) <= 1));
 check("a missing-side hint is given", typeof E.missingHint(map, q, false) === "string");
 
+// Clicks that only say the kind of building: two look-alike storage facilities get sorted out.
+const pins = [{ key: "cc", name: "Command Center", lat: 1.15, lon: 1.95 }, { key: "s1", name: "Storage", lat: 1.3, lon: 2.1 }, { key: "s2", name: "Storage", lat: 1.1, lon: 2.15 }, { key: "s3", name: "Storage", lat: 1.25, lon: 1.85 }];
+const clicks = pins.map((pin) => { const p = E.toPicture(E.apply(Q, E.planetVector(pin.lat, pin.lon, false)), disc); return { px: p.x + 1.5, py: p.y - 1, candidates: pins.filter((x) => x.name === pin.name) }; });
+const matchedSolve = E.solveMatching(clicks, disc);
+check("look-alike buildings are matched by where they are", matchedSolve && matchedSolve.matched.join(",") === "cc,s1,s2,s3");
+check("and the facing comes out right", matchedSolve && E.angle(E.apply(matchedSolve.Q, [0, 0, 1]), E.apply(Q, [0, 0, 1])) < 0.02);
+
+// The rim: found on a rendered planet, followed through a zoom, and from three clicks.
+const frameRim = render(Q);
+const rim = E.findRim(frameRim, W, H, null);
+check("finds the planet's edge", rim && Math.abs(rim.cx - 320) < 3 && Math.abs(rim.cy - 240) < 3 && Math.abs(rim.r - 200) < 4);
+const zoomed = { cx: 320, cy: 240, r: 200 };
+const rim2 = E.findRim(frameRim, W, H, { cx: 320, cy: 240, r: 180 });
+check("follows a zoom from the last circle", rim2 && Math.abs(rim2.r - zoomed.r) < 4);
+const three = E.circleFrom3([520, 240], [320, 40], [120, 240]);
+check("three clicks on the rim make the circle", three && Math.abs(three.cx - 320) < 1e-6 && Math.abs(three.r - 200) < 1e-6);
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);

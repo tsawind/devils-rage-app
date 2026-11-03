@@ -69,19 +69,19 @@
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
-        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> does it; or drag the circle's middle, and the mouse wheel over the picture resizes it. Don't zoom in EVE after this.</div>
-        <div class="row"><button class="btn" id="fit">Find edge</button><span class="small muted" id="discInfo"></span></div>
+        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Zooming in EVE is fine afterwards: the circle follows (keep some of the rim in view).</div>
+        <div class="row"><button class="btn" id="fit">Find edge</button><button class="btn" id="rim3">Click 3 on the edge</button><span class="small muted" id="discInfo"></span></div>
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Point out 3 of your buildings</h3>
-        <div class="muted small"><b>Freeze</b>, pick a building below, click it on the picture. Three spread out (extractor heads help) tells which way the planet faces. Afterwards the green rings should sit on every building.</div>
+        <div class="muted small"><b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
         <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button></div>
         <div class="anchors" id="anchors"></div>
         <div class="status" id="lockStatus"></div>
       </div></div>
       <div class="step"><div class="n">4</div><div>
         <h3>Scan</h3>
-        <div class="muted small">Pick the resource EVE is showing, press <b>Scan</b>, then turn the planet slowly (about a quarter turn every few seconds) until the bar is full. Switch the resource in EVE and here to scan the next one without moving. Drifting? Pick a building and click it on the picture.</div>
+        <div class="muted small"><b>In EVE first:</b> in the planet's Scan panel drag both ends of the colour band right out to the ends (the widest band) and leave it there, so every scan uses the same scale. Then pick the resource EVE is showing here, press <b>Scan</b> and turn the planet slowly (about a quarter turn every few seconds) until the bar is full. Switch the resource in EVE and here for the next one without moving. Drifting? Pick a kind of building and click one.</div>
         <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
         <div class="row" style="display: block"><div class="meter"><i id="cover"></i></div></div>
         <div class="status" id="scanStatus"></div>
@@ -108,14 +108,14 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
   const RESOURCES = {
-    barren: ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Micro Organisms", "Noble Metals"],
+    barren: ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Microorganisms", "Noble Metals"],
     gas: ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Reactive Gas"],
-    ice: ["Aqueous Liquids", "Heavy Metals", "Micro Organisms", "Noble Gas", "Planktic Colonies"],
+    ice: ["Aqueous Liquids", "Heavy Metals", "Microorganisms", "Noble Gas", "Planktic Colonies"],
     lava: ["Base Metals", "Felsic Magma", "Heavy Metals", "Non-CS Crystals", "Suspended Plasma"],
-    oceanic: ["Aqueous Liquids", "Carbon Compounds", "Complex Organisms", "Micro Organisms", "Planktic Colonies"],
+    oceanic: ["Aqueous Liquids", "Carbon Compounds", "Complex Organisms", "Microorganisms", "Planktic Colonies"],
     plasma: ["Base Metals", "Heavy Metals", "Noble Metals", "Non-CS Crystals", "Suspended Plasma"],
     storm: ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Suspended Plasma"],
-    temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Micro Organisms"],
+    temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Microorganisms"],
   };
   const say = (id, text, kind) => { const el = $(id); el.textContent = text || ""; el.className = "status" + (kind ? " " + kind : ""); };
   $("home").addEventListener("click", () => { location.href = "index.html"; });
@@ -172,20 +172,26 @@
     if (!p) return [];
     const out = [];
     p.pins.forEach((pin) => {
-      out.push({ key: "p" + pin.id, name: pin.name, lat: pin.lat, lon: pin.lon });
-      (pin.heads || []).forEach((h, i) => out.push({ key: "h" + pin.id + ":" + h.id, name: `↳ head ${i + 1} of that extractor`, lat: h.lat, lon: h.lon }));
+      out.push({ key: "p" + pin.id, kind: pin.name.replace(/^(Barren|Gas|Ice|Lava|Oceanic|Plasma|Storm|Temperate) /, ""), lat: pin.lat, lon: pin.lon });
+      (pin.heads || []).forEach((h) => out.push({ key: "h" + pin.id + ":" + h.id, kind: "Extractor head", lat: h.lat, lon: h.lon }));
     });
     return out;
   }
+  /** Kinds of building on this planet, with how many of each. */
+  function kinds() {
+    const by = new Map();
+    anchorList().forEach((a) => { if (!by.has(a.kind)) by.set(a.kind, []); by.get(a.kind).push(a); });
+    return [...by.entries()].map(([kind, items]) => ({ kind, items })).sort((a, b) => a.items.length - b.items.length || a.kind.localeCompare(b.kind));
+  }
   function renderAnchors() {
     const host = $("anchors"); host.innerHTML = "";
-    anchorList().forEach((a) => {
+    kinds().forEach(({ kind, items }) => {
       const row = document.createElement("div");
-      row.className = "anchor" + (selected === a.key ? " sel" : "");
-      const got = anchors.find((x) => x.key === a.key);
-      row.innerHTML = `<span></span>${got ? '<span class="got">✓ placed</span>' : ""}`;
-      row.firstChild.textContent = a.name;
-      row.addEventListener("click", () => { selected = selected === a.key ? null : a.key; renderAnchors(); });
+      row.className = "anchor" + (selected === kind ? " sel" : "");
+      const placed = anchors.filter((x) => x.kind === kind).length;
+      row.innerHTML = `<span></span><span class="muted small">×${items.length}</span>${placed ? `<span class="got">✓ ${placed} clicked</span>` : ""}`;
+      row.firstChild.textContent = kind;
+      row.addEventListener("click", () => { selected = selected === kind ? null : kind; renderAnchors(); });
       host.append(row);
     });
   }
@@ -226,8 +232,23 @@
       sctx.strokeStyle = "#adff2f"; sctx.lineWidth = lw;
       anchorList().forEach((a) => { const p = E.toPicture(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), disc); if (!p.front) return; sctx.beginPath(); sctx.arc(p.x, p.y, 7 * lw, 0, Math.PI * 2); sctx.stroke(); });
     }
-    sctx.strokeStyle = "#f0c040"; sctx.lineWidth = lw;
-    anchors.forEach((a) => { sctx.beginPath(); sctx.moveTo(a.px - 9 * lw, a.py); sctx.lineTo(a.px + 9 * lw, a.py); sctx.moveTo(a.px, a.py - 9 * lw); sctx.lineTo(a.px, a.py + 9 * lw); sctx.stroke(); });
+    anchors.forEach((a, i) => {
+      const bad = facing && facing.misses && facing.misses[i] > 0.05;
+      sctx.strokeStyle = bad ? "#ff5a4a" : "#f0c040"; sctx.lineWidth = lw;
+      sctx.beginPath(); sctx.moveTo(a.px - 9 * lw, a.py); sctx.lineTo(a.px + 9 * lw, a.py); sctx.moveTo(a.px, a.py - 9 * lw); sctx.lineTo(a.px, a.py + 9 * lw); sctx.stroke();
+    });
+    rimClicks.forEach(([x, y]) => { sctx.fillStyle = "#ff5a4a"; sctx.beginPath(); sctx.arc(x, y, 4 * lw, 0, Math.PI * 2); sctx.fill(); });
+    // Magnifier while the picture is frozen (or picking rim points): 3× around the pointer.
+    if (mouse && (frozen || rimClicks.length || rimMode)) {
+      const R = Math.round(frame.w / 12), Z = 3, src = R / Z;
+      const mx = mouse.x + R * 1.3 + R > frame.w ? mouse.x - R * 1.3 : mouse.x + R * 1.3, my = Math.max(R, Math.min(frame.h - R, mouse.y));
+      sctx.save(); sctx.beginPath(); sctx.arc(mx, my, R, 0, Math.PI * 2); sctx.clip();
+      sctx.imageSmoothingEnabled = false;
+      sctx.drawImage(frame.img, mouse.x - src, mouse.y - src, src * 2, src * 2, mx - R, my - R, R * 2, R * 2);
+      sctx.strokeStyle = "#fff"; sctx.lineWidth = 1; sctx.beginPath(); sctx.moveTo(mx - 8, my); sctx.lineTo(mx + 8, my); sctx.moveTo(mx, my - 8); sctx.lineTo(mx, my + 8); sctx.stroke();
+      sctx.restore();
+      sctx.strokeStyle = "#f0c040"; sctx.lineWidth = lw; sctx.beginPath(); sctx.arc(mx, my, R, 0, Math.PI * 2); sctx.stroke();
+    }
   }
   function drawFlat() {
     const m = maps.get($("resource").value);
@@ -260,43 +281,18 @@
   }
 
   // ---------- the planet's edge ----------
-  function findEdge(f) {
-    const d = f.data.data, w = f.w, h = f.h;
-    const lum = (x, y) => { const k = ((y | 0) * w + (x | 0)) * 4; return 0.3 * d[k] + 0.59 * d[k + 1] + 0.11 * d[k + 2]; };
-    const cx0 = disc ? disc.cx : w / 2, cy0 = disc ? disc.cy : h / 2, maxR = Math.min(w, h) * 0.6;
-    const pts = [];
-    for (let i = 0; i < 48; i++) {
-      const a = (i / 48) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
-      let dark = 0, edge = null;
-      for (let r = 20; r < maxR; r += 2) {
-        const x = cx0 + dx * r, y = cy0 + dy * r;
-        if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) break;
-        if (lum(x, y) < 16) { dark++; if (dark === 1) edge = r; if (dark >= 6) break; } else { dark = 0; edge = null; }
-      }
-      if (edge && dark >= 6) pts.push([cx0 + dx * edge, cy0 + dy * edge]);
-    }
-    if (pts.length < 8) return null;
-    const fit = (list) => { // Kåsa circle fit
-      let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0; const n = list.length;
-      list.forEach(([x, y]) => { const z = x * x + y * y; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sxz += x * z; syz += y * z; sz += z; });
-      const A = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]], B = [sxz, syz, sz];
-      const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-      const D = det(A); if (!D) return null;
-      const col = (i) => A.map((row, r) => row.map((v, c) => (c === i ? B[r] : v)));
-      const a = det(col(0)) / D, b = det(col(1)) / D, c = det(col(2)) / D;
-      const cx = a / 2, cy = b / 2;
-      return { cx, cy, r: Math.sqrt(Math.max(1, c + cx * cx + cy * cy)) };
-    };
-    let circle = fit(pts);
-    if (!circle) return null;
-    const near = pts.filter(([x, y]) => Math.abs(Math.hypot(x - circle.cx, y - circle.cy) - circle.r) < circle.r * 0.06);
-    if (near.length >= 8) circle = fit(near) || circle;
-    return circle.r > 40 ? circle : null;
-  }
+  // Three clicks on the rim make an exact circle.
+  let rimMode = false, rimClicks = [], mouse = null;
+  $("rim3").addEventListener("click", async () => {
+    if (!frame) frame = await grab().catch(() => null);
+    rimMode = true; rimClicks = []; frozen = true;
+    say("lockStatus", "Click three points on the planet's edge, spread round it.", "warn");
+    updateButtons(); drawShot();
+  });
   $("fit").addEventListener("click", async () => {
     if (!frame) frame = await grab().catch(() => null);
     if (!frame) return say("lockStatus", "No picture from that client.", "bad");
-    const c = findEdge(frame);
+    const c = E.findRim(frame.data.data, frame.w, frame.h, null);
     if (!c) return say("lockStatus", "Couldn't find the edge: drag the circle onto the planet and use the mouse wheel to size it.", "warn");
     disc = c; facing = null; anchors = []; renderAnchors(); updateButtons(); drawShot();
     say("lockStatus", "Edge found. Now point out three buildings.", "ok");
@@ -307,22 +303,37 @@
   let dragging = null;
   shot.addEventListener("mousedown", (e) => {
     const p = toImage(e);
+    if (rimMode) {
+      rimClicks.push([p.x, p.y]);
+      if (rimClicks.length === 3) {
+        const c = E.circleFrom3(...rimClicks);
+        rimMode = false; rimClicks = [];
+        if (c && c.r > 40) { disc = c; facing = null; anchors = []; renderAnchors(); say("lockStatus", "Edge set. Now point out three buildings.", "ok"); }
+        else say("lockStatus", "Those three points don't make a circle: try again, spread round the rim.", "bad");
+      }
+      updateButtons(); drawShot();
+      return;
+    }
     if (disc && Math.hypot(p.x - disc.cx, p.y - disc.cy) < disc.r * 0.08 && !selected) { dragging = { dx: p.x - disc.cx, dy: p.y - disc.cy }; return; }
     if (!selected) { if (!disc) { disc = { cx: p.x, cy: p.y, r: Math.min(shot.width, shot.height) / 3 }; updateButtons(); drawShot(); } return; }
-    const a = anchorList().find((x) => x.key === selected);
-    if (!a || !disc) return;
+    const group = kinds().find((k) => k.kind === selected);
+    if (!group || !disc) return;
     if (!E.toSphere(p.x, p.y, disc)) return say("lockStatus", "That's outside the planet's circle: fix the edge first.", "warn");
     if (facing) {
-      // While scanning: a click is a drift fix.
-      facing.Q = E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: a.lat, lon: a.lon }, disc, facing.mirrored);
-      say("scanStatus", `Pulled back onto ${a.name}.`, "ok");
+      // While scanning: a click on any building of that kind is a drift fix (the nearest one).
+      const cam = E.toSphere(p.x, p.y, disc);
+      let best = null, miss = Infinity;
+      group.items.forEach((a) => { const m = E.angle(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), cam); if (m < miss) { miss = m; best = a; } });
+      if (best) facing.Q = E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored);
+      say("scanStatus", `Pulled back onto a ${selected.toLowerCase()}.`, "ok");
     } else {
-      anchors = anchors.filter((x) => x.key !== a.key).concat([{ key: a.key, px: p.x, py: p.y, lat: a.lat, lon: a.lon }]);
-      const next = anchorList().find((x) => !anchors.some((y) => y.key === x.key) && x.key !== a.key);
-      selected = anchors.length >= 3 ? null : next ? next.key : null;
+      if (anchors.filter((x) => x.kind === selected).length >= group.items.length) return say("lockStatus", `There ${group.items.length === 1 ? "is only one" : "are only " + group.items.length} ${selected.toLowerCase()}: pick another kind.`, "warn");
+      anchors.push({ kind: selected, px: p.x, py: p.y });
     }
     renderAnchors(); updateButtons(); drawShot();
   });
+  shot.addEventListener("mousemove", (e) => { mouse = toImage(e); if (frozen || rimMode) drawShot(); });
+  shot.addEventListener("mouseleave", () => { mouse = null; if (frozen || rimMode) drawShot(); });
   window.addEventListener("mousemove", (e) => { if (!dragging || !disc) return; const p = toImage(e); disc.cx = p.x - dragging.dx; disc.cy = p.y - dragging.dy; facing = null; updateButtons(); drawShot(); });
   window.addEventListener("mouseup", () => { dragging = null; });
   shot.addEventListener("wheel", (e) => { if (!disc) return; e.preventDefault(); disc.r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); facing = null; updateButtons(); drawShot(); }, { passive: false });
@@ -330,12 +341,14 @@
   $("freeze").addEventListener("click", async () => { frozen = !frozen; if (frozen && !frame) frame = await grab().catch(() => null); updateButtons(); drawShot(); });
   $("clearAnchors").addEventListener("click", () => { anchors = []; facing = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
   $("lock").addEventListener("click", () => {
-    const solved = E.solveAnchorsEitherWay(anchors, disc);
+    const groups = new Map(kinds().map((k) => [k.kind, k.items]));
+    const solved = E.solveMatching(anchors.map((a) => ({ px: a.px, py: a.py, candidates: groups.get(a.kind) || [] })), disc);
     if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
     facing = solved; prevGrey = null; frozen = false;
     const miss = solved.error * 180 / Math.PI;
     const kind = miss < 1.5 ? "ok" : miss < 4 ? "warn" : "bad";
-    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Check the green rings sit on your buildings.`, kind);
+    const worst = solved.misses.indexOf(Math.max(...solved.misses));
+    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings.` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
     updateButtons(); drawShot();
   });
 
@@ -363,6 +376,14 @@
       if (!frozen && $("client").value) {
         const f = await grab().catch(() => null);
         if (f) frame = f;
+        // Follow a zoom in EVE: look for the rim near where it was.
+        if (f && disc && !rimMode) {
+          const rim = E.findRim(f.data.data, f.w, f.h, disc);
+          if (rim && (Math.abs(rim.r - disc.r) > disc.r * 0.015 || Math.hypot(rim.cx - disc.cx, rim.cy - disc.cy) > disc.r * 0.015)) {
+            disc = { cx: rim.cx, cy: rim.cy, r: rim.r };
+            updateButtons();
+          }
+        }
         if (f && running && facing && disc) {
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
           let ok = true;

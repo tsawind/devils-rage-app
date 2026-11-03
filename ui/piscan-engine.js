@@ -309,7 +309,118 @@
     return `past the ${parts.join("-")} edge: turn the planet to bring that side round to the front`;
   }
 
+
+  // ---- the planet's edge ----
+  /** Circle through edge points (Kåsa fit), then again with the points that agree. */
+  function fitCircle(points) {
+    const fit = (list) => {
+      let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0;
+      const n = list.length;
+      list.forEach(([x, y]) => { const z = x * x + y * y; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sxz += x * z; syz += y * z; sz += z; });
+      const A = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]], B = [sxz, syz, sz];
+      const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+      const D = det(A);
+      if (!D) return null;
+      const col = (i) => A.map((row, r) => row.map((v, c) => (c === i ? B[r] : v)));
+      const a = det(col(0)) / D, b = det(col(1)) / D, c = det(col(2)) / D;
+      return { cx: a / 2, cy: b / 2, r: Math.sqrt(Math.max(1, c + a * a / 4 + b * b / 4)) };
+    };
+    if (points.length < 3) return null;
+    let circle = fit(points);
+    for (let round = 0; circle && round < 2; round++) {
+      const near = points.filter(([x, y]) => Math.abs(Math.hypot(x - circle.cx, y - circle.cy) - circle.r) < circle.r * 0.04);
+      if (near.length < Math.max(3, points.length * 0.5)) break;
+      circle = fit(near) || circle;
+    }
+    return circle;
+  }
+
+  /**
+   * The planet's rim: rays out from a guess, each stops where the picture turns to space (dark
+   * for a few pixels). With `around` (the circle last frame), only looks near that radius, so a
+   * zoom in EVE is followed. Rays that leave the picture (zoomed right in) are skipped.
+   */
+  function findRim(rgba, width, height, around) {
+    const lum = (x, y) => { const k = ((y | 0) * width + (x | 0)) * 4; return 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2]; };
+    const cx = around ? around.cx : width / 2, cy = around ? around.cy : height / 2;
+    const from = around ? around.r * 0.75 : 20, to = around ? around.r * 1.35 : Math.min(width, height) * 0.6;
+    // How dark space is here: the darkest tenth of a ring well outside the guess.
+    const points = [];
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
+      let dark = 0, edge = null, inside = false;
+      for (let r = from; r < to; r += 2) {
+        const x = cx + dx * r, y = cy + dy * r;
+        if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) { edge = null; break; }
+        if (lum(x, y) < 18) { dark++; if (dark === 1) edge = r; if (dark >= 5 && inside) break; } else { dark = 0; edge = null; inside = true; }
+      }
+      if (edge && dark >= 5 && inside) points.push([cx + dx * edge, cy + dy * edge]);
+    }
+    if (points.length < 10) return null;
+    const circle = fitCircle(points);
+    if (!circle || circle.r < 40) return null;
+    if (around && (Math.abs(circle.r - around.r) > around.r * 0.3 || Math.hypot(circle.cx - around.cx, circle.cy - around.cy) > around.r * 0.15)) return null;
+    return circle;
+  }
+
+  /** The circle through three clicks on the rim. */
+  function circleFrom3(a, b, c) {
+    const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
+    if (Math.abs(d) < 1e-9) return null;
+    const sq = (p) => p[0] * p[0] + p[1] * p[1];
+    const cx = (sq(a) * (b[1] - c[1]) + sq(b) * (c[1] - a[1]) + sq(c) * (a[1] - b[1])) / d;
+    const cy = (sq(a) * (c[0] - b[0]) + sq(b) * (a[0] - c[0]) + sq(c) * (b[0] - a[0])) / d;
+    return { cx, cy, r: Math.hypot(a[0] - cx, a[1] - cy) };
+  }
+
+  /**
+   * Lock on from clicks where each click says only what *kind* of building it is (several
+   * storage facilities look alike): tries the likely matches and keeps the one where every
+   * click lands on a building of its kind. clicks = [{ px, py, candidates: [{ key, lat, lon }] }].
+   * Returns { Q, mirrored, error, matched: [key per click], misses: [radians per click] } or null.
+   */
+  function solveMatching(clicks, disc) {
+    const usable = clicks.map((c) => ({ ...c, cam: toSphere(c.px, c.py, disc) })).filter((c) => c.cam && c.candidates.length);
+    if (usable.length < 2) return null;
+    // Seed from the two clicks farthest apart (best pinned), every pairing of their candidates.
+    let si = 0, sj = 1, far = -1;
+    for (let i = 0; i < usable.length; i++) for (let j = i + 1; j < usable.length; j++) {
+      const d = angle(usable[i].cam, usable[j].cam);
+      if (d > far) { far = d; si = i; sj = j; }
+    }
+    let best = null;
+    for (const mirrored of [false, true]) {
+      for (const ca of usable[si].candidates.slice(0, 12)) for (const cb of usable[sj].candidates.slice(0, 12)) {
+        if (ca.key === cb.key) continue;
+        const seed = solveAnchors([{ px: usable[si].px, py: usable[si].py, lat: ca.lat, lon: ca.lon }, { px: usable[sj].px, py: usable[sj].py, lat: cb.lat, lon: cb.lon }], disc, mirrored);
+        if (!seed) continue;
+        let Q = seed.Q, matched = [];
+        for (let round = 0; round < 3; round++) {
+          const used = new Set();
+          matched = usable.map((c) => {
+            let pick = null, miss = Infinity;
+            for (const cand of c.candidates) {
+              if (used.has(cand.key)) continue;
+              const m = angle(apply(Q, planetVector(cand.lat, cand.lon, mirrored)), c.cam);
+              if (m < miss) { miss = m; pick = cand; }
+            }
+            if (pick) used.add(pick.key);
+            return pick;
+          });
+          const pairs = usable.map((c, i) => matched[i] && { px: c.px, py: c.py, lat: matched[i].lat, lon: matched[i].lon }).filter(Boolean);
+          const solved = solveAnchors(pairs, disc, mirrored);
+          if (!solved) break;
+          Q = solved.Q;
+        }
+        const misses = usable.map((c, i) => (matched[i] ? angle(apply(Q, planetVector(matched[i].lat, matched[i].lon, mirrored)), c.cam) : Math.PI));
+        const error = misses.reduce((a, b) => a + b, 0) / misses.length;
+        if (!best || error < best.error - 1e-9) best = { Q, mirrored, error, matched: matched.map((m) => (m ? m.key : null)), misses };
+      }
+    }
+    return best;
+  }
+
   const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture,
-    solveAnchors, solveAnchorsEitherWay, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint };
+    solveAnchors, solveAnchorsEitherWay, solveMatching, fitCircle, findRim, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);
