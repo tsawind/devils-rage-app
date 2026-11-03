@@ -66,6 +66,7 @@
         <div class="muted small">In EVE: open the planet, turn on the scan for a resource. This page only watches the picture; it never clicks or types in EVE.</div>
         <div class="row"><select id="client"></select><button class="btn" id="reload" title="Look for clients and your planets again">↻</button></div>
         <div class="row"><select id="planet" style="width: 100%"></select></div>
+        <label class="small muted"><input type="checkbox" id="others"> Show other characters' planets</label>
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
@@ -134,6 +135,11 @@
     if (!list.length) sel.append(new Option("No EVE clients open", ""));
     list.forEach((c) => sel.append(new Option(c.name + (c.minimized ? " (minimised)" : ""), c.name)));
     if (list.some((c) => c.name === was)) sel.value = was;
+    else {
+      // The EVE client you were last in (before switching to this page).
+      const last = await invoke("last_eve_client").catch(() => null);
+      if (last && list.some((c) => c.name === last)) sel.value = last;
+    }
   }
   async function loadPlanets() {
     try {
@@ -149,7 +155,7 @@
     if (!planets.length) sel.append(new Option("No colonies found in SeAT (open the PI tab once?)", ""));
     const group = (label, list) => { if (!list.length) return; const g = document.createElement("optgroup"); g.label = label; list.forEach((p) => g.append(new Option(`${p.name} · ${cap(p.type)} · ${p.character}`, p.character_id + ":" + p.planet_id))); sel.append(g); };
     group(client ? client + "'s planets" : "Your planets", mine);
-    group("Other characters", rest);
+    if ($("others").checked || !mine.length) group("Other characters", rest);
     if ([...sel.options].some((o) => o.value === was)) sel.value = was;
     planetChanged();
   }
@@ -314,7 +320,7 @@
       updateButtons(); drawShot();
       return;
     }
-    if (disc && Math.hypot(p.x - disc.cx, p.y - disc.cy) < disc.r * 0.08 && !selected) { dragging = { dx: p.x - disc.cx, dy: p.y - disc.cy }; return; }
+    if (disc && !facing && Math.hypot(p.x - disc.cx, p.y - disc.cy) < disc.r * 0.08 && !selected) { dragging = { dx: p.x - disc.cx, dy: p.y - disc.cy }; return; }
     if (!selected) { if (!disc) { disc = { cx: p.x, cy: p.y, r: Math.min(shot.width, shot.height) / 3 }; updateButtons(); drawShot(); } return; }
     const group = kinds().find((k) => k.kind === selected);
     if (!group || !disc) return;
@@ -336,19 +342,20 @@
   shot.addEventListener("mouseleave", () => { mouse = null; if (frozen || rimMode) drawShot(); });
   window.addEventListener("mousemove", (e) => { if (!dragging || !disc) return; const p = toImage(e); disc.cx = p.x - dragging.dx; disc.cy = p.y - dragging.dy; facing = null; updateButtons(); drawShot(); });
   window.addEventListener("mouseup", () => { dragging = null; });
-  shot.addEventListener("wheel", (e) => { if (!disc) return; e.preventDefault(); disc.r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); facing = null; updateButtons(); drawShot(); }, { passive: false });
+  shot.addEventListener("wheel", (e) => { if (!disc || facing) return; e.preventDefault(); disc.r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); facing = null; updateButtons(); drawShot(); }, { passive: false });
 
   $("freeze").addEventListener("click", async () => { frozen = !frozen; if (frozen && !frame) frame = await grab().catch(() => null); updateButtons(); drawShot(); });
-  $("clearAnchors").addEventListener("click", () => { anchors = []; facing = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
+  $("clearAnchors").addEventListener("click", () => { if (disc) disc = { cx: disc.cx, cy: disc.cy, r: disc.r }; anchors = []; facing = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
   $("lock").addEventListener("click", () => {
     const groups = new Map(kinds().map((k) => [k.kind, k.items]));
     const solved = E.solveMatching(anchors.map((a) => ({ px: a.px, py: a.py, candidates: groups.get(a.kind) || [] })), disc);
     if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
     facing = solved; prevGrey = null; frozen = false;
+    disc = { ...disc, D: solved.D };
     const miss = solved.error * 180 / Math.PI;
     const kind = miss < 1.5 ? "ok" : miss < 4 ? "warn" : "bad";
     const worst = solved.misses.indexOf(Math.max(...solved.misses));
-    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings.` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
+    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings. The circle is locked now: don't zoom in EVE while scanning (Clear to start over).` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
     updateButtons(); drawShot();
   });
 
@@ -377,7 +384,7 @@
         const f = await grab().catch(() => null);
         if (f) frame = f;
         // Follow a zoom in EVE: look for the rim near where it was.
-        if (f && disc && !rimMode) {
+        if (f && disc && !rimMode && !facing) {
           const rim = E.findRim(f.data.data, f.w, f.h, disc);
           if (rim && (Math.abs(rim.r - disc.r) > disc.r * 0.015 || Math.hypot(rim.cx - disc.cx, rim.cy - disc.cy) > disc.r * 0.015)) {
             disc = { cx: rim.cx, cy: rim.cy, r: rim.r };
@@ -388,7 +395,7 @@
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
           let ok = true;
           if (prevGrey) {
-            const t = E.trackRotation(prevGrey, grey);
+            const t = E.trackRotation(prevGrey, grey, disc.D);
             if (t) { facing.Q = E.mul(t.R, facing.Q); lostRun = 0; } else { ok = false; lostRun++; }
           }
           if (ok) {
@@ -425,6 +432,7 @@
 
   $("client").addEventListener("change", () => { frame = null; fillPlanets(); });
   $("planet").addEventListener("change", planetChanged);
+  $("others").addEventListener("change", fillPlanets);
   $("reload").addEventListener("click", async () => { await loadClients(); await loadPlanets(); });
   (async () => { await loadClients(); await loadPlanets(); drawShot(); })();
 })();

@@ -384,6 +384,7 @@ pub fn run() {
             previews::set_previews_snap,
             previews::set_previews_logins,
             previews::preview_interval,
+            previews::last_eve_client,
             clientwindows::client_windows_remember,
             clientwindows::client_windows_place,
             clientwindows::client_windows_auto,

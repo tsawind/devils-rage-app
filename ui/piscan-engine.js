@@ -104,14 +104,35 @@
     return { lat, lon };
   }
 
+  // EVE's planet camera is close: disc.D is its distance from the planet's centre in planet
+  // radii (missing or Infinity = seen from far away). The rim on screen is where sight lines
+  // just touch the planet.
+  const far = (disc) => !disc.D || !isFinite(disc.D);
   // Picture point (pixels) → camera-space point on the near side, or null outside the disc.
   function toSphere(px, py, disc) {
-    const x = (px - disc.cx) / disc.r, y = -(py - disc.cy) / disc.r, d = x * x + y * y;
-    if (d >= 1) return null;
-    return [x, y, Math.sqrt(1 - d)];
+    if (far(disc)) {
+      const x = (px - disc.cx) / disc.r, y = -(py - disc.cy) / disc.r, d = x * x + y * y;
+      if (d >= 1) return null;
+      return [x, y, Math.sqrt(1 - d)];
+    }
+    const D = disc.D, f = disc.r * Math.sqrt(D * D - 1);
+    const u = (px - disc.cx) / f, v = -(py - disc.cy) / f, l = Math.hypot(u, v, 1);
+    const dir = [u / l, v / l, -1 / l];
+    const b = D * dir[2], disc2 = b * b - (D * D - 1);
+    if (disc2 < 0) return null;
+    const t = -b - Math.sqrt(disc2);
+    return [t * dir[0], t * dir[1], D + t * dir[2]];
   }
   function toPicture(v, disc) {
-    return { x: disc.cx + v[0] * disc.r, y: disc.cy - v[1] * disc.r, front: v[2] > 0 };
+    if (far(disc)) return { x: disc.cx + v[0] * disc.r, y: disc.cy - v[1] * disc.r, front: v[2] > 0 };
+    const D = disc.D, f = disc.r * Math.sqrt(D * D - 1), depth = D - v[2];
+    return { x: disc.cx + f * v[0] / depth, y: disc.cy - f * v[1] / depth, front: v[2] > 1 / D };
+  }
+  /** How square-on the camera sees a surface point (1 = straight at it, 0 = edge-on). */
+  function facingOf(v, disc) {
+    if (far(disc)) return v[2];
+    const to = [-v[0], -v[1], disc.D - v[2]], l = Math.hypot(...to);
+    return (v[0] * to[0] + v[1] * to[1] + v[2] * to[2]) / l;
   }
 
   /**
@@ -203,26 +224,27 @@
     }
     return { x: bx, y: by, cost: best };
   }
-  const unit = (x, y, size) => { const u = (x + 0.5) / (size / 2) - 1, v = 1 - (y + 0.5) / (size / 2), d = u * u + v * v; return d >= 1 ? null : [u, v, Math.sqrt(1 - d)]; };
 
   /**
    * How the planet turned between two grey discs: R with cur ≈ R·prev (camera space), from
    * matched patches (coarse at half size, then refined). Returns { R, used, spread (radians), moved (radians) }
    * or null when too few patches agree (moved too fast, or nothing to grip on).
    */
-  function trackRotation(prev, cur) {
+  function trackRotation(prev, cur, D) {
     const P = 4, step = 18, inner = 0.72;
+    const crop = { cx: SIZE / 2, cy: SIZE / 2, r: SIZE / 2, D };
+    const unit = (x, y) => toSphere(x + 0.5, y + 0.5, crop);
     const prevHalf = half(prev, SIZE), curHalf = half(cur, SIZE);
     const as = [], bs = [];
     for (let y = step; y < SIZE - step; y += step) for (let x = step; x < SIZE - step; x += step) {
-      const a = unit(x, y, SIZE);
-      if (!a || Math.hypot(a[0], a[1]) > inner) continue;
+      const a = unit(x, y);
+      if (!a || Math.hypot((x - SIZE / 2) / (SIZE / 2), (y - SIZE / 2) / (SIZE / 2)) > inner) continue;
       if (textured(prev, SIZE, x, y, P) < 12) continue;
       const hx = x >> 1, hy = y >> 1;
       if (hx - 3 < 0 || hy - 3 < 0) continue;
       const coarse = search(prevHalf, curHalf, SIZE / 2, hx, hy, hx, hy, 14, 2);
       const fine = search(prev, cur, SIZE, x, y, coarse.x * 2, coarse.y * 2, 3, P);
-      const b = unit(fine.x, fine.y, SIZE);
+      const b = unit(fine.x, fine.y);
       if (!b) continue;
       as.push(a); bs.push(b);
     }
@@ -256,10 +278,12 @@
     const x0 = Math.max(0, Math.floor(disc.cx - disc.r)), x1 = Math.min(width - 1, Math.ceil(disc.cx + disc.r));
     for (let y = y0; y <= y1; y += step) for (let x = x0; x <= x1; x += step) {
       const v = toSphere(x, y, disc);
-      if (!v || v[2] < 0.35) continue; // near the edge the picture is too squashed to trust
+      if (!v) continue;
+      const square = facingOf(v, disc);
+      if (square < 0.35) continue; // near the edge the picture is too squashed to trust
       const { lat, lon } = latLon(apply(Qt, v), mirrored);
       const row = Math.min(GRID_H - 1, Math.floor(lat / Math.PI * GRID_H)), col = Math.min(GRID_W - 1, Math.floor(lon / (2 * Math.PI) * GRID_W));
-      const k = (y * width + x) * 4, w = v[2] * v[2];
+      const k = (y * width + x) * 4, w = square * square;
       map.sum[row * GRID_W + col] += heat(rgba[k], rgba[k + 1], rgba[k + 2]) * w;
       map.weight[row * GRID_W + col] += w;
       painted++;
@@ -380,6 +404,26 @@
    * Returns { Q, mirrored, error, matched: [key per click], misses: [radians per click] } or null.
    */
   function solveMatching(clicks, disc) {
+    let best = null;
+    for (const D of [Infinity, 12, 8, 6, 5, 4, 3.5, 3, 2.6, 2.3, 2, 1.8, 1.6, 1.45, 1.3]) {
+      const got = solveMatchingAt(clicks, { ...disc, D });
+      if (got && (!best || got.error < best.error - 1e-9)) best = { ...got, D };
+    }
+    // Refine the distance between its neighbours.
+    if (best) {
+      for (let step = 0; step < 12; step++) {
+        const span = isFinite(best.D) ? best.D * 0.08 : 0;
+        if (!span) break;
+        for (const D of [best.D - span, best.D + span]) {
+          if (D <= 1.05) continue;
+          const got = solveMatchingAt(clicks, { ...disc, D });
+          if (got && got.error < best.error - 1e-9) best = { ...got, D };
+        }
+      }
+    }
+    return best;
+  }
+  function solveMatchingAt(clicks, disc) {
     const usable = clicks.map((c) => ({ ...c, cam: toSphere(c.px, c.py, disc) })).filter((c) => c.cam && c.candidates.length);
     if (usable.length < 2) return null;
     // Seed from the two clicks farthest apart (best pinned), every pairing of their candidates.
@@ -420,7 +464,7 @@
     return best;
   }
 
-  const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture,
+  const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
     solveAnchors, solveAnchorsEitherWay, solveMatching, fitCircle, findRim, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);

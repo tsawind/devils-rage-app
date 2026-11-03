@@ -548,6 +548,7 @@ pub fn start_watch(app: AppHandle) {
                 let now = crate::clipboard::foreground_client();
                 if now.is_some() && now != front {
                     front = now.clone();
+                    *LAST_FRONT.lock().unwrap() = now.clone();
                     push_active(&app, front.as_deref());
                 }
             }
@@ -610,6 +611,14 @@ pub fn start_watch(app: AppHandle) {
             }
         }
     });
+}
+
+/// The EVE client that was in front last (stays when you switch to another program).
+static LAST_FRONT: Mutex<Option<String>> = Mutex::new(None);
+
+#[tauri::command]
+pub fn last_eve_client() -> Option<String> {
+    LAST_FRONT.lock().unwrap().clone()
 }
 
 /// Tell every preview which client is in front now (and, with "hide the one in front", hide

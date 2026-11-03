@@ -118,5 +118,16 @@ check("follows a zoom from the last circle", rim2 && Math.abs(rim2.r - zoomed.r)
 const three = E.circleFrom3([520, 240], [320, 40], [120, 240]);
 check("three clicks on the rim make the circle", three && Math.abs(three.cx - 320) < 1e-6 && Math.abs(three.r - 200) < 1e-6);
 
+// EVE's close camera: buildings clicked on a planet seen from 2.5 radii away.
+const near = { cx: 320, cy: 240, r: 200, D: 2.5 };
+const nearClicks = pins.map((pin) => { const p = E.toPicture(E.apply(Q, E.planetVector(pin.lat, pin.lon, false)), near); return { px: p.x, py: p.y, candidates: pins.filter((x) => x.name === pin.name) }; });
+check("close-camera picture points come back on the planet", nearClicks.every((c) => E.toSphere(c.px, c.py, near)));
+const nearSolve = E.solveMatching(nearClicks, { cx: 320, cy: 240, r: 200 });
+console.log(`     close camera: distance ${nearSolve && nearSolve.D.toFixed(2)}, fit ${(nearSolve.error * 180 / Math.PI).toFixed(2)}°`);
+check("works out the camera distance", nearSolve && Math.abs(nearSolve.D - 2.5) < 0.4);
+check("and the buildings fit", nearSolve && nearSolve.error < 0.01);
+const rt = E.toSphere(E.toPicture([0.3, 0.5, Math.sqrt(1 - 0.34)], near).x, E.toPicture([0.3, 0.5, Math.sqrt(1 - 0.34)], near).y, near);
+check("picture ↔ planet round trip (close camera)", rt && Math.abs(rt[0] - 0.3) < 1e-9 && Math.abs(rt[1] - 0.5) < 1e-9);
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);
