@@ -154,6 +154,11 @@
     const ref = mapRef();
     if (!ref || !frame || !facing) return;
     const near = E.alignToMap(E.samplePoints(frame.data.data, frame.w, frame.h, disc, 600), ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
+    if (near && near.score >= 0.55 && bareLegacy) {
+      // The older map fits this client's lock: it's this client's. Keep it under its name.
+      bareLegacy = false; storeBare();
+      const p = currentPlanet(); try { if (p) { localStorage.removeItem(legacyKey(p)); localStorage.removeItem(legacyKey(p) + "-mirrored"); } } catch {}
+    }
     if (near && near.score < 0.5) {
       forgetBare();
       say("scanStatus", "Your saved bare map didn't match this lock (recorded under an older one), so it was cleared: record the bare planet again.", "warn");
@@ -201,18 +206,24 @@
   const currentPlanet = () => planets.find((p) => String(p.planet_id) === $("planet").value) || null;
   // The bare planet's colours, kept on this PC per planet (only the scanner needs them).
   // v2: maps from before every picture was placed on the map slid while recording; not reused.
-  const bareKey = (p) => "piscan-bare3-" + p.planet_id;
-  let bareMirrored = false;
+  // Per planet AND per EVE client: each client's graphics settings draw the planet differently
+  // (Low settings turn lava into bright yellow blobs), so a map only fits the client that made it.
+  const bareKey = (p) => "piscan-bare3-" + p.planet_id + "@" + ($("client").value || "");
+  const legacyKey = (p) => "piscan-bare3-" + p.planet_id; // made before maps were per client: whose is unknown
+  let bareMirrored = false, bareLegacy = false;
   function loadBare(p) {
+    bareLegacy = false;
     if (!p) return null;
     try {
-      const text = localStorage.getItem(bareKey(p));
-      bareMirrored = localStorage.getItem(bareKey(p) + "-mirrored") === "1";
+      let key = bareKey(p), text = localStorage.getItem(key);
+      if (!text && localStorage.getItem(legacyKey(p))) { key = legacyKey(p); text = localStorage.getItem(key); bareLegacy = true; }
+      bareMirrored = localStorage.getItem(key + "-mirrored") === "1";
       return text ? E.bareFromBytes(Uint8Array.from(atob(text), (c) => c.charCodeAt(0))) : null;
     } catch (e) { return null; }
   }
   function forgetBare() {
-    const p = currentPlanet(); bare = null; refCache = null;
+    const p = currentPlanet(), legacy = bareLegacy; bare = null; refCache = null; bareLegacy = false;
+    if (legacy) return; // not this client's map: leave it for the client that made it
     try { if (p) { localStorage.removeItem(bareKey(p)); localStorage.removeItem(bareKey(p) + "-mirrored"); } } catch {}
   }
   function storeBare() {
@@ -220,6 +231,7 @@
     if (!p || !bare) return;
     const bytes = E.bareToBytes(bare);
     let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
+    if (bareLegacy) return; // someone else's (unknown) map: not saved under this client
     try { localStorage.setItem(bareKey(p), btoa(bin)); localStorage.setItem(bareKey(p) + "-mirrored", facing && facing.mirrored ? "1" : "0"); } catch (e) { /* kept for this visit */ }
   }
   /** Every colony on the planet as a layout to look for (buildings and heads). */
@@ -625,7 +637,7 @@
           }
         }
         // A bare map of this planet already recorded: no lock needed, find where the picture sits on it.
-        if (f && disc && !facing && bare && Date.now() - lastFind > 700) {
+        if (f && disc && !facing && bare && !bareLegacy && Date.now() - lastFind > 700) {
           lastFind = Date.now();
           const ref = mapRef();
           if (ref) {
@@ -635,7 +647,7 @@
               const r = E.alignToMap(E.samplePoints(f.data.data, f.w, f.h, disc, 600), ref.fine, bareMirrored, found, 1 * DEG, 0.5 * DEG) || found;
               facing = { Q: E.poseQ(r.yaw, r.pitch), mirrored: bareMirrored, misses: [], owners: [$("client").value] };
               focal = lensPx(); forgetTrack();
-              say("lockStatus", "Found on your bare planet map: no lock needed. Pick the resource EVE shows and press Scan.", "ok");
+              say("lockStatus", `Found on ${$("client").value}'s bare planet map: no lock needed. Pick the resource EVE shows and press Scan.`, "ok");
               updateButtons();
             } else say("lockStatus", "Looking for this view on your bare planet map… (zoomed all the way out, edge set)", "");
           }
