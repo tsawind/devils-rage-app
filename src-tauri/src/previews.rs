@@ -388,15 +388,21 @@ pub fn start_watch(app: AppHandle) {
             // preview comes back by itself when that client starts again.
             let open: std::collections::BTreeSet<String> = crate::clipboard::open_clients().into_iter().map(|(name, _)| name).collect();
             if !with_layout(&app, |layout| layout.edit) {
-                for (label, window) in app.webview_windows() {
-                    if !label.starts_with(PREFIX) {
-                        continue;
-                    }
-                    if let Some(name) = name_of_window(&window) {
-                        if !open.contains(&name) && !last_open.contains(&name) {
+                let gone: Vec<WebviewWindow> = app
+                    .webview_windows()
+                    .into_iter()
+                    .filter(|(label, _)| label.starts_with(PREFIX))
+                    .map(|(_, window)| window)
+                    .filter(|window| name_of_window(window).is_some_and(|name| !open.contains(&name) && !last_open.contains(&name)))
+                    .collect();
+                if !gone.is_empty() {
+                    // Windows are closed on the main thread: closing one from this watcher
+                    // thread left its frame on screen with a dead page inside.
+                    let _ = app.run_on_main_thread(move || {
+                        for window in gone {
                             let _ = window.destroy();
                         }
-                    }
+                    });
                 }
             }
             last_open = open.clone();
