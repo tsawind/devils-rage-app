@@ -70,7 +70,7 @@
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
-        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Zooming in EVE is fine afterwards: the circle follows (keep some of the rim in view).</div>
+        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Set your zoom in EVE first, then the edge, and don't zoom after that (if you do, set the edge again).</div>
         <div class="row"><button class="btn" id="fit">Find edge</button><button class="btn" id="rim3">Click 3 on the edge</button><span class="small muted" id="discInfo"></span></div>
       </div></div>
       <div class="step"><div class="n">3</div><div>
@@ -383,14 +383,6 @@
       if (!frozen && $("client").value) {
         const f = await grab().catch(() => null);
         if (f) frame = f;
-        // Follow a zoom in EVE: look for the rim near where it was.
-        if (f && disc && !rimMode && !facing) {
-          const rim = E.findRim(f.data.data, f.w, f.h, disc);
-          if (rim && (Math.abs(rim.r - disc.r) > disc.r * 0.015 || Math.hypot(rim.cx - disc.cx, rim.cy - disc.cy) > disc.r * 0.015)) {
-            disc = { cx: rim.cx, cy: rim.cy, r: rim.r };
-            updateButtons();
-          }
-        }
         if (f && running && facing && disc) {
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
           let ok = true;

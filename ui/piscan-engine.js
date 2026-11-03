@@ -179,16 +179,39 @@
   // A frame for tracking: the disc cropped and scaled to SIZE × SIZE grey values.
   const SIZE = 256;
 
+  // Each cell is the average of the screen pixels it covers, then softened once more: EVE draws
+  // fine diagonal stripes over the scan colours that stay put on screen while the planet turns,
+  // and a tracker that sees them follows the stripes instead of the planet.
   function greyDisc(rgba, width, height, disc) {
-    const out = new Float32Array(SIZE * SIZE);
+    const raw = new Float32Array(SIZE * SIZE);
     const scale = (2 * disc.r) / SIZE, x0 = disc.cx - disc.r, y0 = disc.cy - disc.r;
+    const span = Math.max(1, Math.round(scale));
     for (let j = 0; j < SIZE; j++) {
-      const y = Math.min(height - 1, Math.max(0, Math.round(y0 + (j + 0.5) * scale)));
+      const yStart = Math.floor(y0 + j * scale);
       for (let i = 0; i < SIZE; i++) {
-        const x = Math.min(width - 1, Math.max(0, Math.round(x0 + (i + 0.5) * scale)));
-        const k = (y * width + x) * 4;
-        out[j * SIZE + i] = 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2];
+        const xStart = Math.floor(x0 + i * scale);
+        let sum = 0, n = 0;
+        for (let dy = 0; dy < span; dy++) {
+          const y = Math.min(height - 1, Math.max(0, yStart + dy));
+          for (let dx = 0; dx < span; dx++) {
+            const x = Math.min(width - 1, Math.max(0, xStart + dx));
+            const k = (y * width + x) * 4;
+            sum += 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2];
+            n++;
+          }
+        }
+        raw[j * SIZE + i] = sum / n;
       }
+    }
+    const out = new Float32Array(SIZE * SIZE);
+    for (let j = 0; j < SIZE; j++) for (let i = 0; i < SIZE; i++) {
+      let sum = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const y = j + dy, x = i + dx;
+        if (y < 0 || x < 0 || y >= SIZE || x >= SIZE) continue;
+        sum += raw[y * SIZE + x]; n++;
+      }
+      out[j * SIZE + i] = sum / n;
     }
     return out;
   }

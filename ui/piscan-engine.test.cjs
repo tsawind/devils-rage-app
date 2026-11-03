@@ -14,6 +14,7 @@ function surface(p) {
   return [t, t * 0.95, t * 0.9];
 }
 const W = 640, H = 480, disc = { cx: 320, cy: 240, r: 200 };
+let STRIPES = false;
 function render(Q, mirrored) {
   const rgba = new Uint8ClampedArray(W * H * 4), Qt = E.transpose(Q);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -22,7 +23,9 @@ function render(Q, mirrored) {
     if (!v) continue;
     const ll = E.latLon(E.apply(Qt, v), mirrored);
     const c = surface(E.planetVector(ll.lat, ll.lon, false));
-    rgba[k] = c[0]; rgba[k + 1] = c[1]; rgba[k + 2] = c[2];
+    // EVE's scan overlay: fine diagonal stripes fixed on screen.
+    const stripe = STRIPES && ((x + y) % 6 < 2) ? 0.55 : 1;
+    rgba[k] = c[0] * stripe; rgba[k + 1] = c[1] * stripe; rgba[k + 2] = c[2] * stripe;
   }
   return rgba;
 }
@@ -117,6 +120,23 @@ const rim2 = E.findRim(frameRim, W, H, { cx: 320, cy: 240, r: 180 });
 check("follows a zoom from the last circle", rim2 && Math.abs(rim2.r - zoomed.r) < 4);
 const three = E.circleFrom3([520, 240], [320, 40], [120, 240]);
 check("three clicks on the rim make the circle", three && Math.abs(three.cx - 320) < 1e-6 && Math.abs(three.r - 200) < 1e-6);
+
+// With EVE's on-screen stripes over everything, a long turn still doesn't drift.
+STRIPES = true;
+{
+  let q2 = Q, truth2 = Q, grey2 = E.greyDisc(render(Q), W, H, disc);
+  for (let i = 0; i < 30; i++) {
+    const R = E.rotationAbout([Math.sin(i / 7), 1, 0.3 * Math.cos(i / 5)], 0.07);
+    truth2 = E.mul(R, truth2);
+    const g = E.greyDisc(render(truth2), W, H, disc), t = E.trackRotation(grey2, g);
+    if (t) q2 = E.mul(t.R, q2);
+    grey2 = g;
+  }
+  const drift2 = E.angle(E.apply(q2, [0, 0, 1]), E.apply(truth2, [0, 0, 1])) * 180 / Math.PI;
+  console.log(`     with on-screen stripes, after 30 frames: drift ${drift2.toFixed(2)}°`);
+  check("on-screen stripes don't make it drift", drift2 < 3);
+}
+STRIPES = false;
 
 // EVE's close camera: buildings clicked on a planet seen from 2.5 radii away.
 const near = { cx: 320, cy: 240, r: 200, D: 2.5 };
