@@ -399,6 +399,105 @@ pub fn profiles_copy(source: String, targets: Vec<String>, force: bool) -> Resul
     Ok(format!("Copied onto {} file{}. Backup first: “{backup}”.", to.len(), if to.len() == 1 { "" } else { "s" }))
 }
 
+/// Patch 68: one target of "set up a launch group": a character and the client profile it runs in.
+#[derive(Debug, Deserialize)]
+pub struct GroupTarget {
+    pub profile: String,
+    pub character_id: u64,
+}
+
+/// What to copy from the baseline: its character file (windows, overview, chat), its account
+/// file (keys, audio and graphics choices kept per account) and the profile's graphics / window /
+/// volume file (core_public__.yaml).
+#[derive(Debug, Deserialize)]
+pub struct CopyParts {
+    #[serde(default)]
+    pub character: bool,
+    #[serde(default)]
+    pub account: bool,
+    #[serde(default)]
+    pub graphics: bool,
+}
+
+/// The newest account file in a profile (the one the client wrote last).
+fn newest_user_file(dir: &Path) -> Option<PathBuf> {
+    entries_in(dir, settings_file).into_iter().find(|e| e.kind == Kind::User).map(|e| dir.join(e.file))
+}
+
+/// Patch 68: give a whole launch group one baseline character's settings. Character files are
+/// written for every target character (made if the character never logged in with that profile);
+/// account and graphics files go to every target profile. Backed up first.
+#[tauri::command]
+pub fn profiles_apply_group(baseline_profile: String, baseline_character: u64, targets: Vec<GroupTarget>, parts: CopyParts, force: bool) -> Result<String, String> {
+    let root = root()?;
+    if !safe_name(&baseline_profile) {
+        return Err("not a profile".into());
+    }
+    let base_dir = root.join(format!("settings_{baseline_profile}"));
+    let base_char = base_dir.join(format!("core_char_{baseline_character}.dat"));
+    let base_user = newest_user_file(&base_dir);
+    let base_public = base_dir.join("core_public__.yaml");
+    if parts.character && !base_char.is_file() {
+        return Err("The baseline character has no settings in its profile yet: log it in once, set it up, log out, then try again.".into());
+    }
+    if !(parts.character || parts.account || parts.graphics) {
+        return Err("Pick at least one kind of settings to copy.".into());
+    }
+    let mut char_targets: Vec<PathBuf> = Vec::new();
+    let mut profiles: Vec<PathBuf> = Vec::new();
+    for target in &targets {
+        if !safe_name(&target.profile) {
+            return Err(format!("{} isn't a profile name", target.profile));
+        }
+        let dir = root.join(format!("settings_{}", target.profile));
+        if !dir.is_dir() {
+            return Err(format!("settings_{} doesn't exist yet (make it under Make a profile, or set the profile in the EVE launcher and start that account once)", target.profile));
+        }
+        let file = dir.join(format!("core_char_{}.dat", target.character_id));
+        if file != base_char {
+            char_targets.push(file);
+        }
+        if dir != base_dir && !profiles.contains(&dir) {
+            profiles.push(dir);
+        }
+    }
+    if char_targets.is_empty() && profiles.is_empty() {
+        return Err("Nothing to copy onto: the group is only the baseline.".into());
+    }
+    refuse_while_open(force)?;
+    let backup = backup_all(&root, "")?;
+    let mut done: Vec<String> = Vec::new();
+    if parts.character {
+        let bytes = std::fs::read(&base_char).map_err(|e| e.to_string())?;
+        for path in &char_targets {
+            std::fs::write(path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+        done.push(format!("{} character{}", char_targets.len(), if char_targets.len() == 1 { "" } else { "s" }));
+    }
+    if parts.account {
+        if let Some(from) = &base_user {
+            let bytes = std::fs::read(from).map_err(|e| e.to_string())?;
+            let mut count = 0;
+            for dir in &profiles {
+                // Every account file in that profile (one per account that ever ran in it).
+                for entry in entries_in(dir, settings_file).into_iter().filter(|e| e.kind == Kind::User) {
+                    std::fs::write(dir.join(&entry.file), &bytes).map_err(|e| e.to_string())?;
+                    count += 1;
+                }
+            }
+            done.push(format!("{count} account file{}", if count == 1 { "" } else { "s" }));
+        }
+    }
+    if parts.graphics && base_public.is_file() {
+        let bytes = std::fs::read(&base_public).map_err(|e| e.to_string())?;
+        for dir in &profiles {
+            std::fs::write(dir.join("core_public__.yaml"), &bytes).map_err(|e| e.to_string())?;
+        }
+        done.push(format!("graphics / window / sound for {} profile{}", profiles.len(), if profiles.len() == 1 { "" } else { "s" }));
+    }
+    Ok(format!("Copied: {}. Backup first: “{backup}”.", done.join(", ")))
+}
+
 /// Make a new profile `settings_<name>` from an existing one (for an account or a launch group).
 #[tauri::command]
 pub fn profiles_clone(from: String, name: String) -> Result<String, String> {

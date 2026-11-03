@@ -62,7 +62,24 @@
   <div class="warn" id="openWarn" hidden></div>
   <div class="warn" id="noRoot" hidden></div>
 
-  <div class="card steps">
+  <div class="card steps" id="wizard">
+    <h2 style="margin: 0 0 4px">Set up a launch group</h2>
+    <div class="row"><b class="n">1</b> Launch group <select id="wGroup" style="min-width: 220px"></select>
+      <span class="muted">(make groups in Your accounts)</span></div>
+    <div class="row"><b class="n">2</b> Baseline character <select id="wBase" style="min-width: 220px"></select>
+      <span class="muted">set this one up in game the way you want everyone, log out, then copy</span></div>
+    <div class="row"><b class="n">3</b> Copy its
+      <label><input type="checkbox" id="wChar" checked> windows, overview &amp; chat</label>
+      <label><input type="checkbox" id="wUser" checked> keys &amp; shortcuts</label>
+      <label><input type="checkbox" id="wGfx" checked> graphics, window size &amp; sound</label></div>
+    <div class="who" id="wTargets"></div>
+    <div class="row"><b class="n">4</b>
+      <button class="btn red" id="wGo" disabled>Copy to the group (backs up first)</button></div>
+    <div class="status" id="wStatus"></div>
+  </div>
+
+  <details class="card" id="manual"><summary style="cursor: pointer">Copy one file by hand (advanced)</summary>
+  <div class="steps" style="margin-top: 10px">
     <div class="row"><b class="n">1</b> Copy from
       <select id="source" style="min-width: 360px"></select>
     </div>
@@ -77,6 +94,7 @@
     </div>
     <div class="status" id="status"></div>
   </div>
+  </details>
 
   <h2>Profiles</h2>
   <div class="grid" id="profiles"></div>
@@ -101,7 +119,7 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-  let scan = null, names = {}, groups = [], ticked = new Set(), accounts = [];
+  let scan = null, names = {}, groups = [], ticked = new Set(), accounts = [], seatGroups = [];
   // Patch 66: account "29" in Your accounts uses client profile settings_29.
   const accountFor = (p) => accounts.find(a => a.profile === p.name);
   const autoLabel = (p) => { const a = accountFor(p); return a ? `Account ${a.nickname} · ${a.characters.map(c => c.name).join(", ")}` : ""; };
@@ -116,14 +134,68 @@
     try { scan = await invoke("profiles_scan"); }
     catch (e) { $("noRoot").textContent = String(e); $("noRoot").hidden = false; return; }
     groups = await invoke("all_launch_groups").catch(() => []);
-    accounts = (await invoke("seat_launch_groups").catch(() => ({ accounts: [] }))).accounts || [];
+    const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [], groups: [] }));
+    accounts = seat.accounts || [];
+    seatGroups = (seat.groups || []).map(x => x.group);
     const ids = [...new Set([...scan.profiles.flatMap(p => p.chars.map(c => c.id)), ...scan.templates.filter(t => t.kind === "char").map(t => t.id)])];
     render();
     names = Object.assign(names, await invoke("profiles_names", { ids }).catch(() => ({})));
     render();
   }
 
+  // Patch 68: the launch-group wizard. Account "29" runs in settings_29.
+  const profileOfAccount = (nick) => accounts.find(a => a.nickname === nick)?.profile || null;
+  const profileExists = (prof) => !!scan.profiles.find(p => p.name === prof);
+  function wizard() {
+    const gsel = $("wGroup"), keep = gsel.value;
+    gsel.innerHTML = "";
+    if (!seatGroups.length) gsel.append(new Option("No launch groups yet: make them in Your accounts", ""));
+    seatGroups.forEach(g => gsel.append(new Option(`${g.name} (${g.members.length})`, String(g.id))));
+    if (keep) gsel.value = keep;
+    const g = seatGroups.find(x => String(x.id) === gsel.value) || seatGroups[0];
+    const bsel = $("wBase"), bkeep = bsel.value;
+    bsel.innerHTML = "";
+    const everyone = accounts.flatMap(a => a.characters.map(c => ({ ...c, account: a.nickname, profile: a.profile })));
+    const inGroup = new Set((g?.members || []).map(m => m.character_id));
+    const sorted = [...everyone].sort((x, y) => Number(inGroup.has(y.id)) - Number(inGroup.has(x.id)) || x.name.localeCompare(y.name));
+    sorted.forEach(c => bsel.append(new Option(`${c.name} · account ${c.account}${c.profile ? " · settings_" + c.profile : ""}`, `${c.profile}|${c.id}`)));
+    if (bkeep && [...bsel.options].some(o => o.value === bkeep)) bsel.value = bkeep;
+    const [baseProfile, baseId] = bsel.value.split("|");
+    const host = $("wTargets"); host.innerHTML = "";
+    let ok = 0;
+    (g?.members || []).forEach(m => {
+      const prof = profileOfAccount(m.account);
+      const row = el("label");
+      const fine = prof && profileExists(prof);
+      if (String(m.character_id) === baseId) { row.append(el("span", "src", "★ baseline"), el("span", null, " " + m.name)); }
+      else {
+        row.append(el("span", null, (fine ? "→ " : "⚠ ") + m.name));
+        if (fine) ok++;
+      }
+      row.append(el("span", "meta", prof ? (fine ? `settings_${prof}` : `settings_${prof} missing: start that account once`) : `account ${m.account} has no number`));
+      host.append(row);
+    });
+    $("wGo").disabled = !ok || !baseId || !baseProfile || baseProfile === "null";
+  }
+  $("wGroup").addEventListener("change", () => { $("wBase").value = ""; wizard(); });
+  $("wBase").addEventListener("change", wizard);
+  $("wGo").addEventListener("click", async () => {
+    const g = seatGroups.find(x => String(x.id) === $("wGroup").value);
+    const [baseProfile, baseId] = $("wBase").value.split("|");
+    const targets = (g?.members || [])
+      .map(m => ({ profile: profileOfAccount(m.account), character_id: m.character_id }))
+      .filter(t => t.profile && profileExists(t.profile) && String(t.character_id) !== baseId);
+    const parts = { character: $("wChar").checked, account: $("wUser").checked, graphics: $("wGfx").checked };
+    const say = (t, c) => { $("wStatus").textContent = t; $("wStatus").className = "status" + (c ? " " + c : ""); };
+    say("Backing up, then copying…");
+    try {
+      const msg = await withForce((force) => invoke("profiles_apply_group", { baselineProfile: baseProfile, baselineCharacter: Number(baseId), targets, parts, force }));
+      say(msg, "ok"); await load();
+    } catch (e) { say(String(e), "bad"); }
+  });
+
   function render() {
+    wizard();
     const open = scan.clientsOpen;
     $("openWarn").hidden = !open;
     $("openWarn").textContent = open ? `${open} EVE client${open === 1 ? " is" : "s are"} open. EVE rewrites its settings when a client closes, so close them before copying or restoring.` : "";
@@ -160,9 +232,13 @@
       label.title = autoLabel(p) ? "From Your accounts: " + autoLabel(p) + ". Type to name it yourself." : "";
       label.addEventListener("change", () => invoke("profiles_label", { profile: p.name, label: label.value }).then(() => { p.label = label.value; render(); }).catch(e => status(String(e), "bad")));
       const list = el("div", "who");
-      const entries = kind() === "user" ? p.users : p.chars;
-      if (!entries.length) list.append(el("span", "muted", kind() === "user" ? "No account files yet" : "No characters yet"));
-      entries.forEach(e => {
+      const all = kind() === "user" ? p.users : p.chars;
+      // The account's own characters first; old copies of other characters tucked away.
+      const own = new Set((accountFor(p)?.characters || []).map(c => c.id));
+      const entries = kind() === "user" || !own.size ? all : all.filter(e => own.has(e.id));
+      const others = kind() === "user" || !own.size ? [] : all.filter(e => !own.has(e.id));
+      if (!all.length) list.append(el("span", "muted", kind() === "user" ? "No account files yet" : "No characters yet"));
+      const rows = (list2) => list2.forEach(e => {
         const spec = `settings_${p.name}/${e.file}`;
         const row = el("label");
         const box = el("input"); box.type = "checkbox"; box.checked = ticked.has(spec); box.disabled = spec === src.value;
@@ -172,6 +248,22 @@
         row.append(el("span", "meta", when(e.modified)));
         list.append(row);
       });
+      rows(entries);
+      if (others.length) {
+        const more = el("details");
+        more.append(el("summary", "muted", `+${others.length} old file${others.length === 1 ? "" : "s"} of other characters`));
+        const inner = el("div", "who"); more.append(inner);
+        list.append(more);
+        // Render them inside the fold.
+        others.forEach(e => {
+          const spec = `settings_${p.name}/${e.file}`;
+          const row = el("label");
+          const box = el("input"); box.type = "checkbox"; box.checked = ticked.has(spec); box.disabled = spec === src.value;
+          box.addEventListener("change", () => { box.checked ? ticked.add(spec) : ticked.delete(spec); summary(); });
+          row.append(box, el("span", "muted", who(e)), el("span", "meta", when(e.modified)));
+          inner.append(row);
+        });
+      }
       card.append(h, label, list);
       host.append(card);
     });

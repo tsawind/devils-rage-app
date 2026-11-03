@@ -360,6 +360,7 @@ pub fn run() {
             profiles::profiles_restore,
             profiles::profiles_copy,
             profiles::profiles_clone,
+            profiles::profiles_apply_group,
             launch::pause_cycle_hotkeys,
             launch::resume_cycle_hotkeys,
             previews::active_client,
