@@ -256,6 +256,100 @@ pub fn all_groups(app: &AppHandle) -> Vec<Group> {
     out
 }
 
+/// Patch 66b: the app asks SeAT itself, signed in as you (the SeAT page's own cookies), instead
+/// of waiting for the Your accounts page to hand the groups over.
+fn seat_session(app: &AppHandle) -> Result<(String, Option<String>), String> {
+    let view = app.get_webview(crate::PAGES_VIEW).ok_or("the app's page view isn't open")?;
+    let url: tauri::Url = crate::SEAT_URL.parse().map_err(|e| format!("{e}"))?;
+    let cookies = view.cookies_for_url(url).map_err(|e| e.to_string())?;
+    if cookies.is_empty() {
+        return Err("not signed in to SeAT in the app yet: open SeAT or Your accounts once".into());
+    }
+    let header = cookies.iter().map(|c| format!("{}={}", c.name(), c.value())).collect::<Vec<_>>().join("; ");
+    // Laravel takes its XSRF-TOKEN cookie back as X-XSRF-TOKEN for anything that saves.
+    let xsrf = cookies.iter().find(|c| c.name() == "XSRF-TOKEN").map(|c| percent_decode(c.value()));
+    Ok((header, xsrf))
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+async fn fetch_seat(app: &AppHandle) -> Result<SeatData, String> {
+    let (cookies, _) = seat_session(app)?;
+    let response = reqwest::Client::new()
+        .get(format!("{}/devilsrage/launch-groups.json", crate::SEAT_URL))
+        .header("Accept", "application/json")
+        .header("Cookie", cookies)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("SeAT answered {} (sign in to SeAT in the app again?)", response.status()));
+    }
+    response.json::<SeatData>().await.map_err(|_| "SeAT didn't send launch groups (signed out? open Your accounts once)".to_string())
+}
+
+/// Read your accounts and launch groups from SeAT now.
+#[tauri::command]
+pub async fn seat_refresh(app: AppHandle) -> Result<String, String> {
+    let data = fetch_seat(&app).await?;
+    store_seat(&app, &data)?;
+    Ok(format!("{} accounts, {} launch groups from Your accounts.", data.accounts.len(), data.groups.len()))
+}
+
+/// Bring this PC's groups (e.g. from EVE-O Preview) into Your accounts, then read SeAT again.
+#[tauri::command]
+pub async fn seat_import_local(app: AppHandle) -> Result<String, String> {
+    let groups = local_for_import(&app);
+    if groups.is_empty() {
+        return Err("No groups on this PC to bring in.".into());
+    }
+    let (cookies, xsrf) = seat_session(&app)?;
+    let xsrf = xsrf.ok_or("SeAT's session cookie is missing: open Your accounts once, then try again")?;
+    let response = reqwest::Client::new()
+        .post(format!("{}/devilsrage/launch-groups/import", crate::SEAT_URL))
+        .header("Accept", "application/json")
+        .header("Cookie", cookies)
+        .header("X-XSRF-TOKEN", xsrf)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .header("Referer", format!("{}/devilsrage/your-accounts", crate::SEAT_URL))
+        .json(&serde_json::json!({ "groups": groups }))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("SeAT answered {}", response.status()));
+    }
+    let report: serde_json::Value = response.json().await.unwrap_or_default();
+    let data = fetch_seat(&app).await?;
+    store_seat(&app, &data)?;
+    retire_local(&app)?;
+    let missing = report["missing"].as_array().map(|m| m.len()).unwrap_or(0);
+    Ok(format!(
+        "Brought in: {} new group(s), {} character(s) ticked{}.",
+        report["made"].as_i64().unwrap_or(0),
+        report["ticked"].as_i64().unwrap_or(0),
+        if missing > 0 { format!(", {missing} not found in your accounts") } else { String::new() }
+    ))
+}
+
 /// SeAT's accounts and groups with this PC's settings for each, for the Launch groups page.
 #[tauri::command]
 pub fn seat_launch_groups(app: AppHandle) -> serde_json::Value {

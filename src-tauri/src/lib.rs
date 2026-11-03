@@ -349,6 +349,8 @@ pub fn run() {
             launch::launch_known_characters,
             launch::launch_status,
             launch::seat_launch_groups,
+            launch::seat_refresh,
+            launch::seat_import_local,
             launch::save_seat_group_prefs,
             launch::all_launch_groups,
             profiles::profiles_scan,

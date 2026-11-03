@@ -182,6 +182,17 @@ fn note_page(app: &AppHandle, url: &Url) {
             crate::scanner::announce(&app);
         });
     }
+    // Patch 66b: Your accounts opened (or changed something): read the launch groups again.
+    if host == crate::host_of(crate::SEAT_URL) && url.path().starts_with("/devilsrage/your-accounts") {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            match crate::launch::seat_refresh(app).await {
+                Ok(said) => log::info!("launch groups: {said}"),
+                Err(why) => log::warn!("launch groups from SeAT: {why}"),
+            }
+        });
+    }
     if !worth_remembering(url) {
         return;
     }

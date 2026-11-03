@@ -46,6 +46,7 @@ fn reply(status: StatusCode, body: Vec<u8>, origin: &str) -> Response<Vec<u8>> {
 pub fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let origin = request.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     if !allowed(&origin) {
+        log::warn!("launch sync from {origin:?} refused (only our SeAT may)");
         return reply(StatusCode::FORBIDDEN, b"{\"error\":\"not for this page\"}".to_vec(), "");
     }
     let method = request.method().clone();
@@ -54,6 +55,7 @@ pub fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     }
     let uri = request.uri().to_string();
     let path = Url::parse(&uri).map(|u| u.path().to_string()).unwrap_or(uri);
+    log::info!("SeAT page → app: {} {path} ({} bytes)", method.as_str(), request.body().len());
     match (method.as_str(), path.as_str()) {
         ("POST", "/launch-sync") => {
             let body = request.body();

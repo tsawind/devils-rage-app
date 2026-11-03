@@ -84,12 +84,12 @@
 
   <p class="legend">Bright = open now · dim = not running · <i>green ring</i> = the client in front</p>
 
-  <h2 class="sec">From Your accounts <span class="muted" id="seatWhen"></span><span class="grow"></span><button class="btn small" id="editSeat">Edit in Your accounts</button></h2>
+  <h2 class="sec">From Your accounts <span class="muted" id="seatWhen"></span><span class="grow"></span><button class="btn small" id="refreshSeat">↻ Refresh</button><button class="btn small" id="editSeat">Edit in Your accounts</button></h2>
   <div class="empty" id="seatEmpty" hidden>Open <b>Your accounts</b> once (top bar) and the app picks up your accounts and launch groups.
      Make groups there (tied to your accounts and characters); pedal keys and on/off switches stay on this PC.</div>
   <div id="seatGroups"></div>
 
-  <h2 class="sec">Only on this PC <span class="muted">e.g. imported from EVE-O Preview. Open Your accounts to bring them into SeAT.</span></h2>
+  <h2 class="sec">Only on this PC <span class="muted">e.g. imported from EVE-O Preview</span><span class="grow"></span><button class="btn small" id="importSeat">Bring these into Your accounts</button></h2>
   <div id="groups"></div>
   <div class="empty" id="empty" hidden>No groups yet. Add one below.</div>
 
@@ -205,6 +205,7 @@
     const host = document.getElementById("groups");
     host.innerHTML = "";
     document.getElementById("empty").hidden = groups.length > 0;
+    document.getElementById("importSeat").hidden = !groups.length;
     const names = Array.from(new Set([LOGIN, ...openClients, ...groups.flatMap(g => g.members)]));
 
     groups.forEach((g) => {
@@ -314,11 +315,24 @@
     groups.push({ id: uid(), name: "New group", members: [] });
     save(); render();
   });
+  async function refreshSeat(quiet) {
+    try { const said = await invoke("seat_refresh"); if (!quiet) status(said); }
+    catch (e) { if (!quiet || !seat.groups.length) status("Your accounts: " + e); }
+    seat = await invoke("seat_launch_groups").catch(() => seat);
+    render();
+  }
+  document.getElementById("refreshSeat").addEventListener("click", () => refreshSeat(false));
+  document.getElementById("importSeat").addEventListener("click", async () => {
+    status("Bringing them into Your accounts…");
+    try { status(await invoke("seat_import_local")); groups = await invoke("launch_groups").catch(() => []); }
+    catch (e) { status(String(e)); }
+    await refreshSeat(true);
+  });
   document.getElementById("editSeat").addEventListener("click", () => { location.href = (seat.seat || "https://seatdevilsrage.duckdns.org") + "/devilsrage/your-accounts"; });
   document.getElementById("home").addEventListener("click", () => { location.href = "index.html"; });
   document.getElementById("setPath").addEventListener("click", () => { location.href = "settings.html"; });
 
-  load();
+  load().then(() => refreshSeat(true));
 
   // Keep "open now" and "in front" live without redrawing while you're typing in a field.
   setInterval(async () => {
