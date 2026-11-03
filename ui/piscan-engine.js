@@ -175,6 +175,31 @@
     return mul(rotationAbout(axis, Math.atan2(s, dot(now, cam))), Q);
   }
 
+  /**
+   * Lock from ONE building. EVE's planet camera never rolls: the planet's axis always stands
+   * upright on screen (checked on a recording: within 0.6° over a 150° turn). So one building
+   * where it was clicked plus "north straight up" (or down) gives the whole facing.
+   */
+  function lockOne(anchor, disc, mirrored, up) {
+    const v = toSphere(anchor.px, anchor.py, disc);
+    if (!v) return null;
+    const a = planetVector(anchor.lat, anchor.lon, mirrored), n = [0, 0, 1];
+    // The pole on screen: p = (0, y, z), unit, at the same angle from v as the pole is from a.
+    const c = dot(a, n), r = Math.hypot(v[1], v[2]);
+    if (r < 1e-9 || Math.abs(c) > r) return null;
+    const phi = Math.atan2(v[2], v[1]), delta = Math.acos(c / r);
+    const options = [phi + delta, phi - delta].map((t) => [0, Math.cos(t), Math.sin(t)]);
+    // Upright: the pole's picture points up (or down) from the planet's middle.
+    const p = options.sort((m, k) => (up ? k[1] - m[1] : m[1] - k[1]))[0];
+    const frame = (x, y) => { const e2 = norm([y[0] - dot(y, x) * x[0], y[1] - dot(y, x) * x[1], y[2] - dot(y, x) * x[2]]); return [x, e2, cross(x, e2)]; };
+    const E1 = frame(a, n), F = frame(v, p);
+    const R = new Array(9).fill(0);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) R[i * 3 + j] += F[k][i] * E1[k][j];
+    return R;
+  }
+  /** Which way up the pole stands for a facing (true = north up on screen). */
+  function northUp(Q) { return apply(Q, [0, 0, 1])[1] >= 0; }
+
   // ---- tracking ----
   // A frame for tracking: the disc cropped and scaled to SIZE × SIZE grey values.
   const SIZE = 256;
@@ -774,6 +799,6 @@
   }
 
   const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
-    solveAnchors, solveAnchorsEitherWay, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
+    solveAnchors, solveAnchorsEitherWay, lockOne, northUp, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);

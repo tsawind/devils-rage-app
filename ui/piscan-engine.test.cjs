@@ -141,6 +141,25 @@ check("three clicks on the rim make the circle", three && Math.abs(three.cx - 32
   check("back near a kept picture: the facing comes back", t && E.angle(E.apply(t.R, [0.3, 0.4, 0.86]), E.apply(near, [0.3, 0.4, 0.86])) < 0.01);
 }
 
+// One building is enough when the camera doesn't roll (EVE keeps the planet's axis upright).
+{
+  const d3 = { cx: 320, cy: 240, r: 200, D: 3 };
+  let worst = 0, flips = 0;
+  for (const [tilt, spin, lat, lon] of [[-0.8, 0.4, 1.1, 0.5], [-1.2, 2.0, 0.7, 2.3], [-0.3, -1.0, 1.6, -0.9], [0.5, 3.0, 2.0, 2.9]]) {
+    const truthQ = E.mul(E.rotationAbout([1, 0, 0], tilt), E.rotationAbout([0, 0, 1], spin));
+    const pic = E.toPicture(E.apply(truthQ, E.planetVector(lat, lon, false)), d3);
+    if (!pic.front) continue;
+    const got = E.lockOne({ px: pic.x, py: pic.y, lat, lon }, d3, false, E.northUp(truthQ));
+    const err = got ? Math.max(E.angle(E.apply(got, [1, 0, 0]), E.apply(truthQ, [1, 0, 0])), E.angle(E.apply(got, [0, 0, 1]), E.apply(truthQ, [0, 0, 1]))) : 9;
+    worst = Math.max(worst, err);
+    const other = E.lockOne({ px: pic.x, py: pic.y, lat, lon }, d3, false, !E.northUp(truthQ));
+    if (other && E.angle(E.apply(other, [0, 0, 1]), E.apply(truthQ, [0, 0, 1])) > 0.05) flips++;
+  }
+  console.log(`     one building + upright pole: worst error ${(worst * 180 / Math.PI).toFixed(3)}°`);
+  check("one clicked building locks on when the pole stands upright", worst < 0.002);
+  check("the other way up gives a different facing (for Flip)", flips > 0);
+}
+
 // With EVE's on-screen stripes over everything, a long turn still doesn't drift.
 STRIPES = true;
 {

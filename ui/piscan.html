@@ -79,9 +79,10 @@
         <h3>Lock on</h3>
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
         <div class="status" id="autoStatus"></div>
-        <details style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
+        <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
+        <div class="small" style="margin-bottom: 4px"><b>Quickest:</b> whole planet in view and the edge set, <b>Freeze</b>, pick your <b>Command Center</b> below, click it on the picture, <b>Lock on</b>. One building is enough (EVE keeps the planet's axis upright).</div>
         <div class="muted small">Not your colony? Anyone's buildings work: in EVE right-click the planet → <b>Show other characters' networks</b>. <b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
-        <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button></div>
+        <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button><button class="btn" id="flip" hidden title="Locked from one building: if the green rings sit wrong, try the other way round">Flip</button></div>
         <label class="small muted"><input type="checkbox" id="othersPins"> Other people's buildings too</label>
         <div class="anchors" id="anchors"></div>
         </details>
@@ -262,7 +263,8 @@
     });
   }
   function updateButtons() {
-    $("lock").disabled = !(disc && anchors.length >= 2);
+    $("lock").disabled = !(disc && anchors.length >= 1);
+    $("flip").hidden = !(facing && facing.one);
     $("scan").disabled = !facing;
     $("scan").textContent = running ? "Pause" : "Scan";
     $("scan").classList.toggle("on", running);
@@ -422,6 +424,7 @@
   $("clearAnchors").addEventListener("click", () => { if (disc) disc = { cx: disc.cx, cy: disc.cy, r: disc.r }; anchors = []; facing = null; focal = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
   $("lock").addEventListener("click", () => {
     const groups = new Map(kinds().map((k) => [k.kind, k.items]));
+    if (anchors.length === 1) return lockFromOne(groups);
     const solved = E.solveMatching(anchors.map((a) => ({ px: a.px, py: a.py, candidates: groups.get(a.kind) || [] })), disc);
     if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
     facing = solved; forgetTrack(); frozen = false;
@@ -438,8 +441,39 @@
       updateButtons(); drawShot();
       return say("lockStatus", `Those buildings are too close together to tell which way the planet faces (${(solved.spread * 180 / Math.PI).toFixed(0)}° apart). Add some far away: "Any command center" on other colonies works well.`, "bad");
     }
+    if (anchors.length >= 3) savePole({ up: E.northUp(solved.Q), mirrored: solved.mirrored });
+    if (anchors.length >= 3 && focal) try { localStorage.setItem("piscan-focal", String(focal)); } catch {}
     say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings.` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
     updateButtons(); drawShot();
+  });
+
+  // One building is enough: EVE's planet camera never rolls, so the planet's axis always stands
+  // upright on screen. Which way up (and which way longitude counts) is remembered once known;
+  // Flip tries the other ways if the green rings sit wrong.
+  const POLE_WAYS = [{ up: true, mirrored: false }, { up: false, mirrored: false }, { up: true, mirrored: true }, { up: false, mirrored: true }];
+  function loadPole() { try { return JSON.parse(localStorage.getItem("piscan-pole")) || POLE_WAYS[0]; } catch { return POLE_WAYS[0]; } }
+  function savePole(way) { try { localStorage.setItem("piscan-pole", JSON.stringify(way)); } catch {} }
+  function lockFromOne(groups, way) {
+    const a = anchors[0], items = groups.get(a.kind) || [];
+    if (items.length !== 1) return say("lockStatus", `There are ${items.length} of "${a.kind}": for a one-click lock pick one that's only there once (your own command center), or click a second building.`, "warn");
+    way = way || loadPole();
+    const Q = E.lockOne({ px: a.px, py: a.py, lat: items[0].lat, lon: items[0].lon }, disc, way.mirrored, way.up);
+    if (!Q) return say("lockStatus", "Couldn't lock from that click: is it inside the circle?", "bad");
+    // EVE's lens is the same at every zoom: use what an earlier lock measured, else a usual value.
+    let lens = null; try { lens = Number(localStorage.getItem("piscan-focal")) || null; } catch {}
+    disc = { ...disc, D: lens ? Math.sqrt((lens / disc.r) ** 2 + 1) : (isFinite(disc.D) ? disc.D : 3) };
+    facing = { Q, mirrored: way.mirrored, misses: [], owners: [items[0].owner].filter(Boolean), one: { groups, way } };
+    focal = disc.r * Math.sqrt(disc.D * disc.D - 1);
+    forgetTrack(); frozen = false; say("autoStatus", "");
+    say("lockStatus", "Locked on from one building. Click your command center in EVE so its network shows: the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
+    updateButtons(); drawShot();
+  }
+  $("flip").addEventListener("click", () => {
+    if (!facing || !facing.one) return;
+    const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);
+    const next = POLE_WAYS[(at + 1) % POLE_WAYS.length];
+    savePole(next);
+    lockFromOne(facing.one.groups, next);
   });
 
   // ---------- scanning ----------
@@ -468,8 +502,12 @@
   }
   function autoStep(f) {
     const now = Date.now();
-    const cols = colonies();
-    if (!cols.length) return say("autoStatus", "No corp buildings known on this planet: point out buildings yourself, or pick another planet.", "warn");
+    // Only the colony of the character in this EVE client: other people's buildings (and all of
+    // their extractor heads) aren't drawn unless you click their command center, so matching
+    // against them only finds look-alikes in lava specks.
+    const me = $("client").value;
+    const cols = colonies().filter((c) => c.owner === me || ($("othersPins") && $("othersPins").checked));
+    if (!cols.length) return say("autoStatus", `${me || "This character"} has no colony on this planet: point out a building yourself (Other people's buildings too), or pick another planet.`, "warn");
     if (facing) {
       // Locked: every few frames, pull back onto any network in view (no drift).
       if (ticks % 3) return;
