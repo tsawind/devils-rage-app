@@ -734,7 +734,10 @@
           if (ref) {
             const pts = E.samplePoints(f.data.data, f.w, f.h, disc, 600);
             const near = E.alignToMap(pts, ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
-            if (near && near.score >= 0.55) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; mapMisses = 0; }
+            // With a resource showing, EVE's colours weaken the match: a lower bar, and never a reason to drop the map.
+            const bareNow = $("resource").value === BARE, enough = bareNow ? 0.55 : 0.35;
+            if (near && near.score >= enough) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; mapMisses = 0; }
+            else if (near && tracked && !bareNow) { /* keep the tracked guess; the next picture is placed again */ }
             else if (near && tracked) {
               // Tracking is fine but the saved map disagrees: the map is what's wrong (recorded
               // under an older, wrong lock). Never jump to it; after a few such pictures, drop it.
