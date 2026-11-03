@@ -108,6 +108,20 @@ fn worth_remembering(url: &Url) -> bool {
     {
         return false;
     }
+    // SeAT addresses that only take a form (ticking a launch group, saving an order…): the page
+    // moves on at once, but reopening one later is a GET and shows "405 Method Not Allowed".
+    if url.host_str() == Some(crate::host_of(crate::SEAT_URL)) {
+        let posts_only = path.starts_with("/devilsrage/account-characters/")
+            || path.starts_with("/devilsrage/launch-groups")
+            || path.starts_with("/devilsrage/accounts/")
+            || path.ends_with(".json")
+            || ["/delete", "/order", "/groups", "/corp-group", "/share", "/view-mode", "/import", "/move", "/remove", "/name", "/fits"]
+                .iter()
+                .any(|end| path.ends_with(end));
+        if posts_only {
+            return false;
+        }
+    }
     ![
         "login", "logout", "callback", "auth", "sso", "register", "password",
     ]
@@ -181,4 +195,24 @@ fn note_page(app: &AppHandle, url: &Url) {
         return;
     }
     let _ = settings::save(app, &s);
+}
+
+#[cfg(test)]
+mod remember_tests {
+    use super::*;
+
+    fn seat(path: &str) -> bool {
+        worth_remembering(&Url::parse(&format!("{}{path}", crate::SEAT_URL)).unwrap())
+    }
+
+    #[test]
+    fn seat_pages_are_remembered_but_form_addresses_are_not() {
+        assert!(seat("/devilsrage/accounts"));
+        assert!(seat("/devilsrage/spfarm"));
+        assert!(!seat("/devilsrage/account-characters/12/groups"));
+        assert!(!seat("/devilsrage/launch-groups/corp"));
+        assert!(!seat("/devilsrage/launch-groups.json"));
+        assert!(!seat("/devilsrage/accounts/order"));
+        assert!(!seat("/devilsrage/your-accounts"));
+    }
 }
