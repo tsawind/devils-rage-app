@@ -685,6 +685,17 @@ pub fn close_previews(app: AppHandle) {
         .map(|(_, w)| w)
         .collect();
     destroy_all(&app, all);
+    // A preview whose page died (e.g. Windows ran out of memory) is still a window but no
+    // longer a webview window: close those by their window too.
+    let frames: Vec<tauri::Window> = app.windows().into_iter().filter(|(label, _)| label.starts_with(PREFIX)).map(|(_, w)| w).collect();
+    if !frames.is_empty() {
+        let _ = app.run_on_main_thread(move || {
+            for frame in frames {
+                let _ = frame.hide();
+                let _ = frame.destroy();
+            }
+        });
+    }
 }
 
 /// Set by Close previews, cleared by Open previews: stops new clients opening previews meanwhile.

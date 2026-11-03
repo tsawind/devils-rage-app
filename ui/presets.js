@@ -17,6 +17,9 @@ window.DR_PRESETS = [
     { id: "background", name: "Background (PI, industry, market)", why: "Lightest graphics, quiet but not silent: alarms still come through.",
       values: { masterVolume: 0.35, worldVolume: 0.3, uiGain: 0.6, evevoiceGain: 0.6, ...QUIET_MUSIC, ...LOW },
       prefs: {} },
+    { id: "redeem", name: "Daily redeem (lots of alts at once)", why: "Lowest everything and nearly silent: for logging a big batch in to claim the daily and log out. Smallest font, no crash-report uploads.",
+      values: { masterVolume: 0.1, worldVolume: 0.2, uiGain: 0.4, evevoiceGain: 0.3, ...QUIET_MUSIC, ...LOW, brightness: 1, clientFontSize: 0 },
+      prefs: { breakpadUpload: false } },
     { id: "sound", name: "Just kill the music", why: "Changes only music, combat music and turret noise; leaves everything else.",
       values: { ...QUIET_MUSIC }, prefs: {} },
   ];
