@@ -191,7 +191,11 @@
   function kinds() {
     const by = new Map();
     anchorList().forEach((a) => { if (!by.has(a.kind)) by.set(a.kind, []); by.get(a.kind).push(a); });
-    return [...by.entries()].map(([kind, items]) => ({ kind, items })).sort((a, b) => a.items.length - b.items.length || a.kind.localeCompare(b.kind));
+    const list = [...by.entries()].map(([kind, items]) => ({ kind, items })).sort((a, b) => a.items.length - b.items.length || a.kind.localeCompare(b.kind));
+    // Every colony's command center, whoever's it is: EVE shows them all, and they're spread out.
+    const centers = anchorList().filter((a) => /Command Center$/.test(a.kind));
+    if (centers.length > 1) list.unshift({ kind: "Any command center", items: centers });
+    return list;
   }
   function renderAnchors() {
     const host = $("anchors"); host.innerHTML = "";
@@ -359,6 +363,11 @@
     const miss = solved.error * 180 / Math.PI;
     const kind = miss < 1.5 ? "ok" : miss < 4 ? "warn" : "bad";
     const worst = solved.misses.indexOf(Math.max(...solved.misses));
+    if (solved.spread < 0.15) {
+      facing = null; disc = { cx: disc.cx, cy: disc.cy, r: disc.r };
+      updateButtons(); drawShot();
+      return say("lockStatus", `Those buildings are too close together to tell which way the planet faces (${(solved.spread * 180 / Math.PI).toFixed(0)}° apart). Add some far away: "Any command center" on other colonies works well.`, "bad");
+    }
     say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings. The circle is locked now: don't zoom in EVE while scanning (Clear to start over).` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
     updateButtons(); drawShot();
   });

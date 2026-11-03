@@ -196,7 +196,8 @@
           for (let dx = 0; dx < span; dx++) {
             const x = Math.min(width - 1, Math.max(0, xStart + dx));
             const k = (y * width + x) * 4;
-            sum += 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2];
+            // Brightness plus colour: EVE's scan colours (blue → green → yellow → red) give plain planets something to grip.
+            sum += 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2] + 0.5 * (rgba[k] - rgba[k + 2]) + 0.25 * (rgba[k + 1] - (rgba[k] + rgba[k + 2]) / 2);
             n++;
           }
         }
@@ -481,7 +482,11 @@
         }
         const misses = usable.map((c, i) => (matched[i] ? angle(apply(Q, planetVector(matched[i].lat, matched[i].lon, mirrored)), c.cam) : Math.PI));
         const error = misses.reduce((a, b) => a + b, 0) / misses.length;
-        if (!best || error < best.error - 1e-9) best = { Q, mirrored, error, matched: matched.map((m) => (m ? m.key : null)), misses };
+        let spread = 0;
+        for (let a = 0; a < matched.length; a++) for (let b = a + 1; b < matched.length; b++) {
+          if (matched[a] && matched[b]) spread = Math.max(spread, angle(planetVector(matched[a].lat, matched[a].lon, mirrored), planetVector(matched[b].lat, matched[b].lon, mirrored)));
+        }
+        if (!best || error < best.error - 1e-9) best = { Q, mirrored, error, matched: matched.map((m) => (m ? m.key : null)), misses, spread };
       }
     }
     return best;
