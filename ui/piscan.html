@@ -77,11 +77,10 @@
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
-        <div class="small" style="margin-bottom: 6px"><b>Easiest:</b> in EVE double-click the planet (your command center jumps to the middle), then <button class="btn red" id="homeLock">Lock on: double-clicked</button> Then zoom all the way out in EVE and press <b>Find edge</b>.</div>
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
         <div class="status" id="autoStatus"></div>
         <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
-        <div class="small" style="margin-bottom: 4px"><b>Quickest:</b> whole planet in view and the edge set, <b>Freeze</b>, pick your <b>Command Center</b> below, click it on the picture, <b>Lock on</b>. One building is enough (EVE keeps the planet's axis upright).</div>
+        <div class="small" style="margin-bottom: 4px"><b>Quickest:</b> zoomed all the way out with the edge set, click your command center in EVE so its network shows (it sits on the dotted line between your extractor hubs). <b>Freeze</b>, pick your <b>Command Center</b> below, click it on the picture, <b>Lock on</b>. Rings on the wrong side? <b>Flip</b> (it remembers).</div>
         <div class="muted small">Not your colony? Anyone's buildings work: in EVE right-click the planet → <b>Show other characters' networks</b>. <b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
         <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button><button class="btn" id="flip" hidden title="Locked from one building: if the green rings sit wrong, try the other way round">Flip</button></div>
         <label class="small muted"><input type="checkbox" id="othersPins"> Other people's buildings too</label>
@@ -387,8 +386,7 @@
     if (!c || c.r < 40) { say("lockStatus", "That's too close to the middle: click on the planet's edge.", "bad"); return; }
     if (facing && !focal) {
       // Locked in the double-click view (no edge there): the lens comes from an earlier lock, else a usual value.
-      let lens = null; try { lens = Number(localStorage.getItem("piscan-focal")) || null; } catch {}
-      focal = lens || c.r * Math.sqrt(3 * 3 - 1);
+      focal = lensPx();
     }
     if (facing && focal) {
       facing.needEdge = false;
@@ -464,7 +462,6 @@
       return say("lockStatus", `Those buildings are too close together to tell which way the planet faces (${(solved.spread * 180 / Math.PI).toFixed(0)}° apart). Add some far away: "Any command center" on other colonies works well.`, "bad");
     }
     if (anchors.length >= 3) savePole({ up: E.northUp(solved.Q), mirrored: solved.mirrored });
-    if (anchors.length >= 3 && focal) try { localStorage.setItem("piscan-focal", String(focal)); } catch {}
     say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings.` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
     updateButtons(); drawShot();
   });
@@ -473,6 +470,10 @@
   // upright on screen. Which way up (and which way longitude counts) is remembered once known;
   // Flip tries the other ways if the green rings sit wrong.
   const POLE_WAYS = [{ up: true, mirrored: false }, { up: false, mirrored: false }, { up: true, mirrored: true }, { up: false, mirrored: true }];
+  // EVE's lens, measured on two recordings (tracking fits best there): focal length 829 px in a
+  // 1280-px-wide picture, the same at every zoom. The distance follows from the planet's size.
+  const LENS_AT_1280 = 829;
+  function lensPx() { return LENS_AT_1280 * (shot.width || 1280) / 1280; }
   function loadPole() { try { return JSON.parse(localStorage.getItem("piscan-pole")) || POLE_WAYS[0]; } catch { return POLE_WAYS[0]; } }
   function savePole(way) { try { localStorage.setItem("piscan-pole", JSON.stringify(way)); } catch {} }
   function lockFromOne(groups, way) {
@@ -482,45 +483,18 @@
     const Q = E.lockOne({ px: a.px, py: a.py, lat: items[0].lat, lon: items[0].lon }, disc, way.mirrored, way.up);
     if (!Q) return say("lockStatus", "Couldn't lock from that click: is it inside the circle?", "bad");
     // EVE's lens is the same at every zoom: use what an earlier lock measured, else a usual value.
-    let lens = null; try { lens = Number(localStorage.getItem("piscan-focal")) || null; } catch {}
-    disc = { ...disc, D: lens ? Math.sqrt((lens / disc.r) ** 2 + 1) : (isFinite(disc.D) ? disc.D : 3) };
+    disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
     facing = { Q, mirrored: way.mirrored, misses: [], owners: [items[0].owner].filter(Boolean), one: { groups, way } };
     focal = disc.r * Math.sqrt(disc.D * disc.D - 1);
     forgetTrack(); frozen = false; say("autoStatus", "");
     say("lockStatus", "Locked on from one building. Click your command center in EVE so its network shows: the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
     updateButtons(); drawShot();
   }
-  // EVE's double-click (and first-open) view: your command center dead centre. No clicks, no edge needed yet.
-  function lockHome(way) {
-    const me = $("client").value;
-    const cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
-    if (!cc) return say("lockStatus", `${me || "This character"} has no command center on this planet: point out a building instead.`, "warn");
-    if (!frame) return say("lockStatus", "No picture from that client yet.", "warn");
-    way = way || loadPole();
-    const centre = { cx: frame.w / 2, cy: frame.h / 2, r: Math.min(frame.w, frame.h) / 3, D: 3 };
-    const Q = E.lockOne({ px: centre.cx, py: centre.cy, lat: cc.lat, lon: cc.lon }, centre, way.mirrored, way.up);
-    if (!Q) return say("lockStatus", "Couldn't lock from the middle of the picture.", "bad");
-    facing = { Q, mirrored: way.mirrored, misses: [], owners: [me], one: { home: true, way }, needEdge: true };
-    focal = null; forgetTrack(); frozen = false; say("autoStatus", "");
-    disc = centre;
-    say("lockStatus", "Locked on with your command center in the middle. Now zoom all the way out in EVE (whole planet in view) and press Find edge or Click the edge: it keeps the lock. Click the command center in EVE so its network shows: green rings should sit on your buildings, else press Flip.", "ok");
-    updateButtons(); drawShot();
-  }
-  $("homeLock").addEventListener("click", () => lockHome());
   $("flip").addEventListener("click", () => {
     if (!facing || !facing.one) return;
     const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);
     const next = POLE_WAYS[(at + 1) % POLE_WAYS.length];
     savePole(next);
-    if (facing.one.home) {
-      // Turn the same way the new way would have from the double-click view: re-solve at the current facing's CC spot.
-      const me = $("client").value, cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
-      const at2 = cc && disc ? E.toPicture(E.apply(facing.Q, E.planetVector(cc.lat, cc.lon, facing.mirrored)), disc) : null;
-      if (!at2 || !at2.front) return say("lockStatus", "Flip needs your command center in view: double-click the planet in EVE and press Lock on: double-clicked again.", "warn");
-      const Q = E.lockOne({ px: at2.x, py: at2.y, lat: cc.lat, lon: cc.lon }, disc, next.mirrored, next.up);
-      if (Q) { facing = { ...facing, Q, mirrored: next.mirrored, one: { home: true, way: next } }; forgetTrack(); drawShot(); say("lockStatus", "Flipped. Green rings on your buildings? Then scan.", "ok"); }
-      return;
-    }
     lockFromOne(facing.one.groups, next);
   });
 
