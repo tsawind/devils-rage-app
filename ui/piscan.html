@@ -423,7 +423,12 @@
       const cam = E.toSphere(p.x, p.y, disc);
       let best = null, miss = Infinity;
       group.items.forEach((a) => { const m = E.angle(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), cam); if (m < miss) { miss = m; best = a; } });
-      if (best) { facing.Q = E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored); prevGrey = null; lastStep = null; lost = null; lostRun = 0; }
+      if (best) {
+        // A building that's only there once: lock again from it with north kept straight up (EVE never rolls). Otherwise nudge.
+        const upright = group.items.length === 1 && E.lockOne({ px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored, E.northUp(facing.Q));
+        facing.Q = upright || E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored);
+        prevGrey = null; lastStep = null; lost = null; lostRun = 0;
+      }
       say("scanStatus", `Pulled back onto a ${selected.toLowerCase()}.`, "ok");
     } else {
       if (anchors.filter((x) => x.kind === selected).length >= group.items.length) return say("lockStatus", `There ${group.items.length === 1 ? "is only one" : "are only " + group.items.length} ${selected.toLowerCase()}: pick another kind.`, "warn");
