@@ -96,7 +96,14 @@ pub struct Layout {
     /// edges within a few pixels of another preview's line up with it.
     #[serde(default = "ten")]
     pub snap: u32,
+    /// Previews for clients still at the login / character-select screen (off: a big batch of
+    /// alts at character select would otherwise each get a live window).
+    #[serde(default)]
+    pub login_previews: bool,
 }
+
+/// At most this many previews open by themselves (more can still be opened by hand).
+const AUTO_MAX: usize = 16;
 
 fn ten() -> u32 {
     10
@@ -111,6 +118,7 @@ impl Default for Layout {
             auto_open: true,
             hide_active: false,
             snap: 10,
+            login_previews: false,
         }
     }
 }
@@ -261,10 +269,12 @@ pub fn open_previews(app: AppHandle) -> Result<usize, String> {
         return Err("No EVE clients are open.".to_string());
     }
     let edit = edit_mode(&app);
+    let logins = with_layout(&app, |layout| layout.login_previews);
     let wanted: Vec<String> = clients
         .into_iter()
         .map(|(name, _)| name)
         .filter(|name| edit || prefs_for(&app, name).enabled)
+        .filter(|name| logins || !crate::clipboard::is_login_label(name))
         .collect();
     let count = wanted.len();
     for name in &wanted {
@@ -434,6 +444,31 @@ pub fn set_previews_hide_active(app: AppHandle, on: bool) {
     }
 }
 
+/// On / off: previews for clients at the login / character-select screen.
+#[tauri::command]
+pub fn set_previews_logins(app: AppHandle, on: bool) {
+    with_layout(&app, |layout| layout.login_previews = on);
+    save_soon(&app);
+    if !on {
+        let gone: Vec<WebviewWindow> = app
+            .webview_windows()
+            .into_iter()
+            .filter(|(l, _)| l.starts_with(PREFIX))
+            .map(|(_, w)| w)
+            .filter(|w| name_of_window(w).is_some_and(|n| crate::clipboard::is_login_label(&n)))
+            .collect();
+        destroy_all(&app, gone);
+    }
+}
+
+/// How often each preview should ask for a picture: twice a second with a few previews,
+/// slower as there are more (the total stays around 16 pictures a second).
+#[tauri::command]
+pub fn preview_interval(app: AppHandle) -> u64 {
+    let open = app.webview_windows().keys().filter(|l| l.starts_with(PREFIX)).count() as u64;
+    (open * 1000 / 16).clamp(500, 3000)
+}
+
 /// The snap grid in pixels (0 = off).
 #[tauri::command]
 pub fn set_previews_snap(app: AppHandle, grid: u32) {
@@ -548,7 +583,7 @@ pub fn start_watch(app: AppHandle) {
             // Every 2 s: new clients get their previews.
             if tick % 25 == 0 {
                 let new_names: Vec<String> = open.iter().filter(|name| !known.contains(*name)).cloned().collect();
-                let fresh = !new_names.is_empty();
+                let fresh = new_names.iter().any(|n| !crate::clipboard::is_login_label(n));
                 known = open;
                 if fresh {
                     let app = app.clone();
@@ -564,10 +599,13 @@ pub fn start_watch(app: AppHandle) {
                 {
                     let app = app.clone();
                     // Give a new client a moment to draw something before its preview opens.
-                    tauri::async_runtime::spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        let _ = open_previews(app);
-                    });
+                    let open_now = app.webview_windows().keys().filter(|l| l.starts_with(PREFIX)).count();
+                    if open_now < AUTO_MAX {
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                            let _ = open_previews(app);
+                        });
+                    }
                 }
             }
         }

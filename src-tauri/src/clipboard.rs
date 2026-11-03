@@ -351,8 +351,35 @@ pub fn login_label(index: usize) -> String {
 /// character-select screen as "Login 1", "Login 2", … (in a steady order while they stay open).
 pub fn open_clients() -> Vec<(String, isize)> {
     let mut all = open_eve_windows();
-    all.extend(open_login_windows().into_iter().enumerate().map(|(i, handle)| (login_label(i), handle)));
+    let logins = open_login_windows();
+    let numbers = login_numbers(&logins);
+    all.extend(logins.into_iter().zip(numbers).map(|(handle, n)| (login_label(n), handle)));
     all
+}
+
+/// Each login-screen window keeps its number while it's open (others logging in or closing
+/// don't renumber it); a new one takes the lowest free number.
+static LOGIN_NUMBERS: Mutex<Vec<(isize, usize)>> = Mutex::new(Vec::new());
+
+fn login_numbers(handles: &[isize]) -> Vec<usize> {
+    let mut known = LOGIN_NUMBERS.lock().unwrap();
+    known.retain(|(handle, _)| handles.contains(handle));
+    handles
+        .iter()
+        .map(|handle| {
+            if let Some((_, n)) = known.iter().find(|(h, _)| h == handle) {
+                return *n;
+            }
+            let n = (0..).find(|n| !known.iter().any(|(_, used)| used == n)).unwrap_or(0);
+            known.push((*handle, n));
+            n
+        })
+        .collect()
+}
+
+/// Whether a client name is a login screen ("Login 3").
+pub fn is_login_label(name: &str) -> bool {
+    name.strip_prefix("Login ").is_some_and(|n| n.parse::<usize>().is_ok())
 }
 
 /// The EVE client in front right now (a character, or "Login N"), if an EVE window is in front.
@@ -406,6 +433,17 @@ mod tests {
         assert_eq!(structure_lines("anyone seen the Fortizar?"), 0);
         assert_eq!(structure_lines(SCAN), 0);
         assert_eq!(structure_lines(""), 0);
+    }
+
+    #[test]
+    fn login_numbers_stay_put() {
+        assert_eq!(login_numbers(&[101, 102, 103]), vec![0, 1, 2]);
+        // 102 logged in: the others keep their numbers.
+        assert_eq!(login_numbers(&[101, 103]), vec![0, 2]);
+        // A new one takes the free number.
+        assert_eq!(login_numbers(&[101, 103, 104]), vec![0, 2, 1]);
+        assert!(is_login_label("Login 12") && !is_login_label("Login Screen Guy"));
+        login_numbers(&[]);
     }
 
     #[test]

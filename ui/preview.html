@@ -102,8 +102,11 @@
       // Give a minimized / closed client a moment before saying so.
       if (failures > 2) { msg.textContent = String(e || "no picture"); msg.hidden = false; }
     }
-    setTimeout(tick, 500);
+    // Fewer pictures a second each when many previews are open (asked every ~10 pictures).
+    if (++ticks % 10 === 1) wait = await invoke("preview_interval").catch(() => 500);
+    setTimeout(tick, wait);
   }
+  let ticks = 0, wait = 500;
   tick();
 
   // Click (without dragging) brings that client forward — not while arranging.
