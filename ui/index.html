@@ -41,7 +41,7 @@
   .motd { max-width: 478px; margin: 0 0 22px; padding: 10px 14px; border: 1px solid #5a2a14; border-radius: 10px;
           background: #1c120d; color: #f0c9a8; font-size: 14px; white-space: pre-wrap; text-align: center; }
   /* EVE client tools (coming): launch groups, multibox previews, client settings */
-  .tools { margin-top: 26px; display: grid; grid-template-columns: repeat(3, 286px); gap: 12px; }
+  .tools { margin-top: 26px; display: grid; grid-template-columns: repeat(2, 330px); gap: 12px; }
   @media (max-width: 960px) { .tools { grid-template-columns: repeat(1, 300px); } }
   .tools h2 { grid-column: 1 / -1; margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .8px;
               color: var(--muted); text-transform: uppercase; }
@@ -111,6 +111,10 @@
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
       <div><b>Client settings</b><span>Copy one client's settings to the others, profiles, backups</span></div>
     </button>
+    <button class="tool" data-tool="tuning">
+      <svg viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16"/><circle cx="5" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="7" r="2"/></svg>
+      <div><b>Client tuning<em>NEW</em></b><span>Sound, graphics and multibox presets, plus a setup guide</span></div>
+    </button>
   </div>
   <div class="plinks">
     <button id="pEdit" title="Arrange previews: drag, resize from the corner, choose shown / click-through / opacity per client. Done locks them.">Edit preview layout</button>
@@ -160,6 +164,7 @@
     btn.addEventListener("click", async () => {
       if (btn.dataset.tool === "launch") { location.href = "launch.html"; return; }
       if (btn.dataset.tool === "settings") { location.href = "profiles.html"; return; }
+      if (btn.dataset.tool === "tuning") { location.href = "tuning.html"; return; }
       if (btn.dataset.tool === "multibox") {
         soon.textContent = "Opening a preview for each EVE client…";
         try {

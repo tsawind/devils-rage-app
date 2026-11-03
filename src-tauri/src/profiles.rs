@@ -498,6 +498,64 @@ pub fn profiles_apply_group(baseline_profile: String, baseline_character: u64, t
     Ok(format!("Copied: {}. Backup first: “{backup}”.", done.join(", ")))
 }
 
+/// Patch 69: the tuning levers and each profile's current values (Client tuning page).
+#[tauri::command]
+pub fn tuning_read() -> Result<serde_json::Value, String> {
+    let root = root()?;
+    let mut profiles = serde_json::Map::new();
+    for entry in std::fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
+        let dir = entry.file_name().to_string_lossy().to_string();
+        let Some(name) = profile_of(&dir) else { continue };
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let yaml = std::fs::read_to_string(entry.path().join("core_public__.yaml")).unwrap_or_default();
+        let prefs = std::fs::read_to_string(entry.path().join("prefs.ini")).unwrap_or_default();
+        profiles.insert(name.to_string(), serde_json::json!({
+            "values": crate::tuning::read_values(&yaml),
+            "prefs": crate::tuning::read_prefs(&prefs),
+            "hasFile": !yaml.is_empty(),
+        }));
+    }
+    Ok(serde_json::json!({
+        "levers": crate::tuning::LEVERS,
+        "prefs": crate::tuning::PREFS.iter().map(|(k, l)| serde_json::json!({ "key": k, "label": l })).collect::<Vec<_>>(),
+        "profiles": profiles,
+        "clientsOpen": clients_open(),
+    }))
+}
+
+/// Patch 69: set levers (and prefs.ini switches) on these profiles. Backed up first.
+#[tauri::command]
+pub fn tuning_apply(profiles: Vec<String>, values: BTreeMap<String, serde_json::Value>, prefs: BTreeMap<String, bool>, force: bool) -> Result<String, String> {
+    let root = root()?;
+    if profiles.is_empty() {
+        return Err("Pick at least one client profile.".into());
+    }
+    if values.is_empty() && prefs.is_empty() {
+        return Err("Nothing to change: switch on at least one setting.".into());
+    }
+    let mut dirs = Vec::new();
+    for name in &profiles {
+        if !safe_name(name) {
+            return Err(format!("{name} isn't a profile"));
+        }
+        let dir = root.join(format!("settings_{name}"));
+        if !dir.is_dir() {
+            return Err(format!("settings_{name} doesn't exist"));
+        }
+        dirs.push(dir);
+    }
+    refuse_while_open(force)?;
+    let backup = backup_all(&root, " before tuning")?;
+    let stamp = crate::tuning::file_time_now();
+    let mut changed = 0;
+    for dir in &dirs {
+        changed += crate::tuning::apply_to(dir, &values, &prefs, stamp)?;
+    }
+    Ok(format!("{changed} setting{} changed on {} profile{}. Backup first: “{backup}”.", if changed == 1 { "" } else { "s" }, dirs.len(), if dirs.len() == 1 { "" } else { "s" }))
+}
+
 /// Make a new profile `settings_<name>` from an existing one (for an account or a launch group).
 #[tauri::command]
 pub fn profiles_clone(from: String, name: String) -> Result<String, String> {

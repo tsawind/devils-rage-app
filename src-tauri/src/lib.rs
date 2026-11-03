@@ -24,6 +24,7 @@ mod profiles;
 mod scanner;
 mod seatsync;
 mod settings;
+mod tuning;
 #[cfg(desktop)]
 mod updates;
 
@@ -361,6 +362,8 @@ pub fn run() {
             profiles::profiles_copy,
             profiles::profiles_clone,
             profiles::profiles_apply_group,
+            profiles::tuning_read,
+            profiles::tuning_apply,
             launch::pause_cycle_hotkeys,
             launch::resume_cycle_hotkeys,
             previews::active_client,

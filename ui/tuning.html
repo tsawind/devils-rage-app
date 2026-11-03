@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Client tuning</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
+          --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --warn:#f0c040; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; user-select: none; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .grow { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  .back { background: none; border: 0; color: var(--muted); }
+  .back:hover { color: var(--text); }
+  main { flex: 1; overflow: auto; padding: 18px 20px 40px; max-width: 1060px; width: 100%; margin: 0 auto; }
+  h2 { font-size: 15px; margin: 22px 0 8px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .warn { color: #f0c9a8; border: 1px solid #5a2a14; background: #1c120d; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 14px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 12px 14px; margin-bottom: 10px; }
+  .btn { border: 1px solid var(--line); border-radius: 8px; background: #121216; color: var(--text); padding: 6px 12px; }
+  .btn:hover { border-color: var(--red-hi); }
+  .btn.red { border-color: var(--red); background: #1c0d0e; color: #f3c6c6; }
+  .btn.small { padding: 2px 9px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  select { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 5px 8px; font: inherit; }
+  .muted { color: var(--muted); }
+  .status { min-height: 1.5em; margin: 8px 0 0; color: var(--muted); }
+  .status.ok { color: var(--ok); } .status.bad { color: #f08a8a; }
+  ol.guide { margin: 6px 0 0 20px; padding: 0; }
+  ol.guide li { margin: 6px 0; }
+  ol.guide .link { color: var(--red-hi); cursor: pointer; text-decoration: underline; }
+  .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  .preset { text-align: left; border: 1px solid var(--line); border-radius: 10px; background: #121216; color: var(--text); padding: 10px 12px; }
+  .preset b { display: block; }
+  .preset span { color: var(--muted); font-size: 12px; }
+  .preset.on { border-color: var(--red-hi); background: #2a0f12; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 6px 8px; border-top: 1px solid #23232a; text-align: left; vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  tr.off td:not(:first-child) { opacity: .45; }
+  td.now { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  td.val { white-space: nowrap; }
+  input[type=range] { width: 160px; vertical-align: middle; }
+  .grp td:first-child { color: var(--warn); font-size: 12px; letter-spacing: .5px; text-transform: uppercase; border-top: 0; padding-top: 14px; }
+  .profiles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .profiles label { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 13px; cursor: pointer; }
+  .profiles label.on { border-color: var(--red-hi); background: #2a0f12; }
+  .profiles input { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">DR</span>
+  <h1>Client tuning</h1>
+  <span class="grow"></span>
+  <button class="back" id="home">← Home</button>
+</header>
+<main>
+  <details class="card" id="guideCard" open>
+    <summary style="cursor: pointer"><b>Guide: set up a group of clients start to finish</b></summary>
+    <ol class="guide">
+      <li><b>Make the launch group.</b> <span class="link" data-go="accounts">Your accounts</span>: type a name (e.g. “Test Launch”) in the new-group box, Add, then tick it on a few characters on <b>different accounts</b> (the launcher starts one character per account).</li>
+      <li><b>See it in the app.</b> <span class="link" data-go="launch">Launch groups</span> → ↻ Refresh. Give it pedal keys (Next / Prev).</li>
+      <li><b>Build the baseline.</b> Start one of them through the EVE launcher, arrange windows, overview and shortcuts the way you want everyone, then <b>log out and close that client</b> (EVE saves its settings on close).</li>
+      <li><b>Copy it to the group.</b> With every client closed: <span class="link" data-go="settings">Client settings</span> → Set up a launch group → pick the group and the baseline → Copy to the group.</li>
+      <li><b>Tune sound and graphics.</b> Here: pick a preset below (Alt for the group, Main for your own client), pick the group's profiles, Apply. Music off, alarms and wormhole activations kept.</li>
+      <li><b>Match the EVE launcher once.</b> On the group's card in <span class="link" data-go="launch">Launch groups</span>, open “Set this group up in the EVE launcher” and follow it (same accounts, client profile numbers as shown).</li>
+      <li><b>Launch.</b> ▶ Open launcher, launch the group, then <span class="link" data-go="previews">Multibox previews</span> and cycle with the pedal.</li>
+    </ol>
+  </details>
+
+  <div class="warn" id="openWarn" hidden></div>
+  <div class="warn" id="noRoot" hidden></div>
+
+  <h2>1 · Pick a preset (or start from one and adjust)</h2>
+  <div class="presets" id="presets"></div>
+
+  <h2>2 · Adjust the levers</h2>
+  <p class="note">Ticked rows are written; unticked rows stay as each client has them. “Now” is the first picked profile's current value.</p>
+  <div class="card" style="padding: 4px 6px">
+    <table id="levers"></table>
+  </div>
+
+  <h2>3 · Pick the clients</h2>
+  <div class="card">
+    <div class="row">
+      <select id="byGroup"><option value="">Pick a launch group…</option></select>
+      <button class="btn small" id="pickAll">All profiles</button>
+      <button class="btn small" id="pickNone">None</button>
+      <span class="muted" id="pickedCount"></span>
+    </div>
+    <div class="profiles" id="profiles"></div>
+  </div>
+
+  <h2>4 · Apply</h2>
+  <div class="card">
+    <div class="row"><button class="btn red" id="apply" disabled>Apply to the picked clients (backs up first)</button>
+      <span class="muted">Close the clients first; restore any time from Client settings → Backups.</span></div>
+    <div class="status" id="status"></div>
+  </div>
+</main>
+
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+  // Suggested values. Music always off; world (wormhole activations) and interface (alarms) never muted.
+  const LOW = { textureQuality: 2, shaderQuality: 1, lodQuality: 1, shadowQuality: 0, reflectionQuality: 0, aoQuality: 0, postProcessingQuality: 0, volumetricQuality: 0, antiAliasing: 0, charTextureQuality: 2, dofEnabled: 0, charClothSimulation: 0, frameGeneration: false };
+  const QUIET_MUSIC = { eveampGain: 0, useCombatMusic: 0, suppressTurret: 1 };
+  const PRESETS = [
+    { id: "main", name: "Main (the one you fly)", why: "Good-looking, every warning loud, no music.",
+      values: { masterVolume: 0.8, worldVolume: 0.8, uiGain: 0.7, evevoiceGain: 0.9, ...QUIET_MUSIC,
+                textureQuality: 1, shaderQuality: 2, lodQuality: 2, shadowQuality: 1, reflectionQuality: 1, aoQuality: 1, postProcessingQuality: 1, volumetricQuality: 1, antiAliasing: 1, charTextureQuality: 1, dofEnabled: 0, charClothSimulation: 0, frameGeneration: false },
+      prefs: { bracketsAlwaysShowShipText: true } },
+    { id: "alt", name: "Alt / multibox", why: "Light on the PC; you still hear activations and alarms, a bit quieter.",
+      values: { masterVolume: 0.5, worldVolume: 0.7, uiGain: 0.6, evevoiceGain: 0.7, ...QUIET_MUSIC, ...LOW },
+      prefs: { bracketsAlwaysShowShipText: true } },
+    { id: "watch", name: "Hole watcher / scout", why: "Lightest graphics, world sound up so a wormhole activation is heard over everything.",
+      values: { masterVolume: 0.7, worldVolume: 1.0, uiGain: 0.8, evevoiceGain: 0.9, ...QUIET_MUSIC, ...LOW },
+      prefs: { bracketsAlwaysShowShipText: true } },
+    { id: "background", name: "Background (PI, industry, market)", why: "Lightest graphics, quiet but not silent: alarms still come through.",
+      values: { masterVolume: 0.35, worldVolume: 0.3, uiGain: 0.6, evevoiceGain: 0.6, ...QUIET_MUSIC, ...LOW },
+      prefs: {} },
+    { id: "sound", name: "Just kill the music", why: "Changes only music, combat music and turret noise; leaves everything else.",
+      values: { ...QUIET_MUSIC }, prefs: {} },
+  ];
+  const GROUPS = [["Sound", "audio"], ["Graphics", "device-gfx"], ["Interface", "interface"]];
+  const INTERFACE = ["UIScaleWindowed", "UIScaleFullscreen", "clientFontSize", "brightness"];
+
+  let data = null, seat = { accounts: [], groups: [] }, picked = new Set(), preset = null;
+  let chosen = {};    // key -> value
+  let on = {};        // key -> write it?
+  let prefsOn = {};   // pref key -> { write, value }
+
+  function status(t, c) { $("status").textContent = t || ""; $("status").className = "status" + (c ? " " + c : ""); }
+
+  function usePreset(p) {
+    preset = p.id;
+    on = {}; chosen = {}; prefsOn = {};
+    for (const [k, v] of Object.entries(p.values)) { on[k] = true; chosen[k] = v; }
+    for (const [k, v] of Object.entries(p.prefs)) prefsOn[k] = { write: true, value: v };
+    render();
+  }
+
+  function groupOf(lever) {
+    if (lever.section === "audio") return "audio";
+    if (INTERFACE.includes(lever.key)) return "interface";
+    return "device-gfx";
+  }
+
+  function control(lever) {
+    const v = chosen[lever.key];
+    const set = (val) => { chosen[lever.key] = val; on[lever.key] = true; preset = null; render(); };
+    if (lever.kind === "volume" || lever.kind === "scale") {
+      const wrap = el("span");
+      const min = lever.kind === "volume" ? 0 : 0.5, max = lever.kind === "volume" ? 1 : 2;
+      const r = el("input"); r.type = "range"; r.min = min; r.max = max; r.step = 0.05;
+      r.value = v ?? (lever.kind === "volume" ? 0.5 : 1);
+      const out = el("span", "muted", " " + (lever.kind === "volume" ? Math.round(r.value * 100) + "%" : Number(r.value).toFixed(2)));
+      r.addEventListener("input", () => { out.textContent = " " + (lever.kind === "volume" ? Math.round(r.value * 100) + "%" : Number(r.value).toFixed(2)); });
+      r.addEventListener("change", () => set(Number(r.value)));
+      wrap.append(r, out);
+      return wrap;
+    }
+    const s = el("select");
+    const opts = lever.kind === "switch" ? [[0, "off"], [1, "on"]]
+      : lever.kind === "bool" ? [[false, "off"], [true, "on"]]
+      : [[0, "0"], [1, "1"], [2, "2"], [3, "3"]];
+    opts.forEach(([val, label]) => { const o = new Option(label, JSON.stringify(val)); s.append(o); });
+    s.value = JSON.stringify(v ?? opts[0][0]);
+    s.addEventListener("change", () => set(JSON.parse(s.value)));
+    return s;
+  }
+
+  function nowOf(key) {
+    const first = [...picked][0];
+    const v = first && data.profiles[first] ? data.profiles[first].values[key] : undefined;
+    return v === undefined ? "—" : v;
+  }
+
+  function render() {
+    // Presets
+    const ph = $("presets"); ph.innerHTML = "";
+    PRESETS.forEach(p => {
+      const b = el("button", "preset" + (preset === p.id ? " on" : ""));
+      b.append(el("b", null, p.name), el("span", null, p.why));
+      b.addEventListener("click", () => usePreset(p));
+      ph.append(b);
+    });
+
+    // Levers
+    const t = $("levers"); t.innerHTML = "";
+    const head = el("tr"); ["Write", "Setting", "Set to", "Now"].forEach(h => head.append(el("th", null, h))); t.append(head);
+    GROUPS.forEach(([title, id]) => {
+      const g = el("tr", "grp"); const gt = el("td", null, title); gt.colSpan = 4; g.append(gt); t.append(g);
+      data.levers.filter(l => groupOf(l) === id).forEach(l => {
+        const tr = el("tr", on[l.key] ? "" : "off");
+        const c = el("td"); const box = el("input"); box.type = "checkbox"; box.checked = !!on[l.key];
+        box.addEventListener("change", () => { on[l.key] = box.checked; if (box.checked && chosen[l.key] === undefined) { const now = nowOf(l.key); chosen[l.key] = now === "—" ? undefined : JSON.parse(now === "true" || now === "false" ? now : String(Number(now))); } preset = null; render(); });
+        c.append(box);
+        const val = el("td", "val"); val.append(control(l));
+        tr.append(c, el("td", null, l.label), val, el("td", "now", String(nowOf(l.key))));
+        t.append(tr);
+      });
+    });
+    const g = el("tr", "grp"); const gt = el("td", null, "prefs.ini"); gt.colSpan = 4; g.append(gt); t.append(g);
+    data.prefs.forEach(p => {
+      const state = prefsOn[p.key] || { write: false, value: true };
+      const tr = el("tr", state.write ? "" : "off");
+      const c = el("td"); const box = el("input"); box.type = "checkbox"; box.checked = state.write;
+      box.addEventListener("change", () => { prefsOn[p.key] = { ...state, write: box.checked }; render(); });
+      c.append(box);
+      const s = el("select"); s.append(new Option("off", "0"), new Option("on", "1")); s.value = state.value ? "1" : "0";
+      s.addEventListener("change", () => { prefsOn[p.key] = { write: true, value: s.value === "1" }; render(); });
+      const v = el("td", "val"); v.append(s);
+      const first = [...picked][0];
+      const now = first && data.profiles[first] ? data.profiles[first].prefs[p.key] : undefined;
+      tr.append(c, el("td", null, p.label), v, el("td", "now", now === undefined ? "—" : now === "1" ? "on" : "off"));
+      t.append(tr);
+    });
+
+    // Profiles
+    const accountOf = (prof) => seat.accounts.find(a => a.profile === prof);
+    const ph2 = $("profiles"); ph2.innerHTML = "";
+    Object.keys(data.profiles).sort((a, b) => (Number(a) || 999) - (Number(b) || 999) || a.localeCompare(b)).forEach(name => {
+      const a = accountOf(name);
+      const lab = el("label", picked.has(name) ? "on" : "");
+      lab.title = a ? a.characters.map(c => c.name).join(", ") : "";
+      const box = el("input"); box.type = "checkbox"; box.checked = picked.has(name);
+      box.addEventListener("change", () => { box.checked ? picked.add(name) : picked.delete(name); render(); });
+      lab.append(box, document.createTextNode(`settings_${name}${a ? " · " + a.characters.map(c => c.name)[0] : ""}`));
+      ph2.append(lab);
+    });
+    $("pickedCount").textContent = picked.size ? `${picked.size} picked` : "";
+    const writes = Object.values(on).some(Boolean) || Object.values(prefsOn).some(p => p.write);
+    $("apply").disabled = !picked.size || !writes;
+
+    const gs = $("byGroup"), keep = gs.value;
+    gs.innerHTML = ""; gs.append(new Option("Pick a launch group…", ""));
+    seat.groups.forEach(x => gs.append(new Option(x.group.name, String(x.group.id))));
+    gs.value = keep;
+  }
+
+  $("byGroup").addEventListener("change", () => {
+    const g = seat.groups.find(x => String(x.group.id) === $("byGroup").value)?.group;
+    if (!g) return;
+    g.members.forEach(m => { const prof = seat.accounts.find(a => a.nickname === m.account)?.profile; if (prof && data.profiles[prof]) picked.add(prof); });
+    status(`Picked the profiles of “${g.name}”.`);
+    render();
+  });
+  $("pickAll").addEventListener("click", () => { Object.keys(data.profiles).forEach(n => picked.add(n)); render(); });
+  $("pickNone").addEventListener("click", () => { picked.clear(); render(); });
+
+  $("apply").addEventListener("click", async () => {
+    const values = {}; for (const [k, w] of Object.entries(on)) if (w && chosen[k] !== undefined) values[k] = chosen[k];
+    const prefs = {}; for (const [k, p] of Object.entries(prefsOn)) if (p.write) prefs[k] = !!p.value;
+    const run = (force) => invoke("tuning_apply", { profiles: [...picked], values, prefs, force });
+    status("Backing up, then writing…");
+    try {
+      let msg;
+      try { msg = await run(false); }
+      catch (e) {
+        if (String(e).includes("close them first") && confirm(String(e) + "\n\nGo ahead anyway?")) msg = await run(true);
+        else throw e;
+      }
+      status(msg, "ok");
+      data = await invoke("tuning_read");
+      render();
+    } catch (e) { status(String(e), "bad"); }
+  });
+
+  document.querySelectorAll("[data-go]").forEach(a => a.addEventListener("click", () => {
+    const go = a.dataset.go;
+    if (go === "launch") location.href = "launch.html";
+    else if (go === "settings") location.href = "profiles.html";
+    else if (go === "previews") invoke("open_previews").catch(e => status(String(e), "bad"));
+    else if (go === "accounts") invoke("open_site", { site: "accounts", remember: false }).catch(e => status(String(e), "bad"));
+  }));
+  $("home").addEventListener("click", () => { location.href = "index.html"; });
+
+  (async () => {
+    try { data = await invoke("tuning_read"); }
+    catch (e) { $("noRoot").textContent = String(e); $("noRoot").hidden = false; return; }
+    seat = await invoke("seat_launch_groups").catch(() => seat);
+    if (data.clientsOpen) { $("openWarn").hidden = false; $("openWarn").textContent = `${data.clientsOpen} EVE client(s) open: close them before applying (EVE rewrites these settings when a client closes).`; }
+    usePreset(PRESETS[1]);
+  })();
+</script>
+</body>
+</html>
