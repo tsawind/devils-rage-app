@@ -70,8 +70,9 @@
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
-        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Once it's locked on, zooming in EVE is fine while some of the edge stays in view (the circle follows).</div>
-        <div class="row"><button class="btn" id="fit">Find edge</button><button class="btn" id="rim3">Click 3 on the edge</button><span class="small muted" id="discInfo"></span></div>
+        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> guesses; <b>Click 3 on the edge</b> is exact (click three points spread round the rim). Drag the middle to move it, mouse wheel to size it. Zoomed in EVE after locking on? Press Click 3 on the edge again: it keeps the lock and works out the new distance.</div>
+        <div class="row"><button class="btn red" id="rim3">Click 3 on the edge</button><button class="btn" id="fit">Find edge (guess)</button><span class="small muted" id="discInfo"></span></div>
+        <label class="small muted" title="Off: if you zoom in EVE, press Click 3 on the edge again (it keeps the lock). On: the app looks for the edge itself, which can latch onto a lava glow."><input type="checkbox" id="follow"> Follow zoom by itself (not on lava)</label>
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
@@ -80,6 +81,7 @@
         <details style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
         <div class="muted small">Not your colony? Anyone's buildings work: in EVE right-click the planet → <b>Show other characters' networks</b>. <b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
         <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button></div>
+        <label class="small muted"><input type="checkbox" id="othersPins"> Other people's buildings too</label>
         <div class="anchors" id="anchors"></div>
         </details>
         <div class="status" id="lockStatus"></div>
@@ -221,8 +223,8 @@
     const owners = new Set(p.pins.map((pin) => pin.owner || ""));
     const whose = (pin) => (owners.size > 1 && pin.owner ? pin.owner + " · " : "");
     p.pins.forEach((pin) => {
-      out.push({ key: "p" + pin.id, kind: whose(pin) + pin.name.replace(/^(Barren|Gas|Ice|Lava|Oceanic|Plasma|Storm|Temperate) /, ""), lat: pin.lat, lon: pin.lon });
-      (pin.heads || []).forEach((h) => out.push({ key: "h" + pin.id + ":" + h.id, kind: whose(pin) + "Extractor head", lat: h.lat, lon: h.lon }));
+      out.push({ key: "p" + pin.id, owner: pin.owner || "", kind: whose(pin) + pin.name.replace(/^(Barren|Gas|Ice|Lava|Oceanic|Plasma|Storm|Temperate) /, ""), lat: pin.lat, lon: pin.lon });
+      (pin.heads || []).forEach((h) => out.push({ key: "h" + pin.id + ":" + h.id, owner: pin.owner || "", kind: whose(pin) + "Extractor head", lat: h.lat, lon: h.lon }));
     });
     return out;
   }
@@ -230,7 +232,12 @@
   function kinds() {
     const by = new Map();
     anchorList().forEach((a) => { if (!by.has(a.kind)) by.set(a.kind, []); by.get(a.kind).push(a); });
-    const list = [...by.entries()].map(([kind, items]) => ({ kind, items })).sort((a, b) => a.items.length - b.items.length || a.kind.localeCompare(b.kind));
+    const p = currentPlanet();
+    const mineNames = new Set(((p && p.characters) || []).filter((c) => c.mine).map((c) => c.name));
+    const isMine = (items) => items.some((a) => mineNames.has(a.owner));
+    let list = [...by.entries()].map(([kind, items]) => ({ kind, items, mine: isMine(items) }))
+      .sort((a, b) => Number(b.mine) - Number(a.mine) || a.items.length - b.items.length || a.kind.localeCompare(b.kind));
+    if (!($("othersPins") && $("othersPins").checked) && list.some((k) => k.mine)) list = list.filter((k) => k.mine);
     // Every colony's command center, whoever's it is: EVE shows them all, and they're spread out.
     const centers = anchorList().filter((a) => /Command Center$/.test(a.kind));
     if (centers.length > 1) list.unshift({ kind: "Any command center", items: centers });
@@ -283,7 +290,9 @@
     if (disc) { sctx.strokeStyle = "#ff5a4a"; sctx.lineWidth = lw; sctx.beginPath(); sctx.arc(disc.cx, disc.cy, disc.r, 0, Math.PI * 2); sctx.stroke(); sctx.beginPath(); sctx.arc(disc.cx, disc.cy, 4 * lw, 0, Math.PI * 2); sctx.stroke(); }
     if (facing && disc) {
       sctx.strokeStyle = "#adff2f"; sctx.lineWidth = lw;
-      anchorList().forEach((a) => { const p = E.toPicture(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), disc); if (!p.front) return; sctx.beginPath(); sctx.arc(p.x, p.y, 7 * lw, 0, Math.PI * 2); sctx.stroke(); });
+      // Only the colony it locked on with (every corp colony at once is a cloud of rings).
+      const shown = facing.owners && facing.owners.length ? anchorList().filter((a) => facing.owners.includes(a.owner)) : anchorList();
+      shown.forEach((a) => { const p = E.toPicture(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), disc); if (!p.front) return; sctx.beginPath(); sctx.arc(p.x, p.y, 7 * lw, 0, Math.PI * 2); sctx.stroke(); });
     }
     anchors.forEach((a, i) => {
       const bad = facing && facing.misses && facing.misses[i] > 0.05;
@@ -365,7 +374,12 @@
       if (rimClicks.length === 3) {
         const c = E.circleFrom3(...rimClicks);
         rimMode = false; rimClicks = [];
-        if (c && c.r > 40) { disc = c; facing = null; anchors = []; renderAnchors(); say("lockStatus", "Edge set. Now point out three buildings.", "ok"); }
+        if (c && c.r > 40 && facing && focal) {
+          // Re-set the edge after a zoom: same facing, new distance from the camera's lens.
+          disc = { cx: c.cx, cy: c.cy, r: c.r, D: Math.sqrt((focal / c.r) ** 2 + 1) };
+          prevGrey = null;
+          say("lockStatus", "Edge set again; still locked on.", "ok");
+        } else if (c && c.r > 40) { disc = c; facing = null; anchors = []; renderAnchors(); say("lockStatus", "Edge set. Now lock on.", "ok"); }
         else say("lockStatus", "Those three points don't make a circle: try again, spread round the rim.", "bad");
       }
       updateButtons(); drawShot();
@@ -403,6 +417,9 @@
     if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
     facing = solved; prevGrey = null; frozen = false;
     disc = { ...disc, D: solved.D };
+    const byKey = new Map(anchorList().map((a) => [a.key, a]));
+    facing.owners = [...new Set(solved.matched.map((k) => byKey.get(k)?.owner).filter(Boolean))];
+    say("autoStatus", "");
     focal = isFinite(solved.D) ? disc.r * Math.sqrt(solved.D * solved.D - 1) : null;
     const miss = solved.error * 180 / Math.PI;
     const kind = miss < 1.5 ? "ok" : miss < 4 ? "warn" : "bad";
@@ -433,7 +450,7 @@
 
   // ---------- automatic lock-on ----------
   function adoptPose(pose, how) {
-    facing = { Q: pose.Q, mirrored: pose.mirrored, misses: [] };
+    facing = { Q: pose.Q, mirrored: pose.mirrored, misses: [], owners: [pose.owner] };
     disc = { cx: disc.cx, cy: disc.cy, r: disc.r, D: pose.D };
     focal = isFinite(pose.D) ? disc.r * Math.sqrt(pose.D * pose.D - 1) : null;
     prevGrey = null;
@@ -449,9 +466,10 @@
       if (ticks % 3) return;
       const markers = E.findMarkers(f.data.data, f.w, f.h, disc);
       if (markers.length < 4) return;
-      const all = cols.flatMap((c) => c.points);
-      const refined = E.refineWithMarkers(markers, all, { Q: facing.Q, mirrored: facing.mirrored, D: disc.D }, disc, 9);
-      if (refined && refined.inliers >= 6) {
+      const mine = cols.filter((c) => (facing.owners || []).includes(c.owner)).flatMap((c) => c.points);
+      if (!mine.length) return;
+      const refined = E.refineWithMarkers(markers, mine, { Q: facing.Q, mirrored: facing.mirrored, D: disc.D }, disc, 6);
+      if (refined && refined.inliers >= 8 && refined.inliers >= mine.length * 0.6) {
         const moved = E.angle(E.apply(refined.Q, [0, 0, 1]), E.apply(facing.Q, [0, 0, 1]));
         if (moved < 0.05) facing.Q = refined.Q;
       }
@@ -464,7 +482,8 @@
     say("autoStatus", `Matching ${markers.length} marks against ${cols.length} colonies…`, "");
     const done = (pose) => {
       autoBusy = false;
-      if (pose && pose.inliers >= 6 && pose.inliers >= pose.of * 0.35 && !facing) adoptPose(pose, "Locked on by itself");
+      // Strict: most of that colony has to show up, and it has to explain the marks (lava specks match anything).
+      if (pose && pose.inliers >= 8 && pose.inliers >= pose.of * 0.6 && pose.inliers >= markers.length * 0.5 && !facing) adoptPose(pose, "Locked on by itself");
       else if (!facing) say("autoStatus", "No colony matched yet: click a command center in EVE so its network shows, or zoom in on one.", "warn");
     };
     const msg = { id: ++workerId, markers: markers.slice(0, 120).map((m) => ({ x: m.x, y: m.y })), colonies: cols, disc: { cx: disc.cx, cy: disc.cy, r: disc.r } };
@@ -487,12 +506,9 @@
       if (!frozen && $("client").value) {
         const f = await grab().catch(() => null);
         if (f) frame = f;
-        if (f && !disc && $("auto").checked) {
-          const rim = E.findRim(f.data.data, f.w, f.h, null);
-          if (rim) { disc = rim; updateButtons(); }
-        }
+        if (f && !disc && $("auto").checked && ticks % 8 === 0) say("autoStatus", "Set the edge first: Click 3 on the edge.", "warn");
         // Zoomed in EVE: the rim moves; with the camera's lens known, so does the distance.
-        if (f && facing && disc && focal && ticks % 3 === 0) {
+        if (f && facing && disc && focal && $("follow").checked && ticks % 3 === 0) {
           const rim = E.findRim(f.data.data, f.w, f.h, disc);
           if (rim && (Math.abs(rim.r - disc.r) > disc.r * 0.012 || Math.hypot(rim.cx - disc.cx, rim.cy - disc.cy) > disc.r * 0.012)) {
             disc = { cx: rim.cx, cy: rim.cy, r: rim.r, D: Math.sqrt((focal / rim.r) ** 2 + 1) };
@@ -552,6 +568,7 @@
   $("client").addEventListener("change", () => { frame = null; fillPlanets(); });
   $("planet").addEventListener("change", planetChanged);
   $("others").addEventListener("change", fillPlanets);
+  $("othersPins").addEventListener("change", renderAnchors);
   $("reload").addEventListener("click", async () => { await loadClients(); await loadPlanets(); });
   (async () => { await loadClients(); await loadPlanets(); drawShot(); })();
 })();
