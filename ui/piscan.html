@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PI planet scan</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
+          --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --warn:#f0c040; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; user-select: none; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header em { font-style: normal; font-size: 11px; color: var(--warn); border: 1px solid var(--warn); border-radius: 999px; padding: 0 7px; }
+  header .grow { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  .back { background: none; border: 0; color: var(--muted); }
+  .back:hover { color: var(--text); }
+  main { flex: 1; overflow: auto; padding: 14px 20px 30px; display: grid; grid-template-columns: 360px 1fr; gap: 14px; align-items: start; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 12px 14px; margin-bottom: 12px; }
+  .step { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 10px 0; border-top: 1px solid #23232a; }
+  .step:first-child { border-top: 0; padding-top: 0; }
+  .step .n { width: 22px; height: 22px; border-radius: 50%; background: var(--red); text-align: center; line-height: 22px; font-size: 12px; font-weight: 700; }
+  .step h3 { margin: 0 0 4px; font-size: 14px; }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  select, input[type=text] { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 5px 8px; font: inherit; max-width: 100%; }
+  .btn { border: 1px solid var(--line); border-radius: 8px; background: #121216; color: var(--text); padding: 5px 11px; }
+  .btn:hover { border-color: var(--red-hi); }
+  .btn.red { border-color: var(--red); background: #1c0d0e; color: #f3c6c6; font-weight: 600; }
+  .btn.on { border-color: var(--ok); color: var(--ok); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+  .anchors { max-height: 190px; overflow: auto; margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; }
+  .anchor { display: flex; gap: 6px; align-items: center; padding: 3px 8px; font-size: 12.5px; cursor: pointer; border-top: 1px solid #202026; }
+  .anchor:first-child { border-top: 0; }
+  .anchor.sel { background: #2a1a0a; color: var(--warn); }
+  .anchor .got { margin-left: auto; color: var(--ok); }
+  .status { min-height: 1.4em; margin-top: 6px; color: var(--muted); font-size: 13px; }
+  .status.ok { color: var(--ok); } .status.bad { color: #f08a8a; } .status.warn { color: var(--warn); }
+  .view { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .view canvas { display: block; width: 100%; height: auto; }
+  #shot { cursor: crosshair; }
+  .maps { display: grid; grid-template-columns: 1fr; gap: 6px; }
+  #flat { image-rendering: pixelated; background: #0a0a0d; }
+  .meter { height: 8px; border-radius: 4px; background: #23232a; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--ok); width: 0; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .legend b { font-weight: 600; color: var(--text); }
+  kbd { background: #0d0d10; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">DR</span>
+  <h1>PI planet scan</h1><em>BETA</em>
+  <span class="grow"></span>
+  <button class="back" id="home">← Home</button>
+</header>
+<main>
+  <div>
+    <div class="card">
+      <div class="step"><div class="n">1</div><div>
+        <h3>Client and planet</h3>
+        <div class="muted small">In EVE: open the planet, turn on the scan for a resource. This page only watches the picture; it never clicks or types in EVE.</div>
+        <div class="row"><select id="client"></select><button class="btn" id="reload" title="Look for clients and your planets again">↻</button></div>
+        <div class="row"><select id="planet" style="width: 100%"></select></div>
+      </div></div>
+      <div class="step"><div class="n">2</div><div>
+        <h3>The planet's edge</h3>
+        <div class="muted small">The red circle should sit on the planet's edge. <b>Find edge</b> does it; or drag the circle's middle, and the mouse wheel over the picture resizes it. Don't zoom in EVE after this.</div>
+        <div class="row"><button class="btn" id="fit">Find edge</button><span class="small muted" id="discInfo"></span></div>
+      </div></div>
+      <div class="step"><div class="n">3</div><div>
+        <h3>Point out 3 of your buildings</h3>
+        <div class="muted small"><b>Freeze</b>, pick a building below, click it on the picture. Three spread out (extractor heads help) tells which way the planet faces. Afterwards the green rings should sit on every building.</div>
+        <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button></div>
+        <div class="anchors" id="anchors"></div>
+        <div class="status" id="lockStatus"></div>
+      </div></div>
+      <div class="step"><div class="n">4</div><div>
+        <h3>Scan</h3>
+        <div class="muted small">Pick the resource EVE is showing, press <b>Scan</b>, then turn the planet slowly (about a quarter turn every few seconds) until the bar is full. Switch the resource in EVE and here to scan the next one without moving. Drifting? Pick a building and click it on the picture.</div>
+        <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
+        <div class="row" style="display: block"><div class="meter"><i id="cover"></i></div></div>
+        <div class="status" id="scanStatus"></div>
+      </div></div>
+      <div class="step"><div class="n">5</div><div>
+        <h3>Save for the corp</h3>
+        <div class="muted small">Adds to what the corp already has for this planet and resource (the Corp map tab on the PI screen shows it, with the best places to put two extractors).</div>
+        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button></div>
+        <div class="status" id="saveStatus"></div>
+      </div></div>
+    </div>
+  </div>
+  <div class="maps">
+    <div class="view"><canvas id="shot" width="1280" height="720"></canvas></div>
+    <div class="legend"><span><b style="color:#ff5a4a">○</b> planet edge</span><span><b style="color:var(--warn)">✚</b> buildings you pointed out</span><span><b style="color:var(--ok)">○</b> where the scan thinks your buildings are</span></div>
+    <div class="view"><canvas id="flat" width="720" height="360"></canvas></div>
+    <div class="legend" id="flatLegend"><span>Whole planet, north at the top. Dark = not seen yet.</span></div>
+  </div>
+</main>
+<script src="piscan-engine.js"></script>
+<script>
+(() => {
+  const E = window.PiScanEngine;
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  const RESOURCES = {
+    barren: ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Micro Organisms", "Noble Metals"],
+    gas: ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Reactive Gas"],
+    ice: ["Aqueous Liquids", "Heavy Metals", "Micro Organisms", "Noble Gas", "Planktic Colonies"],
+    lava: ["Base Metals", "Felsic Magma", "Heavy Metals", "Non-CS Crystals", "Suspended Plasma"],
+    oceanic: ["Aqueous Liquids", "Carbon Compounds", "Complex Organisms", "Micro Organisms", "Planktic Colonies"],
+    plasma: ["Base Metals", "Heavy Metals", "Noble Metals", "Non-CS Crystals", "Suspended Plasma"],
+    storm: ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Suspended Plasma"],
+    temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Micro Organisms"],
+  };
+  const say = (id, text, kind) => { const el = $(id); el.textContent = text || ""; el.className = "status" + (kind ? " " + kind : ""); };
+  $("home").addEventListener("click", () => { location.href = "index.html"; });
+
+  const shot = $("shot"), sctx = shot.getContext("2d", { willReadFrequently: true });
+  const flat = $("flat"), fctx = flat.getContext("2d");
+  let planets = [], frame = null, frozen = false, disc = null, anchors = [], selected = null, facing = null;
+  const maps = new Map(); // resource → engine map
+  let running = false, prevGrey = null, lostRun = 0, painting = false;
+
+  // ---------- clients and planets ----------
+  async function loadClients() {
+    const list = await invoke("preview_clients").catch(() => []);
+    const sel = $("client"), was = sel.value;
+    sel.innerHTML = "";
+    if (!list.length) sel.append(new Option("No EVE clients open", ""));
+    list.forEach((c) => sel.append(new Option(c.name + (c.minimized ? " (minimised)" : ""), c.name)));
+    if (list.some((c) => c.name === was)) sel.value = was;
+  }
+  async function loadPlanets() {
+    try {
+      const data = await invoke("piscan_planets");
+      planets = (data && data.planets) || [];
+    } catch (e) { planets = []; say("lockStatus", String(e), "bad"); }
+    fillPlanets();
+  }
+  function fillPlanets() {
+    const sel = $("planet"), client = $("client").value, was = sel.value;
+    sel.innerHTML = "";
+    const mine = planets.filter((p) => p.character === client), rest = planets.filter((p) => p.character !== client);
+    if (!planets.length) sel.append(new Option("No colonies found in SeAT (open the PI tab once?)", ""));
+    const group = (label, list) => { if (!list.length) return; const g = document.createElement("optgroup"); g.label = label; list.forEach((p) => g.append(new Option(`${p.name} · ${cap(p.type)} · ${p.character}`, p.character_id + ":" + p.planet_id))); sel.append(g); };
+    group(client ? client + "'s planets" : "Your planets", mine);
+    group("Other characters", rest);
+    if ([...sel.options].some((o) => o.value === was)) sel.value = was;
+    planetChanged();
+  }
+  const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : "";
+  const currentPlanet = () => planets.find((p) => p.character_id + ":" + p.planet_id === $("planet").value) || null;
+  function planetChanged() {
+    const p = currentPlanet();
+    anchors = []; facing = null; selected = null; maps.clear(); prevGrey = null;
+    const res = $("resource"); res.innerHTML = "";
+    (RESOURCES[p ? p.type : ""] || Object.values(RESOURCES).flat().filter((v, i, a) => a.indexOf(v) === i)).forEach((r) => {
+      const had = p && (p.scans || []).find((s) => s.resource === r);
+      res.append(new Option(r + (had ? ` (corp has ${Math.round(had.coverage * 100)}%)` : ""), r));
+    });
+    renderAnchors(); updateButtons(); drawFlat(); drawShot();
+    if (res.value) loadCorpScan(res.value);
+    say("lockStatus", p ? `${p.pins.length} buildings known on ${p.name}.` : "");
+  }
+  function anchorList() {
+    const p = currentPlanet();
+    if (!p) return [];
+    const out = [];
+    p.pins.forEach((pin) => {
+      out.push({ key: "p" + pin.id, name: pin.name, lat: pin.lat, lon: pin.lon });
+      (pin.heads || []).forEach((h, i) => out.push({ key: "h" + pin.id + ":" + h.id, name: `↳ head ${i + 1} of that extractor`, lat: h.lat, lon: h.lon }));
+    });
+    return out;
+  }
+  function renderAnchors() {
+    const host = $("anchors"); host.innerHTML = "";
+    anchorList().forEach((a) => {
+      const row = document.createElement("div");
+      row.className = "anchor" + (selected === a.key ? " sel" : "");
+      const got = anchors.find((x) => x.key === a.key);
+      row.innerHTML = `<span></span>${got ? '<span class="got">✓ placed</span>' : ""}`;
+      row.firstChild.textContent = a.name;
+      row.addEventListener("click", () => { selected = selected === a.key ? null : a.key; renderAnchors(); });
+      host.append(row);
+    });
+  }
+  function updateButtons() {
+    $("lock").disabled = !(disc && anchors.length >= 2);
+    $("scan").disabled = !facing;
+    $("scan").textContent = running ? "Pause" : "Scan";
+    $("scan").classList.toggle("on", running);
+    const m = maps.get($("resource").value);
+    $("save").disabled = !(m && E.coverage(m) > 0);
+    $("freeze").textContent = frozen ? "Unfreeze" : "Freeze";
+    $("freeze").classList.toggle("on", frozen);
+    $("discInfo").textContent = disc ? `centre ${Math.round(disc.cx)}, ${Math.round(disc.cy)} · radius ${Math.round(disc.r)} px` : "not set yet";
+  }
+
+  // ---------- pictures ----------
+  async function grab() {
+    const name = $("client").value;
+    if (!name) return null;
+    const url = await invoke("preview_frame", { name, width: 1280, quality: 88 });
+    const img = new Image();
+    await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = url; });
+    if (shot.width !== img.naturalWidth || shot.height !== img.naturalHeight) { shot.width = img.naturalWidth; shot.height = img.naturalHeight; }
+    const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0);
+    return { img, data: x.getImageData(0, 0, c.width, c.height), w: c.width, h: c.height };
+  }
+  function drawShot() {
+    if (!frame) { sctx.fillStyle = "#000"; sctx.fillRect(0, 0, shot.width, shot.height); sctx.fillStyle = "#666"; sctx.font = "20px Segoe UI"; sctx.fillText("Pick a client: its picture shows here.", 30, 50); return; }
+    if ($("showHeat").checked) {
+      const view = sctx.createImageData(frame.w, frame.h), d = frame.data.data;
+      for (let i = 0; i < d.length; i += 4) { const h = E.heat(d[i], d[i + 1], d[i + 2]); view.data[i] = h ? 255 * h : d[i] * 0.25; view.data[i + 1] = h ? 255 * (1 - Math.abs(h - 0.6) * 2) : d[i + 1] * 0.25; view.data[i + 2] = h ? 255 * (1 - h) : d[i + 2] * 0.25; view.data[i + 3] = 255; }
+      sctx.putImageData(view, 0, 0);
+    } else sctx.drawImage(frame.img, 0, 0);
+    const lw = Math.max(2, frame.w / 640);
+    if (disc) { sctx.strokeStyle = "#ff5a4a"; sctx.lineWidth = lw; sctx.beginPath(); sctx.arc(disc.cx, disc.cy, disc.r, 0, Math.PI * 2); sctx.stroke(); sctx.beginPath(); sctx.arc(disc.cx, disc.cy, 4 * lw, 0, Math.PI * 2); sctx.stroke(); }
+    if (facing && disc) {
+      sctx.strokeStyle = "#adff2f"; sctx.lineWidth = lw;
+      anchorList().forEach((a) => { const p = E.toPicture(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), disc); if (!p.front) return; sctx.beginPath(); sctx.arc(p.x, p.y, 7 * lw, 0, Math.PI * 2); sctx.stroke(); });
+    }
+    sctx.strokeStyle = "#f0c040"; sctx.lineWidth = lw;
+    anchors.forEach((a) => { sctx.beginPath(); sctx.moveTo(a.px - 9 * lw, a.py); sctx.lineTo(a.px + 9 * lw, a.py); sctx.moveTo(a.px, a.py - 9 * lw); sctx.lineTo(a.px, a.py + 9 * lw); sctx.stroke(); });
+  }
+  function drawFlat() {
+    const m = maps.get($("resource").value);
+    const img = fctx.createImageData(E.GRID_W, E.GRID_H);
+    if (m) {
+      const bytes = E.cells(m);
+      for (let i = 0; i < bytes.length; i++) {
+        const v = bytes[i];
+        if (!v) { img.data[i * 4 + 3] = 255; continue; }
+        const h = (v - 1) / 250;
+        // Same scale as EVE: blue → green → yellow → red → white.
+        const rgb = h > 0.85 ? [255, 255, 255] : h > 0.7 ? [255, 60, 40] : h > 0.5 ? [255, 220, 40] : h > 0.3 ? [60, 210, 60] : h > 0.1 ? [50, 90, 230] : [40, 40, 48];
+        img.data.set([...rgb, 255], i * 4);
+      }
+    } else for (let i = 0; i < E.GRID_W * E.GRID_H; i++) img.data[i * 4 + 3] = 255;
+    const tmp = document.createElement("canvas"); tmp.width = E.GRID_W; tmp.height = E.GRID_H; tmp.getContext("2d").putImageData(img, 0, 0);
+    fctx.imageSmoothingEnabled = false;
+    fctx.drawImage(tmp, 0, 0, flat.width, flat.height);
+    fctx.strokeStyle = "#2a2a33"; fctx.lineWidth = 1;
+    for (let i = 1; i < 6; i++) { fctx.beginPath(); fctx.moveTo(0, i * 60); fctx.lineTo(720, i * 60); fctx.stroke(); }
+    for (let i = 1; i < 12; i++) { fctx.beginPath(); fctx.moveTo(i * 60, 0); fctx.lineTo(i * 60, 360); fctx.stroke(); }
+    const p = currentPlanet();
+    if (p) {
+      fctx.fillStyle = "#f0c040";
+      p.pins.forEach((pin) => { const x = ((pin.lon % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) / (2 * Math.PI) * 720, y = pin.lat / Math.PI * 360; fctx.fillRect(x - 2, y - 2, 4, 4); });
+    }
+    const cover = m ? E.coverage(m) : 0;
+    $("cover").style.width = Math.round(cover * 100) + "%";
+    $("flatLegend").innerHTML = `<span>Whole planet, north at the top. Dark = not seen yet. Yellow dots: your buildings.</span><span><b>${$("resource").value || ""}</b> ${Math.round(cover * 100)}% seen</span>`;
+  }
+
+  // ---------- the planet's edge ----------
+  function findEdge(f) {
+    const d = f.data.data, w = f.w, h = f.h;
+    const lum = (x, y) => { const k = ((y | 0) * w + (x | 0)) * 4; return 0.3 * d[k] + 0.59 * d[k + 1] + 0.11 * d[k + 2]; };
+    const cx0 = disc ? disc.cx : w / 2, cy0 = disc ? disc.cy : h / 2, maxR = Math.min(w, h) * 0.6;
+    const pts = [];
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 48) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
+      let dark = 0, edge = null;
+      for (let r = 20; r < maxR; r += 2) {
+        const x = cx0 + dx * r, y = cy0 + dy * r;
+        if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) break;
+        if (lum(x, y) < 16) { dark++; if (dark === 1) edge = r; if (dark >= 6) break; } else { dark = 0; edge = null; }
+      }
+      if (edge && dark >= 6) pts.push([cx0 + dx * edge, cy0 + dy * edge]);
+    }
+    if (pts.length < 8) return null;
+    const fit = (list) => { // Kåsa circle fit
+      let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0; const n = list.length;
+      list.forEach(([x, y]) => { const z = x * x + y * y; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; sxz += x * z; syz += y * z; sz += z; });
+      const A = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]], B = [sxz, syz, sz];
+      const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+      const D = det(A); if (!D) return null;
+      const col = (i) => A.map((row, r) => row.map((v, c) => (c === i ? B[r] : v)));
+      const a = det(col(0)) / D, b = det(col(1)) / D, c = det(col(2)) / D;
+      const cx = a / 2, cy = b / 2;
+      return { cx, cy, r: Math.sqrt(Math.max(1, c + cx * cx + cy * cy)) };
+    };
+    let circle = fit(pts);
+    if (!circle) return null;
+    const near = pts.filter(([x, y]) => Math.abs(Math.hypot(x - circle.cx, y - circle.cy) - circle.r) < circle.r * 0.06);
+    if (near.length >= 8) circle = fit(near) || circle;
+    return circle.r > 40 ? circle : null;
+  }
+  $("fit").addEventListener("click", async () => {
+    if (!frame) frame = await grab().catch(() => null);
+    if (!frame) return say("lockStatus", "No picture from that client.", "bad");
+    const c = findEdge(frame);
+    if (!c) return say("lockStatus", "Couldn't find the edge: drag the circle onto the planet and use the mouse wheel to size it.", "warn");
+    disc = c; facing = null; anchors = []; renderAnchors(); updateButtons(); drawShot();
+    say("lockStatus", "Edge found. Now point out three buildings.", "ok");
+  });
+
+  // ---------- clicks on the picture ----------
+  const toImage = (e) => { const r = shot.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * shot.width, y: (e.clientY - r.top) / r.height * shot.height }; };
+  let dragging = null;
+  shot.addEventListener("mousedown", (e) => {
+    const p = toImage(e);
+    if (disc && Math.hypot(p.x - disc.cx, p.y - disc.cy) < disc.r * 0.08 && !selected) { dragging = { dx: p.x - disc.cx, dy: p.y - disc.cy }; return; }
+    if (!selected) { if (!disc) { disc = { cx: p.x, cy: p.y, r: Math.min(shot.width, shot.height) / 3 }; updateButtons(); drawShot(); } return; }
+    const a = anchorList().find((x) => x.key === selected);
+    if (!a || !disc) return;
+    if (!E.toSphere(p.x, p.y, disc)) return say("lockStatus", "That's outside the planet's circle: fix the edge first.", "warn");
+    if (facing) {
+      // While scanning: a click is a drift fix.
+      facing.Q = E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: a.lat, lon: a.lon }, disc, facing.mirrored);
+      say("scanStatus", `Pulled back onto ${a.name}.`, "ok");
+    } else {
+      anchors = anchors.filter((x) => x.key !== a.key).concat([{ key: a.key, px: p.x, py: p.y, lat: a.lat, lon: a.lon }]);
+      const next = anchorList().find((x) => !anchors.some((y) => y.key === x.key) && x.key !== a.key);
+      selected = anchors.length >= 3 ? null : next ? next.key : null;
+    }
+    renderAnchors(); updateButtons(); drawShot();
+  });
+  window.addEventListener("mousemove", (e) => { if (!dragging || !disc) return; const p = toImage(e); disc.cx = p.x - dragging.dx; disc.cy = p.y - dragging.dy; facing = null; updateButtons(); drawShot(); });
+  window.addEventListener("mouseup", () => { dragging = null; });
+  shot.addEventListener("wheel", (e) => { if (!disc) return; e.preventDefault(); disc.r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); facing = null; updateButtons(); drawShot(); }, { passive: false });
+
+  $("freeze").addEventListener("click", async () => { frozen = !frozen; if (frozen && !frame) frame = await grab().catch(() => null); updateButtons(); drawShot(); });
+  $("clearAnchors").addEventListener("click", () => { anchors = []; facing = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
+  $("lock").addEventListener("click", () => {
+    const solved = E.solveAnchorsEitherWay(anchors, disc);
+    if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
+    facing = solved; prevGrey = null; frozen = false;
+    const miss = solved.error * 180 / Math.PI;
+    const kind = miss < 1.5 ? "ok" : miss < 4 ? "warn" : "bad";
+    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Check the green rings sit on your buildings.`, kind);
+    updateButtons(); drawShot();
+  });
+
+  // ---------- scanning ----------
+  function mapFor(resource) { if (!maps.has(resource)) maps.set(resource, E.newMap()); return maps.get(resource); }
+  async function loadCorpScan(resource) {
+    const p = currentPlanet();
+    if (!p || maps.has(resource) || !(p.scans || []).some((s) => s.resource === resource)) return;
+    try {
+      const got = await invoke("piscan_cells", { planetId: p.planet_id, resource });
+      if (got && got.cells && !maps.has(resource)) maps.set(resource, E.fromCells(Uint8Array.from(atob(got.cells), (c) => c.charCodeAt(0))));
+    } catch (e) { /* start fresh */ }
+    drawFlat(); updateButtons();
+  }
+  $("resource").addEventListener("change", () => { loadCorpScan($("resource").value); drawFlat(); updateButtons(); });
+  $("scan").addEventListener("click", () => { running = !running; prevGrey = null; lostRun = 0; frozen = false; updateButtons(); if (running) say("scanStatus", "Scanning: turn the planet slowly.", "ok"); });
+  $("showHeat").addEventListener("change", drawShot);
+
+  let ticks = 0;
+  async function tick() {
+    ticks++;
+    if (painting || (!running && ticks % 4)) return;
+    painting = true;
+    try {
+      if (!frozen && $("client").value) {
+        const f = await grab().catch(() => null);
+        if (f) frame = f;
+        if (f && running && facing && disc) {
+          const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
+          let ok = true;
+          if (prevGrey) {
+            const t = E.trackRotation(prevGrey, grey);
+            if (t) { facing.Q = E.mul(t.R, facing.Q); lostRun = 0; } else { ok = false; lostRun++; }
+          }
+          if (ok) {
+            prevGrey = grey;
+            const m = mapFor($("resource").value);
+            E.paint(m, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3);
+            const hint = E.missingHint(m, facing.Q, facing.mirrored), cover = E.coverage(m);
+            say("scanStatus", cover > 0.97 ? "Whole planet seen: save it, or pick the next resource." : `${Math.round(cover * 100)}% seen. Still missing: ${hint || "a little here and there"}.`, "ok");
+          } else if (lostRun > 2) {
+            prevGrey = grey; // start again from here; a building click fixes any jump
+            say("scanStatus", "Lost the grip (turned too fast, or the picture changed). Turn slower; if the green rings are off, pick a building and click it.", "warn");
+          }
+          drawFlat(); updateButtons();
+        }
+        drawShot();
+      }
+    } finally { painting = false; }
+  }
+  setInterval(tick, 120);
+
+  // ---------- save ----------
+  $("save").addEventListener("click", async () => {
+    const p = currentPlanet(), resource = $("resource").value, m = maps.get(resource);
+    if (!p || !m) return;
+    const bytes = E.cells(m);
+    let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
+    say("saveStatus", "Saving…");
+    try {
+      say("saveStatus", await invoke("piscan_save", { planetId: p.planet_id, resource, characterId: p.character_id, cells: btoa(bin) }), "ok");
+      const had = (p.scans || []).find((s) => s.resource === resource);
+      if (had) had.coverage = Math.max(had.coverage, E.coverage(m)); else (p.scans = p.scans || []).push({ resource, coverage: E.coverage(m) });
+    } catch (e) { say("saveStatus", String(e), "bad"); }
+  });
+
+  $("client").addEventListener("change", () => { frame = null; fillPlanets(); });
+  $("planet").addEventListener("change", planetChanged);
+  $("reload").addEventListener("click", async () => { await loadClients(); await loadPlanets(); });
+  (async () => { await loadClients(); await loadPlanets(); drawShot(); })();
+})();
+</script>
+</body>
+</html>

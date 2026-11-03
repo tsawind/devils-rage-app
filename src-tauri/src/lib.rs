@@ -20,6 +20,7 @@ mod commands;
 mod location;
 mod mainwindow;
 mod parsec;
+mod piscan;
 mod previews;
 mod profiles;
 mod scanner;
@@ -366,6 +367,9 @@ pub fn run() {
             profiles::tuning_read,
             profiles::tuning_apply,
             groupsetup::group_setup_create,
+            piscan::piscan_planets,
+            piscan::piscan_cells,
+            piscan::piscan_save,
             groupsetup::group_setups,
             groupsetup::group_setup_delete,
             launch::pause_cycle_hotkeys,

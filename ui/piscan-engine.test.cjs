@@ -1,0 +1,105 @@
+// Run: node ui/piscan-engine.test.cjs — renders a made-up planet, turns it, checks the scan maths.
+require("./piscan-engine.js");
+const E = globalThis.PiScanEngine;
+
+let fails = 0;
+const check = (what, ok) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails++; };
+
+// A planet surface: grey terrain with texture everywhere, and a resource hotspot (red → white) near lat 1.2, lon 2.0.
+const hot = E.planetVector(1.2, 2.0, false);
+function surface(p) {
+  const t = 90 + 40 * Math.sin(p[0] * 23 + p[1] * 7) * Math.cos(p[2] * 19 - p[0] * 5) + 25 * Math.sin(p[1] * 41 + p[2] * 13);
+  const d = E.angle(p, hot);
+  if (d < 0.35) { const k = 1 - d / 0.35; return [255, Math.round(80 + 175 * k * k), Math.round(60 + 195 * k * k * k)]; }
+  return [t, t * 0.95, t * 0.9];
+}
+const W = 640, H = 480, disc = { cx: 320, cy: 240, r: 200 };
+function render(Q, mirrored) {
+  const rgba = new Uint8ClampedArray(W * H * 4), Qt = E.transpose(Q);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = E.toSphere(x, y, disc), k = (y * W + x) * 4;
+    rgba[k + 3] = 255;
+    if (!v) continue;
+    const ll = E.latLon(E.apply(Qt, v), mirrored);
+    const c = surface(E.planetVector(ll.lat, ll.lon, false));
+    rgba[k] = c[0]; rgba[k + 1] = c[1]; rgba[k + 2] = c[2];
+  }
+  return rgba;
+}
+
+// fitRotation finds a known rotation.
+const R0 = E.rotationAbout([0.3, 1, 0.2], 0.4);
+const pts = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.5, 0.5, 0.7]];
+const fit = E.fitRotation(pts, pts.map((p) => E.apply(R0, p)));
+check("fitRotation recovers a rotation", fit.every((v, i) => Math.abs(v - R0[i]) < 1e-6));
+
+// Heat colours.
+check("white is hottest, blue coolest, grey none", E.heat(255, 255, 255) === 1 && Math.abs(E.heat(40, 60, 230) - 0.2) < 0.05 && E.heat(120, 120, 120) === 0);
+check("red hotter than green", E.heat(230, 30, 30) > E.heat(30, 220, 30));
+
+// Anchors: three buildings pointed out on the picture give Q back (and say it isn't mirrored).
+// Facing: the hotspot a little off the middle of the picture, north roughly up.
+const east = (() => { const c = [-hot[1], hot[0], 0], l = Math.hypot(...c); return c.map((x) => x / l); })();
+const Q = E.mul(E.rotationAbout([1, 1, 0], 0.25), E.fitRotation([hot, east], [[0, 0, 1], [1, 0, 0]]));
+const buildings = [{ lat: 1.15, lon: 1.95 }, { lat: 1.3, lon: 2.1 }, { lat: 1.1, lon: 2.15 }];
+const anchors = buildings.map((b) => { const p = E.toPicture(E.apply(Q, E.planetVector(b.lat, b.lon, false)), disc); return { px: p.x, py: p.y, ...b }; });
+check("the buildings are on the visible side", anchors.every((a) => E.toSphere(a.px, a.py, disc)));
+const solved = E.solveAnchorsEitherWay(anchors, disc);
+check("anchors give the planet's facing back", solved && Q.every((v, i) => Math.abs(v - solved.Q[i]) < 1e-3));
+check("and it isn't mirrored", solved && !solved.mirrored);
+const hotM = E.planetVector(1.2, 2.0, true);
+const Qm = E.fitRotation([hotM, [-hotM[1], hotM[0], 0]], [[0, 0, 1], [1, 0, 0]]);
+const mirroredAnchors = buildings.map((b) => { const p = E.toPicture(E.apply(Qm, E.planetVector(b.lat, b.lon, true)), disc); return { px: p.x, py: p.y, ...b }; });
+const solvedM = E.solveAnchorsEitherWay(mirroredAnchors, disc);
+check("a mirrored planet is spotted", solvedM && solvedM.mirrored);
+const two = E.solveAnchors(anchors.slice(0, 2), disc, false);
+check("two anchors are enough", two && two.error < 1e-3);
+
+// Drift fix: a slightly wrong Q is pulled so the clicked building lands on its click.
+const off = E.mul(E.rotationAbout([0, 1, 0], 0.05), Q);
+const fixedQ = E.correctWithAnchor(off, anchors[0], disc, false);
+const landed = E.toPicture(E.apply(fixedQ, E.planetVector(anchors[0].lat, anchors[0].lon, false)), disc);
+check("drift fix puts the building back", Math.hypot(landed.x - anchors[0].px, landed.y - anchors[0].py) < 0.5);
+
+// Tracking: turn the planet a few degrees between frames; the tracker finds the turn.
+const turns = [[[0, 1, 0], 0.06], [[1, 0.2, 0], -0.08], [[0.3, -1, 0.1], 0.12], [[0, 0, 1], 0.05]];
+let ok = 0;
+for (const [axis, rad] of turns) {
+  const R = E.rotationAbout(axis, rad);
+  const a = E.greyDisc(render(Q), W, H, disc), b = E.greyDisc(render(E.mul(R, Q)), W, H, disc);
+  const t = E.trackRotation(a, b);
+  const err = t ? E.angle(E.apply(t.R, [0.3, 0.4, 0.86]), E.apply(R, [0.3, 0.4, 0.86])) : 9;
+  console.log(`     turn ${rad} rad about ${axis}: ${t ? `${t.used}/${t.of} patches, error ${(err * 180 / Math.PI).toFixed(2)}°` : "lost"}`);
+  if (t && err < 0.01) ok++;
+}
+check("tracker follows each turn within ~0.6°", ok === turns.length);
+
+// A whole scan: anchors, then turns, painting each frame; the hotspot lands where it is.
+let q = solved.Q;
+const map = E.newMap();
+let frame = render(Q), grey = E.greyDisc(frame, W, H, disc), truth = Q;
+E.paint(map, frame, W, H, disc, q, false, 2);
+for (let i = 0; i < 40; i++) {
+  const R = E.rotationAbout([Math.sin(i / 7), 1, 0.3 * Math.cos(i / 5)], 0.07);
+  truth = E.mul(R, truth);
+  frame = render(truth);
+  const g = E.greyDisc(frame, W, H, disc), t = E.trackRotation(grey, g);
+  if (t) q = E.mul(t.R, q);
+  grey = g;
+  E.paint(map, frame, W, H, disc, q, false, 3);
+}
+const drift = E.angle(E.apply(q, [0, 0, 1]), E.apply(truth, [0, 0, 1])) * 180 / Math.PI;
+console.log(`     after 40 frames: drift ${drift.toFixed(2)}°, coverage ${(E.coverage(map) * 100).toFixed(0)}%`);
+check("drift stays small over a long turn", drift < 3);
+check("a long turn covers much of the planet", E.coverage(map) > 0.4);
+const bytes = E.cells(map);
+const at = (lat, lon) => bytes[Math.floor(lat / Math.PI * 180) * 360 + Math.floor(lon / (2 * Math.PI) * 360)];
+console.log("     hotspot cell", at(1.2, 2.0), "near", at(1.25, 2.05), at(1.15,1.95));
+check("the hotspot is hot on the map", at(1.2, 2.0) > 150);
+check("far from it is cold", at(1.2, 2.0 + 1.2) > 0 ? at(1.2, 2.0 + 1.2) < 30 : true);
+const back = E.fromCells(bytes);
+check("a map comes back from its bytes", E.cells(back).every((v, i) => Math.abs(v - bytes[i]) <= 1));
+check("a missing-side hint is given", typeof E.missingHint(map, q, false) === "string");
+
+console.log(fails ? `\n${fails} failed` : "\nall passed");
+process.exit(fails ? 1 : 0);

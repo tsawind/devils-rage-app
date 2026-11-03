@@ -115,6 +115,10 @@
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
       <div><b>Client settings</b><span>Copy one client's settings to the others, profiles, backups</span></div>
     </button>
+    <button class="tool" data-tool="piscan">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 2.6 3 14.4 0 17M12 3.5c-3 2.6-3 14.4 0 17"/></svg>
+      <div><b>PI planet scan<em>BETA</em></b><span>Turn a planet in EVE; the app maps the whole planet's resources for the corp</span></div>
+    </button>
     <button class="tool" data-tool="tuning">
       <svg viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16"/><circle cx="5" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="7" r="2"/></svg>
       <div><b>Client tuning</b><span>Sound, graphics and multibox presets, plus a setup guide</span></div>
@@ -171,6 +175,7 @@
       if (btn.dataset.tool === "settings") { location.href = "profiles.html"; return; }
       if (btn.dataset.tool === "tuning") { location.href = "tuning.html"; return; }
       if (btn.dataset.tool === "newgroup") { location.href = "newgroup.html"; return; }
+      if (btn.dataset.tool === "piscan") { location.href = "piscan.html"; return; }
       if (btn.dataset.tool === "multibox") {
         soon.textContent = "Opening a preview for each EVE client…";
         try {
