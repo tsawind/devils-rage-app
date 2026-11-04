@@ -21,9 +21,10 @@
   body.edit.through #frame { border-color: #3a6ea8; }
   /* The client in front right now. */
   body.active #frame { border: 3px solid #adff2f; }
-  /* Patch 114: in the pedal's hotkey group: orange round the outside (green inside it when in front). */
-  body.ingroup:not(.edit) #frame { border: 3px solid #ff8c1a; }
-  body.ingroup.active:not(.edit) #frame { box-shadow: inset 0 0 0 3px #adff2f; }
+  /* Patch 115: taken out of the pedal's hotkey group (died, flying something else): orange round
+     the outside, so it stands out from the stack (green inside it when in front). */
+  body.groupoff:not(.edit) #frame { border: 3px solid #ff8c1a; }
+  body.groupoff.active:not(.edit) #frame { box-shadow: inset 0 0 0 3px #adff2f; }
   body.login #name { color: #f0c040; }
   #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3;
          text-align: center; padding: 16px; color: #c98a5a; pointer-events: none; }
@@ -50,7 +51,10 @@
            border: 2px solid #ff8c1a; border-radius: 3px; background: #0009; }
   body.hasgroup #group { display: block; }
   body.edit #group { right: 28px; }
+  /* On the pedal: the square lit. Taken out: just its outline. In no hotkey group: only on hover. */
   body.ingroup #group { background: #ff8c1a; box-shadow: inset 0 0 0 2px #000; }
+  body.groupout #group { opacity: 0; border-color: #888; }
+  body.groupout:hover #group { opacity: 1; }
   #group:hover { filter: brightness(1.3); }
   body.hasgroup #name { padding-right: 26px; }
   body.edit.hasgroup #name { padding-right: 50px; }
@@ -74,7 +78,7 @@
   </div>
   <div id="grip" title="Drag to resize"></div>
   <div id="close" title="Close this preview">✕</div>
-  <div id="group" title="In the pedal / hotkey group (orange frame). Click to take this client in or out of the cycle."></div>
+  <div id="group" title="Lit: on the pedal / hotkey cycle. Click to take this client out (orange frame) or back in."></div>
 
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
@@ -103,7 +107,7 @@
     document.getElementById("opacity").value = String(Math.round((m.opacity || 1) * 100));
     // Patch 114: the hotkey-group square (group: null = no square).
     document.body.classList.toggle("hasgroup", m.group !== null && m.group !== undefined);
-    document.body.classList.toggle("ingroup", m.group === true);
+    setGroup(m.group);
     showSize();
   };
   invoke("preview_mode", { name }).then(window.__previewMode).catch(() => {});
@@ -154,15 +158,21 @@
   document.getElementById("opacity").addEventListener("input", (e) => invoke("set_preview_client", { name, opacity: Number(e.target.value) / 100 }).catch(() => {}));
   document.getElementById("done").addEventListener("click", () => invoke("set_preview_edit", { on: false }).catch(() => {}));
 
-  // The square: in / out of the hotkey group.
+  // The square: in / out of the hotkey group ("on", "off" = taken out, "out" = in no hotkey group).
+  function setGroup(state) {
+    mode.group = state;
+    document.body.classList.toggle("ingroup", state === "on");
+    document.body.classList.toggle("groupoff", state === "off");
+    document.body.classList.toggle("groupout", state === "out");
+  }
   const groupBox = document.getElementById("group");
   groupBox.addEventListener("mousedown", (e) => e.stopPropagation());
   groupBox.addEventListener("click", (e) => {
     e.stopPropagation();
-    const on = !document.body.classList.contains("ingroup");
-    document.body.classList.toggle("ingroup", on);
+    const was = mode.group, on = was !== "on";
+    setGroup(on ? "on" : "off");
     invoke("set_preview_group", { name, on }).catch((err) => {
-      document.body.classList.toggle("ingroup", !on);
+      setGroup(was);
       msg.textContent = String(err || "Couldn't change the group"); msg.hidden = false;
       setTimeout(() => { msg.hidden = true; }, 3000);
     });

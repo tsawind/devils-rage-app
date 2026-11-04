@@ -393,14 +393,22 @@ fn has_hotkey(group: &Group) -> bool {
     [&group.forward_hotkey, &group.backward_hotkey].iter().any(|h| h.as_deref().is_some_and(|h| !h.trim().is_empty()))
 }
 
-/// Patch 114: is this character cycled by the pedal? In (and switched on) in any group with a
-/// hotkey. None when no group has a hotkey (the previews then show no square).
-pub fn hotkey_membership(app: &AppHandle, name: &str) -> Option<bool> {
+/// Patch 114: where this character stands with the pedal: "on" (in a hotkey group and switched
+/// on), "off" (in one but switched off: dead, or flying something else), "out" (in none).
+/// None when no group has a hotkey (the previews then show no square).
+pub fn hotkey_membership(app: &AppHandle, name: &str) -> Option<&'static str> {
     let groups: Vec<Group> = all_groups(app).into_iter().filter(has_hotkey).collect();
     if groups.is_empty() {
         return None;
     }
-    Some(groups.iter().any(|g| g.members.iter().any(|m| m == name) && !g.skipped.iter().any(|s| s == name)))
+    let member: Vec<&Group> = groups.iter().filter(|g| g.members.iter().any(|m| m == name)).collect();
+    Some(if member.is_empty() {
+        "out"
+    } else if member.iter().any(|g| !g.skipped.iter().any(|s| s == name)) {
+        "on"
+    } else {
+        "off"
+    })
 }
 
 /// Patch 114: the preview's square. Switch the character on or off in every hotkey group it's
