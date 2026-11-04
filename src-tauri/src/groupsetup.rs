@@ -160,7 +160,7 @@ pub async fn group_setup_create(app: AppHandle, setup: NewGroup) -> Result<serde
     crate::launch::save_seat_group_prefs(
         app.clone(),
         group_id,
-        crate::launch::GroupPrefs { forward_hotkey: setup.forward_hotkey, backward_hotkey: setup.backward_hotkey, skipped: Vec::new(), login_screens: setup.login_screens },
+        crate::launch::GroupPrefs { forward_hotkey: setup.forward_hotkey, backward_hotkey: setup.backward_hotkey, skipped: Vec::new(), login_screens: setup.login_screens, ..Default::default() },
     )?;
     let _ = crate::launch::seat_refresh(app.clone()).await;
     log::info!("new launch group {name}: settings_{folder}, {} characters", setup.character_ids.len());
@@ -289,6 +289,8 @@ pub async fn group_setup_update(app: AppHandle, profile: String, setup: NewGroup
             backward_hotkey: setup.backward_hotkey.or(old.backward_hotkey),
             skipped: old.skipped,
             login_screens: setup.login_screens,
+            color: old.color,
+            remember_windows: old.remember_windows,
         },
     )?;
     let _ = crate::launch::seat_refresh(app.clone()).await;

@@ -188,15 +188,15 @@ fn edit_mode(app: &AppHandle) -> bool {
 fn mode_json(app: &AppHandle, name: &str) -> serde_json::Value {
     let prefs = prefs_for(app, name);
     let (master, marks) = with_layout(app, |layout| (layout.opacity, layout.group_marks));
-    // In / out of the pedal's hotkey group (None: no group has a hotkey, or squares are off).
-    let group = if marks && !crate::clipboard::is_login_label(name) { crate::launch::hotkey_membership(app, name) } else { None };
+    // One square per stack (group with a pedal key); none when squares are off.
+    let stacks = if marks && !crate::clipboard::is_login_label(name) { crate::launch::stacks_for(app, name) } else { Vec::new() };
     serde_json::json!({
         "edit": edit_mode(app),
         "enabled": prefs.enabled,
         "clickThrough": prefs.click_through,
         "opacity": prefs.opacity,
         "master": master,
-        "group": group,
+        "stacks": stacks,
     })
 }
 
@@ -668,10 +668,10 @@ pub fn set_previews_opacity(app: AppHandle, opacity: f64) {
     }
 }
 
-/// Patch 114: the square on a preview: put that client in or out of the pedal's hotkey group.
+/// Patch 116: a stack's square on a preview: that client joins or leaves that stack.
 #[tauri::command]
-pub fn set_preview_group(app: AppHandle, name: String, on: bool) -> Result<(), String> {
-    crate::launch::set_hotkey_member(&app, &name, on)?;
+pub fn set_preview_group(app: AppHandle, name: String, group: String, on: bool) -> Result<(), String> {
+    crate::launch::set_stack_member(&app, &group, &name, on)?;
     refresh_modes(&app);
     Ok(())
 }
@@ -756,13 +756,21 @@ fn hover_square(app: &AppHandle) {
         if edit || !prefs_for(app, &name).click_through {
             continue;
         }
-        let over = cursor.is_some_and(|c| {
+        // The squares: 18 css px each, 4 apart, 4 from the right, 2 from the top (preview.html).
+        let near = |c: &tauri::PhysicalPosition<f64>, squares: f64| {
             let (Ok(pos), Ok(size), Ok(scale)) = (window.outer_position(), window.outer_size(), window.scale_factor()) else { return false };
-            // The square: 18 css px, 2 from the top, 4 from the right (preview.html), with some slack.
-            let (left, right) = (pos.x as f64 + size.width as f64 - 26.0 * scale, pos.x as f64 + size.width as f64);
-            let (top, bottom) = (pos.y as f64, pos.y as f64 + 24.0 * scale);
-            c.x >= left && c.x <= right && c.y >= top && c.y <= bottom
-        }) && crate::launch::hotkey_membership(app, &name).is_some();
+            let right = pos.x as f64 + size.width as f64;
+            let left = right - (6.0 + 22.0 * squares) * scale;
+            c.x >= left && c.x <= right && c.y >= pos.y as f64 && c.y <= pos.y as f64 + 24.0 * scale
+        };
+        // Cheap test first (room for 8 squares), then the real number of stacks.
+        let over = cursor.is_some_and(|c| {
+            if !near(&c, 8.0) {
+                return false;
+            }
+            let stacks = crate::launch::stack_groups(app).len();
+            stacks > 0 && near(&c, stacks as f64)
+        });
         let mut taking = HOVER_OPEN.lock().unwrap();
         let was = taking.contains(&label);
         if over != was {
@@ -899,6 +907,7 @@ pub async fn import_eveo(app: AppHandle) -> Result<String, String> {
             skipped: g.skipped,
             forward_hotkey: g.forward,
             backward_hotkey: g.backward,
+            ..Default::default()
         })
         .collect();
     let group_count = groups.len();

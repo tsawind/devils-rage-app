@@ -23,6 +23,13 @@ pub struct ClientLayout {
     pub spots: BTreeMap<String, Spot>,
     #[serde(default)]
     pub auto: bool,
+    /// Patch 116: each stack's spot for each character (stack id → character → spot), learnt
+    /// when the character leaves the stack.
+    #[serde(default)]
+    pub stacks: BTreeMap<String, BTreeMap<String, Spot>>,
+    /// Which stack's spot a character's window is in now (none: its own spot above).
+    #[serde(default)]
+    pub in_stack: BTreeMap<String, String>,
 }
 
 static LAYOUT: Mutex<Option<ClientLayout>> = Mutex::new(None);
@@ -97,7 +104,15 @@ pub fn client_windows_remember(app: AppHandle) -> Result<String, String> {
             continue;
         }
         if let Some(spot) = win::spot(handle).filter(|s| s.w > 100 && s.h > 100) {
-            with(&app, |layout| layout.spots.insert(name.clone(), spot));
+            // A client sitting in a stack: that's its spot in the stack.
+            with(&app, |layout| match layout.in_stack.get(&name).cloned() {
+                Some(stack) => {
+                    layout.stacks.entry(stack).or_default().insert(name.clone(), spot);
+                }
+                None => {
+                    layout.spots.insert(name.clone(), spot);
+                }
+            });
             count += 1;
         }
     }
@@ -132,19 +147,87 @@ pub fn client_windows_state(app: AppHandle) -> serde_json::Value {
 
 /// Move the named clients (all when None) to their spots; how many moved.
 pub fn place_these(app: &AppHandle, only: Option<&[String]>) -> usize {
-    let spots = with(app, |layout| layout.spots.clone());
     let mut moved = 0;
     for (name, handle) in crate::clipboard::open_clients() {
         if only.is_some_and(|names| !names.contains(&name)) {
             continue;
         }
-        if let Some(spot) = spots.get(&name) {
-            if win::place(handle, *spot) {
+        if let Some(spot) = with(app, |layout| spot_now(layout, &name)) {
+            if win::place(handle, spot) {
                 moved += 1;
             }
         }
     }
     moved
+}
+
+/// Where a character's window belongs right now: its stack's spot while it's in one, else its own.
+fn spot_now(layout: &ClientLayout, name: &str) -> Option<Spot> {
+    layout
+        .in_stack
+        .get(name)
+        .and_then(|stack| layout.stacks.get(stack))
+        .and_then(|spots| spots.get(name))
+        .or_else(|| layout.spots.get(name))
+        .copied()
+}
+
+/// Patch 116: a character joined or left a stack (its square on the preview). With the stack's
+/// "remember window locations": joining keeps where the window is now (as its own spot, or its
+/// spot in the stack it was in) and moves it to its spot in this stack; leaving keeps its spot
+/// here and moves it back (to another stack it's still in, else its own spot). The first time,
+/// there's no spot in the stack yet: drag the window there, and leaving remembers it.
+pub fn stack_changed(app: &AppHandle, name: &str, stack: &str, joined: bool, remember: bool, still_on: &[String]) {
+    if !keeps_a_spot(name) {
+        return;
+    }
+    let handle = crate::clipboard::open_clients().into_iter().find(|(n, _)| n == name).map(|(_, h)| h);
+    let now = handle.and_then(win::spot).filter(|s| s.w > 100 && s.h > 100);
+    let target = with(app, |layout| stack_move(layout, name, stack, joined, remember, still_on, now));
+    save(app);
+    if let (Some(handle), Some(target)) = (handle, target) {
+        if win::place(handle, target) {
+            log::info!("{name} {} stack {stack}: window moved", if joined { "joined" } else { "left" });
+        }
+    }
+}
+
+/// The bookkeeping of `stack_changed`: updates the spots, returns where the window should go.
+fn stack_move(layout: &mut ClientLayout, name: &str, stack: &str, joined: bool, remember: bool, still_on: &[String], now: Option<Spot>) -> Option<Spot> {
+    let current = layout.in_stack.get(name).cloned();
+    if joined {
+        if !remember {
+            return None;
+        }
+        if let Some(now) = now {
+            match &current {
+                Some(other) => {
+                    layout.stacks.entry(other.clone()).or_default().insert(name.to_string(), now);
+                }
+                None => {
+                    layout.spots.insert(name.to_string(), now);
+                }
+            }
+        }
+        layout.in_stack.insert(name.to_string(), stack.to_string());
+        layout.stacks.get(stack).and_then(|s| s.get(name)).copied()
+    } else {
+        if current.as_deref() != Some(stack) {
+            return None;
+        }
+        if let Some(now) = now.filter(|_| remember) {
+            layout.stacks.entry(stack.to_string()).or_default().insert(name.to_string(), now);
+        }
+        match still_on.first() {
+            Some(next) => {
+                layout.in_stack.insert(name.to_string(), next.clone());
+            }
+            None => {
+                layout.in_stack.remove(name);
+            }
+        }
+        spot_now(layout, name)
+    }
 }
 
 /// For the preview watcher: clients that just appeared go to their spot when Auto is on.
@@ -163,7 +246,47 @@ pub fn on_new_clients(app: &AppHandle, names: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::keeps_a_spot;
+    use super::*;
+
+    const TOP_LEFT: Spot = Spot { x: 0, y: 0, w: 1280, h: 720 };
+    const BOTTOM_LEFT: Spot = Spot { x: 0, y: 720, w: 1280, h: 720 };
+    const BOTTOM_RIGHT: Spot = Spot { x: 1280, y: 720, w: 1280, h: 720 };
+
+    #[test]
+    fn joining_and_leaving_a_stack_moves_the_window_there_and_back() {
+        let mut layout = ClientLayout::default();
+        // First time: no spot in the stack yet, so it stays; its own spot is kept.
+        assert_eq!(stack_move(&mut layout, "Tsawind", "dps", true, true, &[], Some(TOP_LEFT)), None);
+        assert_eq!(layout.spots["Tsawind"], TOP_LEFT);
+        // Dragged down into the stack by hand, then leaves: that spot is learnt, back to the top left.
+        assert_eq!(stack_move(&mut layout, "Tsawind", "dps", false, true, &[], Some(BOTTOM_LEFT)), Some(TOP_LEFT));
+        assert!(!layout.in_stack.contains_key("Tsawind"));
+        // Next time it joins, it goes straight down.
+        assert_eq!(stack_move(&mut layout, "Tsawind", "dps", true, true, &[], Some(TOP_LEFT)), Some(BOTTOM_LEFT));
+        assert_eq!(layout.in_stack["Tsawind"], "dps");
+    }
+
+    #[test]
+    fn leaving_one_stack_goes_to_another_it_is_still_in() {
+        let mut layout = ClientLayout::default();
+        layout.spots.insert("Tsawind".into(), TOP_LEFT);
+        layout.stacks.entry("dps".into()).or_default().insert("Tsawind".into(), BOTTOM_LEFT);
+        layout.stacks.entry("logi".into()).or_default().insert("Tsawind".into(), BOTTOM_RIGHT);
+        assert_eq!(stack_move(&mut layout, "Tsawind", "dps", true, true, &[], Some(TOP_LEFT)), Some(BOTTOM_LEFT));
+        assert_eq!(stack_move(&mut layout, "Tsawind", "logi", true, true, &["dps".into()], Some(BOTTOM_LEFT)), Some(BOTTOM_RIGHT));
+        // Leaving logi while still in dps: back down to the dps spot.
+        assert_eq!(stack_move(&mut layout, "Tsawind", "logi", false, true, &["dps".into()], Some(BOTTOM_RIGHT)), Some(BOTTOM_LEFT));
+        assert_eq!(layout.in_stack["Tsawind"], "dps");
+    }
+
+    #[test]
+    fn stacks_without_remember_never_move_it() {
+        let mut layout = ClientLayout::default();
+        layout.spots.insert("MyThai".into(), TOP_LEFT);
+        assert_eq!(stack_move(&mut layout, "MyThai", "dps", true, false, &[], Some(BOTTOM_LEFT)), None);
+        assert_eq!(stack_move(&mut layout, "MyThai", "dps", false, false, &[], Some(BOTTOM_LEFT)), None);
+        assert_eq!(layout.spots["MyThai"], TOP_LEFT);
+    }
 
     #[test]
     fn login_screens_have_no_spot() {

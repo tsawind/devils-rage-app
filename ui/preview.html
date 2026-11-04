@@ -21,9 +21,9 @@
   body.edit.through #frame { border-color: #3a6ea8; }
   /* The client in front right now. */
   body.active #frame { border: 3px solid #adff2f; }
-  /* Patch 115: taken out of the pedal's hotkey group (died, flying something else): orange round
-     the outside, so it stands out from the stack (green inside it when in front). */
-  body.groupoff:not(.edit) #frame { border: 3px solid #ff8c1a; }
+  /* Patch 115/116: taken out of its stack (died, flying something else) and in no other: a frame
+     in that stack's color round the outside (green inside it when in front). */
+  body.groupoff:not(.edit) #frame { border: 3px solid var(--off, #ff8c1a); }
   body.groupoff.active:not(.edit) #frame { box-shadow: inset 0 0 0 3px #adff2f; }
   body.login #name { color: #f0c040; }
   #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3;
@@ -46,18 +46,16 @@
   /* Patch 114: the ✕ only while arranging (edit preview layout). */
   body:not(.edit) #close { display: none; }
   body.edit:hover #close { opacity: 1; }
-  /* The square: in / out of the pedal's hotkey group. Where the ✕ is; left of it while editing. */
-  #group { position: fixed; top: 2px; right: 4px; width: 14px; height: 14px; z-index: 8; display: none; cursor: pointer;
-           border: 2px solid #ff8c1a; border-radius: 3px; background: #0009; }
-  body.hasgroup #group { display: block; }
-  body.edit #group { right: 28px; }
-  /* On the pedal: the square lit. Taken out: just its outline. In no hotkey group: only on hover. */
-  body.ingroup #group { background: #ff8c1a; box-shadow: inset 0 0 0 2px #000; }
-  body.groupout #group { opacity: 0; border-color: #888; }
-  body.groupout:hover #group { opacity: 1; }
-  #group:hover { filter: brightness(1.3); }
-  body.hasgroup #name { padding-right: 26px; }
-  body.edit.hasgroup #name { padding-right: 50px; }
+  /* Patch 116: one square per stack (group with a pedal key), first stack on the right, where the ✕
+     is (left of it while editing). Lit: cycled in that stack. Outline: switched off in it. Faint:
+     not in it (click to join). */
+  #groups { position: fixed; top: 2px; right: 4px; z-index: 8; display: flex; flex-direction: row-reverse; gap: 4px; }
+  body.edit #groups { right: 28px; }
+  #groups .sq { width: 14px; height: 14px; cursor: pointer; border: 2px solid var(--c); border-radius: 3px; background: #0009; }
+  #groups .sq.on { background: var(--c); box-shadow: inset 0 0 0 2px #000; }
+  #groups .sq.out { opacity: .3; }
+  body:hover #groups .sq.out { opacity: .7; }
+  #groups .sq:hover { opacity: 1 !important; filter: brightness(1.3); }
   #bar input[type=number] { width: 48px; font: inherit; background: #111; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 0 2px; }
   #close:hover { background: #a8181f; color: #fff; }
 </style>
@@ -78,7 +76,7 @@
   </div>
   <div id="grip" title="Drag to resize"></div>
   <div id="close" title="Close this preview">✕</div>
-  <div id="group" title="Lit: on the pedal / hotkey cycle. Click to take this client out (orange frame) or back in."></div>
+  <div id="groups"></div>
 
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
@@ -105,9 +103,7 @@
     document.getElementById("shown").checked = !!m.enabled;
     document.getElementById("through").checked = !!m.clickThrough;
     document.getElementById("opacity").value = String(Math.round((m.opacity || 1) * 100));
-    // Patch 114: the hotkey-group square (group: null = no square).
-    document.body.classList.toggle("hasgroup", m.group !== null && m.group !== undefined);
-    setGroup(m.group);
+    drawStacks(m.stacks || []);
     showSize();
   };
   invoke("preview_mode", { name }).then(window.__previewMode).catch(() => {});
@@ -158,25 +154,37 @@
   document.getElementById("opacity").addEventListener("input", (e) => invoke("set_preview_client", { name, opacity: Number(e.target.value) / 100 }).catch(() => {}));
   document.getElementById("done").addEventListener("click", () => invoke("set_preview_edit", { on: false }).catch(() => {}));
 
-  // The square: in / out of the hotkey group ("on", "off" = taken out, "out" = in no hotkey group).
-  function setGroup(state) {
-    mode.group = state;
-    document.body.classList.toggle("ingroup", state === "on");
-    document.body.classList.toggle("groupoff", state === "off");
-    document.body.classList.toggle("groupout", state === "out");
+  // Patch 116: the stack squares ("on", "off" = switched off in it, "out" = not in it).
+  const groupsBox = document.getElementById("groups");
+  function drawStacks(stacks) {
+    mode.stacks = stacks;
+    groupsBox.innerHTML = "";
+    for (const st of stacks) {
+      const sq = document.createElement("div");
+      sq.className = "sq " + st.state;
+      sq.style.setProperty("--c", st.color);
+      sq.title = st.name + (st.state === "on" ? ": on its pedal. Click to take this client out." : st.state === "off" ? ": taken out. Click to put it back in." : ": not in it. Click to join.")
+        + (st.remember ? " (its EVE window moves with it)" : "");
+      sq.addEventListener("mousedown", (e) => e.stopPropagation());
+      sq.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const on = st.state !== "on", was = mode.stacks;
+        drawStacks(was.map(x => x.id === st.id ? { ...x, state: on ? "on" : "off" } : x));
+        invoke("set_preview_group", { name, group: st.id, on }).catch((err) => {
+          drawStacks(was);
+          msg.textContent = String(err || "Couldn't change the stack"); msg.hidden = false;
+          setTimeout(() => { msg.hidden = true; }, 4000);
+        });
+      });
+      groupsBox.append(sq);
+    }
+    // The frame: taken out of a stack and not cycled in any.
+    const off = stacks.find(x => x.state === "off");
+    const taken = !!off && !stacks.some(x => x.state === "on");
+    document.body.classList.toggle("groupoff", taken);
+    if (off) document.body.style.setProperty("--off", off.color);
+    document.getElementById("name").style.paddingRight = (8 + 18 * stacks.length + (mode.edit ? 24 : 0)) + "px";
   }
-  const groupBox = document.getElementById("group");
-  groupBox.addEventListener("mousedown", (e) => e.stopPropagation());
-  groupBox.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const was = mode.group, on = was !== "on";
-    setGroup(on ? "on" : "off");
-    invoke("set_preview_group", { name, on }).catch((err) => {
-      setGroup(was);
-      msg.textContent = String(err || "Couldn't change the group"); msg.hidden = false;
-      setTimeout(() => { msg.hidden = true; }, 3000);
-    });
-  });
 
   // Patch 114: type a size (physical pixels, like the saved layout).
   const sizeW = document.getElementById("sizeW"), sizeH = document.getElementById("sizeH");

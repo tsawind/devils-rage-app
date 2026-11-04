@@ -66,6 +66,9 @@
   details.check ol { margin: 6px 0 0 18px; padding: 0; font-size: 13px; }
   details.check li { margin: 3px 0; }
   details.check .ok { color: #adff2f; }
+  .stack { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .stack label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .stack input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; }
   .empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 22px; text-align: center; }
 </style>
 </head>
@@ -129,6 +132,31 @@
   }
 
   function status(t) { document.getElementById("status").textContent = t || ""; }
+
+  // Patch 116: a group with a pedal key is a stack: its color (squares on the previews) and
+  // whether its clients' EVE windows move in and out with it.
+  const STACK_COLORS = ["#ff8c1a", "#3ccf4e", "#3d8bff", "#b36bff", "#20c8d8", "#ff5fa2"];
+  const hasKey = (g) => !!((g.forward_hotkey || "").trim() || (g.backward_hotkey || "").trim());
+  function stackRow(g, stackIndex, onChange) {
+    const row = el("div", "stack");
+    if (stackIndex < 0) { row.append(el("span", null, "Set a pedal / hotkey to make this a stack (a square on each preview).")); return row; }
+    const color = el("input"); color.type = "color"; color.value = g.color || STACK_COLORS[stackIndex % STACK_COLORS.length];
+    color.title = "This stack's color: its square on every preview, and the frame when a client is taken out";
+    color.addEventListener("change", () => { g.color = color.value; onChange(); });
+    const cl = el("label"); cl.append(color, document.createTextNode("Stack color"));
+    const box = el("input"); box.type = "checkbox"; box.checked = !!g.remember_windows;
+    box.addEventListener("change", () => { g.remember_windows = box.checked; onChange(); });
+    const rl = el("label");
+    rl.title = "Click a preview's square to join this stack and its EVE window moves to its spot here; untick it and the window goes back to where it was. The first time, drag the window into the stack yourself: leaving remembers the spot.";
+    rl.append(box, document.createTextNode("Remember their window locations"));
+    row.append(cl, rl);
+    return row;
+  }
+  // Stacks in the order the previews show them: Your accounts' groups first, then this PC's.
+  function stackIndexOf(g) {
+    const all = [...seat.groups.map(x => x.prefs), ...groups].filter(hasKey);
+    return all.indexOf(g);
+  }
 
   // Patch 66: SeAT's launch groups, with this PC's pedal keys, switches and login screens.
   function chipFor(name, skipped, onToggle) {
@@ -198,7 +226,7 @@
         catch (e) { status(String(e)); document.getElementById("pathWarn").hidden = false; }
       });
       row.append(open);
-      card.append(top, members, opts, cyc, row, check);
+      card.append(top, members, opts, cyc, stackRow(prefs, stackIndexOf(prefs), () => { save(); render(); }), row, check);
       host.append(card);
     });
   }
@@ -286,7 +314,7 @@
       const hint = el("span", "note"); hint.style.margin = "0"; hint.textContent = "then click these clients in the launcher";
       row.append(open, hint);
 
-      card.append(top, members, add, cyc, row);
+      card.append(top, members, add, cyc, stackRow(g, stackIndexOf(g), () => { save(); render(); }), row);
       host.append(card);
     });
   }
@@ -356,8 +384,16 @@
   setInterval(async () => {
     const s = await invoke("launch_status").catch(() => null);
     if (!s) return;
-    const changed = JSON.stringify([s.open, s.logins, s.active]) !== JSON.stringify([openClients, logins, active]);
+    let changed = JSON.stringify([s.open, s.logins, s.active]) !== JSON.stringify([openClients, logins, active]);
     openClients = s.open; logins = s.logins; active = s.active || null;
+    const busy = (document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName)) || document.querySelector(".key.listen") || document.querySelector(".chip.dragging");
+    // A preview's stack square changes the groups behind this page's back: pick that up.
+    if (!busy) {
+      const fresh = await invoke("launch_groups").catch(() => null);
+      const freshSeat = await invoke("seat_launch_groups").catch(() => null);
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(groups)) { groups = fresh; changed = true; }
+      if (freshSeat && JSON.stringify(freshSeat.groups) !== JSON.stringify(seat.groups)) { seat = freshSeat; changed = true; }
+    }
     const typing = (document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName)) || document.querySelector(".key.listen") || document.querySelector(".chip.dragging");
     if (changed && !typing) render();
   }, 1500);

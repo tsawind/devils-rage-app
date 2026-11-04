@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use tauri::{AppHandle, Manager};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Group {
     pub id: String,
     pub name: String,
@@ -27,6 +27,13 @@ pub struct Group {
     /// And one that cycles it backward.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backward_hotkey: Option<String>,
+    /// Patch 116 (stacks): the color of this group's square / frame on the previews (#rrggbb).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Patch 116: move a client's EVE window into this stack's spot when it joins (its square
+    /// on the preview) and back to where it was when it leaves.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remember_windows: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -72,6 +79,8 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
             skipped,
             forward_hotkey: g.forward_hotkey.filter(|h| !h.trim().is_empty()),
             backward_hotkey: g.backward_hotkey.filter(|h| !h.trim().is_empty()),
+            color: clean_color(g.color),
+            remember_windows: g.remember_windows,
             }
         })
         .collect();
@@ -160,6 +169,13 @@ pub struct GroupPrefs {
     pub skipped: Vec<String>,
     #[serde(default)]
     pub login_screens: bool,
+    /// Patch 116 (stacks): the color of this group's square / frame on the previews (#rrggbb).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Patch 116: move a client's EVE window into this stack's spot when it joins (its square
+    /// on the preview) and back to where it was when it leaves.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remember_windows: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -256,7 +272,7 @@ pub fn all_groups(app: &AppHandle) -> Vec<Group> {
             if p.login_screens {
                 members.push(crate::cycle::LOGIN_SCREENS.to_string());
             }
-            Group { id: format!("seat-{}", g.id), name: g.name, members, skipped: p.skipped, forward_hotkey: p.forward_hotkey, backward_hotkey: p.backward_hotkey }
+            Group { id: format!("seat-{}", g.id), name: g.name, members, skipped: p.skipped, forward_hotkey: p.forward_hotkey, backward_hotkey: p.backward_hotkey, color: p.color, remember_windows: p.remember_windows }
         })
         .collect();
     out.extend(load(app).groups);
@@ -379,6 +395,8 @@ pub fn save_seat_group_prefs(app: AppHandle, id: u64, prefs: GroupPrefs) -> Resu
         backward_hotkey: prefs.backward_hotkey.filter(|h| !h.trim().is_empty()),
         skipped: prefs.skipped.into_iter().take(150).collect(),
         login_screens: prefs.login_screens,
+        color: clean_color(prefs.color),
+        remember_windows: prefs.remember_windows,
     };
     crate::cycle::forget(&format!("seat-{id}"));
     all.groups.insert(id.to_string(), clean);
@@ -393,76 +411,78 @@ fn has_hotkey(group: &Group) -> bool {
     [&group.forward_hotkey, &group.backward_hotkey].iter().any(|h| h.as_deref().is_some_and(|h| !h.trim().is_empty()))
 }
 
-/// Patch 114: where this character stands with the pedal: "on" (in a hotkey group and switched
-/// on), "off" (in one but switched off: dead, or flying something else), "out" (in none).
-/// None when no group has a hotkey (the previews then show no square).
-pub fn hotkey_membership(app: &AppHandle, name: &str) -> Option<&'static str> {
-    let groups: Vec<Group> = all_groups(app).into_iter().filter(has_hotkey).collect();
-    if groups.is_empty() {
-        return None;
-    }
-    let member: Vec<&Group> = groups.iter().filter(|g| g.members.iter().any(|m| m == name)).collect();
-    Some(if member.is_empty() {
-        "out"
-    } else if member.iter().any(|g| !g.skipped.iter().any(|s| s == name)) {
-        "on"
-    } else {
-        "off"
-    })
+/// Colors for stacks that haven't picked one: orange, green, blue, purple, cyan, pink.
+const STACK_COLORS: [&str; 6] = ["#ff8c1a", "#3ccf4e", "#3d8bff", "#b36bff", "#20c8d8", "#ff5fa2"];
+
+fn clean_color(color: Option<String>) -> Option<String> {
+    color.filter(|c| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit()))
 }
 
-/// Patch 114: the preview's square. Switch the character on or off in every hotkey group it's
-/// in (like the toggle on its chip); a character in none is added to the first of this PC's
-/// hotkey groups.
-pub fn set_hotkey_member(app: &AppHandle, name: &str, on: bool) -> Result<(), String> {
+/// Patch 116: the stacks (groups with a pedal / hotkey), in the order the launch groups page shows them.
+pub fn stack_groups(app: &AppHandle) -> Vec<Group> {
+    all_groups(app).into_iter().filter(has_hotkey).collect()
+}
+
+/// Where this character stands in each stack, for its preview's squares: "on" (cycled), "off"
+/// (in the stack, switched off: dead, flying something else), "out" (not in it).
+pub fn stacks_for(app: &AppHandle, name: &str) -> Vec<serde_json::Value> {
+    stack_groups(app)
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let state = if !g.members.iter().any(|m| m == name) {
+                "out"
+            } else if g.skipped.iter().any(|s| s == name) {
+                "off"
+            } else {
+                "on"
+            };
+            serde_json::json!({
+                "id": g.id,
+                "name": g.name,
+                "color": g.color.clone().unwrap_or_else(|| STACK_COLORS[i % STACK_COLORS.len()].to_string()),
+                "remember": g.remember_windows,
+                "state": state,
+            })
+        })
+        .collect()
+}
+
+/// Patch 116: a preview's square for one stack. On: the character joins it (switched back on,
+/// or added at the end of its list); off: switched off in it. With the stack's "remember window
+/// locations", its EVE window moves into the stack's spot and back out (clientwindows.rs).
+pub fn set_stack_member(app: &AppHandle, group_id: &str, name: &str, on: bool) -> Result<(), String> {
+    let group = stack_groups(app).into_iter().find(|g| g.id == group_id).ok_or("That stack is gone (no pedal key any more?)")?;
     let toggle = |skipped: &mut Vec<String>| {
         skipped.retain(|s| s != name);
         if !on {
             skipped.push(name.to_string());
         }
     };
-    let mut found = false;
-    // SeAT's groups: the switched-off list is this PC's.
-    let seat = load_seat(app);
-    let mut prefs = load_prefs(app);
-    let mut seat_changed = false;
-    for g in &seat.groups {
-        let key = g.id.to_string();
-        let mut p = prefs.groups.get(&key).cloned().unwrap_or_default();
-        let keyed = [&p.forward_hotkey, &p.backward_hotkey].iter().any(|h| h.as_deref().is_some_and(|h| !h.trim().is_empty()));
-        if !keyed || !g.members.iter().any(|m| m.name == name) {
-            continue;
+    if let Some(seat_id) = group_id.strip_prefix("seat-") {
+        if !group.members.iter().any(|m| m == name) {
+            return Err(format!("{name} isn't in {}: tick that group on {name} in Your accounts first.", group.name));
         }
-        found = true;
-        toggle(&mut p.skipped);
-        prefs.groups.insert(key, p);
-        seat_changed = true;
-    }
-    if seat_changed {
+        let mut prefs = load_prefs(app);
+        toggle(&mut prefs.groups.entry(seat_id.to_string()).or_default().skipped);
         write_json(config_file(app, "seat-group-prefs.json").ok_or("no config folder")?, &prefs)?;
-    }
-    // This PC's groups.
-    let mut groups = load(app).groups;
-    let mut local_changed = false;
-    for g in groups.iter_mut().filter(|g| has_hotkey(g)) {
+    } else {
+        let mut groups = load(app).groups;
+        let g = groups.iter_mut().find(|g| g.id == group_id).ok_or("That stack is gone")?;
         if g.members.iter().any(|m| m == name) {
-            found = true;
             toggle(&mut g.skipped);
-            local_changed = true;
+        } else if on {
+            g.members.push(name.to_string());
         }
-    }
-    if !found && on {
-        match groups.iter_mut().find(|g| has_hotkey(g)) {
-            Some(g) => {
-                g.members.push(name.to_string());
-                local_changed = true;
-            }
-            None => return Err(format!("{name} isn't in a hotkey group: add them on Your accounts first.")),
-        }
-    }
-    if local_changed {
         save_launch_groups(app.clone(), groups)?;
     }
+    // Stacks it's still cycled in that move windows (for where its window goes on leaving).
+    let still_on: Vec<String> = stack_groups(app)
+        .into_iter()
+        .filter(|g| g.id != group_id && g.remember_windows && g.members.iter().any(|m| m == name) && !g.skipped.iter().any(|s| s == name))
+        .map(|g| g.id)
+        .collect();
+    crate::clientwindows::stack_changed(app, name, group_id, on, group.remember_windows, &still_on);
     Ok(())
 }
 
@@ -643,7 +663,7 @@ mod tests {
     #[test]
     fn groups_round_trip_through_json() {
         let groups = Groups {
-            groups: vec![Group { id: "a".into(), name: "Roll fleet".into(), members: vec!["Tsawind".into(), "LuigiSquirrel".into()], skipped: vec![], forward_hotkey: Some("F13".into()), backward_hotkey: None }],
+            groups: vec![Group { id: "a".into(), name: "Roll fleet".into(), members: vec!["Tsawind".into(), "LuigiSquirrel".into()], skipped: vec![], forward_hotkey: Some("F13".into()), backward_hotkey: None, ..Default::default() }],
         };
         let text = serde_json::to_string(&groups).unwrap();
         let back: Groups = serde_json::from_str(&text).unwrap();
