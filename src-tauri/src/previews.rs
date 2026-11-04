@@ -776,7 +776,7 @@ fn hover_square(app: &AppHandle) {
             if !near(&c, 8.0) {
                 return false;
             }
-            let stacks = crate::launch::stack_groups(app).len();
+            let stacks = crate::launch::stacks_for(app, &name).iter().filter(|s| s["state"] != "out").count();
             stacks > 0 && near(&c, stacks as f64)
         });
         let mut taking = HOVER_OPEN.lock().unwrap();
