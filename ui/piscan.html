@@ -234,12 +234,14 @@
   function useVersion(v) { bare = v ? v.bare : null; bareVersion = v ? v.id : null; bareMirrored = v ? v.mirrored : false; refCache = null; }
   /** Stop using the current version for this client (it doesn't fit); the next bare scan makes a new one. */
   function dropVersion() { useVersion(null); }
-  /** Delete the current version from this PC ("Record bare map again"). */
+  /** A finished bare map to search on when lost (only on a resource pass: the map being recorded is half done). */
+  const mapDone = () => !!bare && E.bareCoverage(bare) > 0.6 && $("resource").value !== BARE;
+  /** Delete every version of this planet's bare map from this PC ("Record bare map again"). */
   function forgetBare() {
-    const p = currentPlanet(), id = bareVersion; useVersion(null);
-    if (!p || id === null) return;
-    versions = versions.filter((v) => v.id !== id);
-    try { localStorage.removeItem(versionKey(p, id)); localStorage.setItem(listKey(p), JSON.stringify(versions.map(({ bare: _b, ...v }) => v))); } catch {}
+    const p = currentPlanet(); useVersion(null);
+    if (!p) return;
+    try { for (const v of versions) localStorage.removeItem(versionKey(p, v.id)); localStorage.setItem(listKey(p), "[]"); } catch {}
+    versions = [];
   }
   /** The version a picture fits best at a known facing (null if none fits). */
   function bestVersionAt(Q, mirroredNow) {
@@ -802,7 +804,8 @@
             }
             else if (!tracked) {
               ok = false;
-              if (Date.now() - lastFind > 300) {
+              // The whole-planet search needs a finished map: a half-recorded one finds look-alikes.
+              if (mapDone() && Date.now() - lastFind > 300) {
                 lastFind = Date.now();
                 const found = E.findOnMap(E.samplePoints(f.data.data, f.w, f.h, disc, 300, true), ref.coarse, facing.mirrored);
                 if (found && found.score >= 0.5 && found.margin >= 0.15) {
@@ -813,7 +816,10 @@
             }
           }
           lost = ok ? null : { grey };
-          if (!ok) prevGrey = grey;
+          // Lost with no finished map to fall back on: keep the last good picture, so the grip only
+          // comes back when the planet is turned back to where it was lost (never a silent jump).
+          if (!ok && placed === false && !mapDone()) { /* keep prevGrey */ }
+          else if (!ok) prevGrey = grey;
           if (ok) prevGrey = grey;
           if (ok && !running) {
             // Following only.
@@ -831,7 +837,7 @@
               say("scanStatus", cover > 0.97 ? "Whole planet seen: save it, or pick the next resource." : `${Math.round(cover * 100)}% seen. Still missing: ${hint || "a little here and there"}.`, "ok");
             }
           } else {
-            say("scanStatus", ref ? "Finding where this is on the planet map… (painting paused until it's sure)" : "Lost the grip (turned too fast): painting is paused. Record the bare planet first and it can't get lost; for now, turn slower or click one of your buildings.", "warn");
+            say("scanStatus", mapDone() ? "Finding where this is on the planet map… (painting paused until it's sure)" : "Lost the grip (turned too fast): painting is paused. Turn back slowly to where it lost it and it picks up again, or press Re-centre / click one of your buildings.", "warn");
           }
           drawFlat(); updateButtons();
         }
