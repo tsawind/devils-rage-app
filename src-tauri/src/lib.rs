@@ -7,6 +7,7 @@ use tauri::{
 use tauri_plugin_opener::OpenerExt;
 
 mod appconfig;
+mod arrange;
 mod audiodetect;
 mod bar;
 mod capture;
@@ -400,6 +401,9 @@ pub fn run() {
             clientwindows::client_windows_place,
             clientwindows::client_windows_auto,
             clientwindows::client_windows_state,
+            clientwindows::client_windows_lock,
+            arrange::arrange_windows,
+            arrange::arrange_size,
             launch::open_launcher,
             launch::launcher_ready,
         ])

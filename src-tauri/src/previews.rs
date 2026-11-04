@@ -479,6 +479,11 @@ pub fn preview_interval(app: AppHandle) -> u64 {
     (open * 1000 / 16).clamp(500, 3000)
 }
 
+/// The snap grid in pixels (0 = off), for arranging EVE windows too.
+pub fn snap_grid(app: &AppHandle) -> u32 {
+    with_layout(app, |layout| layout.snap)
+}
+
 /// The snap grid in pixels (0 = off).
 #[tauri::command]
 pub fn set_previews_snap(app: AppHandle, grid: u32) {
@@ -564,6 +569,9 @@ pub fn start_watch(app: AppHandle) {
             }
             tick += 1;
             hover_square(&app);
+            if tick % 12 == 0 && !crate::arrange::arranging() {
+                crate::clientwindows::hold(&app);
+            }
             if tick % 5 != 0 {
                 continue;
             }

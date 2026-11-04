@@ -148,6 +148,8 @@
     <button id="cwRemember" title="Remember where every logged-in client's window is and how big">Remember where they are</button>
     <button id="cwPlace" title="Move every open client back to its remembered spot">Put them back</button>
     <label title="Move a client to its spot when it starts or logs in"><input type="checkbox" id="cwAuto"> Put back by themselves</label>
+    <button id="cwArrange" title="For Fixed Window clients (no title bar): a handle over each client; drag to move its window, pull the corner to resize. Done snaps, remembers and locks them.">Arrange windows</button>
+    <label title="A client moved off its remembered spot goes straight back (for Windowed mode; Fixed Window clients can't be dragged anyway). Use Arrange windows to change spots."><input type="checkbox" id="cwLock"> Lock windows</label>
     <button id="pImport" title="Bring in thumbnail spots and cycle groups (with their pedal hotkeys) from your EVE-O Preview settings file">Import EVE-O Preview settings…</button>
   </div>
   <p class="soon" id="soon"></p>
@@ -253,7 +255,18 @@
       setTimeout(showSizes, 700);
     });
   }
-  invoke("client_windows_state").then(st => { cwAuto.checked = !!(st && st.auto); }).catch(() => {});
+  const cwLock = document.getElementById("cwLock"), cwArrange = document.getElementById("cwArrange");
+  invoke("client_windows_state").then(st => { cwAuto.checked = !!(st && st.auto); cwLock.checked = !!(st && st.lock); }).catch(() => {});
+  cwLock.addEventListener("change", () => invoke("client_windows_lock", { on: cwLock.checked }).catch(() => {}));
+  // Patch 117: arrange the EVE windows themselves (Fixed Window mode has no title bar to drag).
+  cwArrange.addEventListener("click", async () => {
+    const on = !cwArrange.classList.contains("on");
+    try {
+      soon.textContent = await invoke("arrange_windows", { on });
+      cwArrange.classList.toggle("on", on);
+      cwArrange.textContent = on ? "Done arranging" : "Arrange windows";
+    } catch (e) { soon.textContent = String(e); }
+  });
   cwAuto.addEventListener("change", () => invoke("client_windows_auto", { on: cwAuto.checked }).catch(() => {}));
   const cwSay = async (cmd) => { try { soon.textContent = await invoke(cmd); } catch (e) { soon.textContent = String(e); } };
   document.getElementById("cwRemember").addEventListener("click", () => cwSay("client_windows_remember"));

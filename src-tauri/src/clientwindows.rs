@@ -30,6 +30,9 @@ pub struct ClientLayout {
     /// Which stack's spot a character's window is in now (none: its own spot above).
     #[serde(default)]
     pub in_stack: BTreeMap<String, String>,
+    /// Patch 117: lock windows: a client moved off its spot (windowed mode) goes straight back.
+    #[serde(default)]
+    pub lock: bool,
 }
 
 static LAYOUT: Mutex<Option<ClientLayout>> = Mutex::new(None);
@@ -95,6 +98,40 @@ mod win {
     }
 }
 
+/// A client window's spot now (None while minimised).
+pub fn window_spot(handle: isize) -> Option<Spot> {
+    win::spot(handle).filter(|s| s.w > 100 && s.h > 100)
+}
+
+/// Move a client window (its title-bar drag, done for it).
+pub fn place_window(handle: isize, spot: Spot) -> bool {
+    win::place(handle, spot)
+}
+
+/// Patch 117: Lock windows on / off.
+#[tauri::command]
+pub fn client_windows_lock(app: AppHandle, on: bool) {
+    with(&app, |layout| layout.lock = on);
+    save(&app);
+    if on {
+        hold(&app);
+    }
+}
+
+/// With Lock on: every open client that has drifted off its spot goes back to it.
+pub fn hold(app: &AppHandle) {
+    if !with(app, |layout| layout.lock) {
+        return;
+    }
+    for (name, handle) in crate::clipboard::open_clients() {
+        let Some(spot) = with(app, |layout| spot_now(layout, &name)) else { continue };
+        let Some(now) = window_spot(handle) else { continue };
+        if (now.x - spot.x).abs() > 2 || (now.y - spot.y).abs() > 2 || (now.w - spot.w).abs() > 2 || (now.h - spot.h).abs() > 2 {
+            win::place(handle, spot);
+        }
+    }
+}
+
 /// Remember where every open client is now.
 #[tauri::command]
 pub fn client_windows_remember(app: AppHandle) -> Result<String, String> {
@@ -142,7 +179,7 @@ pub fn client_windows_auto(app: AppHandle, on: bool) {
 
 #[tauri::command]
 pub fn client_windows_state(app: AppHandle) -> serde_json::Value {
-    with(&app, |layout| serde_json::json!({ "auto": layout.auto, "remembered": layout.spots.keys().collect::<Vec<_>>() }))
+    with(&app, |layout| serde_json::json!({ "auto": layout.auto, "lock": layout.lock, "remembered": layout.spots.keys().collect::<Vec<_>>() }))
 }
 
 /// Move the named clients (all when None) to their spots; how many moved.

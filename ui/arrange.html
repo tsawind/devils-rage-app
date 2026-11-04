@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arrange</title>
+<style>
+  html, body { height: 100%; margin: 0; overflow: hidden; background: transparent; user-select: none;
+               font: 13px "Segoe UI", system-ui, sans-serif; color: #fff; }
+  /* The handle: see-through over the client, so you can line it up with what's on screen. */
+  #drag { position: fixed; inset: 0; background: #0a1a3366; border: 3px dashed #f0c040; box-sizing: border-box;
+          cursor: move; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  #name { font-size: 22px; font-weight: 700; text-shadow: 0 2px 4px #000; pointer-events: none; }
+  #size { color: #f0c040; text-shadow: 0 1px 2px #000; pointer-events: none; }
+  #bar { display: flex; gap: 6px; align-items: center; background: #000c; border: 1px solid #333; border-radius: 6px; padding: 4px 8px; }
+  #bar input { width: 60px; font: inherit; background: #111; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 1px 4px; }
+  #bar button { font: inherit; background: #1c0d0e; color: #f3c6c6; border: 1px solid #a8181f; border-radius: 4px; padding: 2px 10px; cursor: pointer; }
+  #grip { position: fixed; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize;
+          background: linear-gradient(135deg, transparent 50%, #f0c040 50%); }
+</style>
+</head>
+<body>
+  <div id="drag" data-tauri-drag-region>
+    <div id="name">…</div>
+    <div id="size"></div>
+    <div id="bar">
+      <input type="number" id="w" min="200" step="10" title="Width in pixels"> × <input type="number" id="h" min="120" step="10" title="Height in pixels">
+      <button id="done" title="Snap every window to the grid, remember where they are, and lock them in">Done</button>
+    </div>
+  </div>
+  <div id="grip" title="Drag to resize this client's window"></div>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const name = window.__ARRANGE_NAME__ || "";
+  document.getElementById("name").textContent = name;
+  const w = document.getElementById("w"), h = document.getElementById("h"), size = document.getElementById("size");
+  const dpr = () => window.devicePixelRatio || 1;
+  function show() {
+    const pw = Math.round(window.innerWidth * dpr()), ph = Math.round(window.innerHeight * dpr());
+    size.textContent = `${pw} × ${ph}`;
+    if (document.activeElement !== w) w.value = pw;
+    if (document.activeElement !== h) h.value = ph;
+  }
+  show();
+  window.addEventListener("resize", show);
+  for (const box of [w, h]) {
+    box.addEventListener("mousedown", (e) => e.stopPropagation());
+    box.addEventListener("change", () => invoke("arrange_size", { width: Math.round(+w.value), height: Math.round(+h.value) }).catch(() => {}));
+    box.addEventListener("keydown", (e) => { if (e.key === "Enter") box.blur(); });
+  }
+  const done = document.getElementById("done");
+  done.addEventListener("mousedown", (e) => e.stopPropagation());
+  done.addEventListener("click", () => invoke("arrange_windows", { on: false }).catch(() => {}));
+  // Resize from the corner.
+  const grip = document.getElementById("grip");
+  let sizing = null, pending = null;
+  grip.addEventListener("pointerdown", (e) => {
+    sizing = { x: e.screenX, y: e.screenY, w: window.innerWidth * dpr(), h: window.innerHeight * dpr(), dpr: dpr() };
+    grip.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  grip.addEventListener("pointermove", (e) => {
+    if (!sizing || pending) return;
+    const width = Math.round(sizing.w + (e.screenX - sizing.x) * sizing.dpr), height = Math.round(sizing.h + (e.screenY - sizing.y) * sizing.dpr);
+    pending = setTimeout(() => { pending = null; invoke("arrange_size", { width, height }).catch(() => {}); }, 30);
+  });
+  grip.addEventListener("pointerup", () => { sizing = null; });
+</script>
+</body>
+</html>
