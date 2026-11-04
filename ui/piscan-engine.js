@@ -428,7 +428,7 @@
     if (used < Math.max(8, as.length * 0.4)) return null;
     const miss = as.map((a, i) => angle(apply(R, a), bs[i])).filter((_, i) => keep[i]).sort((m, n) => m - n);
     // Patches that agree only loosely mean the matches were guesses (turned past the search): lost.
-    if (miss[Math.floor(miss.length / 2)] > (o.maxSpread || 0.012)) return null;
+    if (miss[Math.floor(miss.length / 2)] > (o.maxSpread || 0.025)) return null;
     const moved = Math.acos(Math.max(-1, Math.min(1, (R[0] + R[4] + R[8] - 1) / 2)));
     return { R, used, of: as.length, spread: miss[Math.floor(miss.length / 2)], moved, ...(o.debug ? { as, bs, keep } : {}) };
   }
