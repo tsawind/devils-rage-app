@@ -625,7 +625,9 @@
     anchors = [{ kind: cc.kind, px: at.x, py: at.y }];
     forgetTrack(); frozen = false; mapMisses = 0; say("autoStatus", "");
     const fixed = fitVersionsToLock();
-    say("lockStatus", `Locked on your command center (${icon ? "found its icon" : "icon not seen: used where it usually sits"}). The cross should sit on it in EVE.${fixed ? " " + fixed : ""}`, "ok");
+    // EVE doesn't always leave the command center in the same spot: one click on it in the picture fixes the lock exactly.
+    selected = cc.kind;
+    say("lockStatus", `Locked on your command center (${icon ? "found its icon" : "icon not seen: used where it usually sits"}). If the cross isn't exactly on it in EVE, click your command center in the picture: that sets it exactly.${fixed ? " " + fixed : ""}`, "ok");
     renderAnchors(); updateButtons(); drawShot(); drawFlat();
   }
   /** Bare map versions that are off sideways (recorded under an older lock): turn them to fit this lock, and keep them that way. */
