@@ -543,7 +543,8 @@
     // other light, moving lava) leaves it alone. Only a clearly better look replaces it.
     let painted = 0;
     for (const [cell, l] of look) {
-      if (l.square <= map.best[cell] + 0.02) continue;
+      // Seen well once (near the middle of the disc): settled for good.
+      if (map.best[cell] >= SETTLED || l.square <= map.best[cell] + 0.02) continue;
       map.best[cell] = l.square;
       if (recording) {
         map.rgb[cell * 3] = l.r / l.n; map.rgb[cell * 3 + 1] = l.g / l.n; map.rgb[cell * 3 + 2] = l.b / l.n;
@@ -554,6 +555,34 @@
       painted++;
     }
     return painted;
+  }
+
+  const SETTLED = 0.85;
+  /**
+   * EVE's resource fields are smooth, so a lone cell far from the cells round it is a speck
+   * (glowing lava shining through the scan colours, a moving lava blob): it takes their median.
+   */
+  function despeckle(map, limit) {
+    const lim = limit || 0.2;
+    for (let pass = 0; pass < 2; pass++) {
+      const fix = [];
+      for (let row = 0; row < GRID_H; row++) for (let col = 0; col < GRID_W; col++) {
+        const i = row * GRID_W + col;
+        if (!(map.weight[i] > 0)) continue;
+        const near = [];
+        for (let dr = -2; dr <= 2; dr++) {
+          const r = row + dr;
+          if (r < 0 || r >= GRID_H) continue;
+          for (let dc = -2; dc <= 2; dc++) { const j = r * GRID_W + ((col + dc + GRID_W) % GRID_W); if (map.weight[j] > 0) near.push(map.sum[j] / map.weight[j]); }
+        }
+        if (near.length < 9) continue;
+        near.sort((a, b) => a - b);
+        const med = near[near.length >> 1];
+        if (Math.abs(map.sum[i] / map.weight[i] - med) > lim) fix.push([i, med]);
+      }
+      for (const [i, v] of fix) map.sum[i] = v * map.weight[i];
+      if (!fix.length) break;
+    }
   }
 
   /** Fill small holes (glowing lava, a missed patch) from the cells round them. */
@@ -938,7 +967,7 @@
     return { ...pose, Q, inliers: pairs.length };
   }
 
-  const api = { shiftBare, GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
+  const api = { shiftBare, despeckle, GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
     solveAnchors, solveAnchorsEitherWay, lockOne, northUp, poseQ, poseOf, upright, samplePoints, bareGrey, poseScore, alignToMap, findOnMap, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);

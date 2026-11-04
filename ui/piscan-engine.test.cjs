@@ -232,5 +232,16 @@ check("picture ↔ planet round trip (close camera)", rt && Math.abs(rt[0] - 0.3
   check("turning moves it along the longitude", Math.abs(there.rgb[(10 * E.GRID_W + 100) * 3] - 91.25) < 0.01);
 }
 
+// Specks (lava shining through) go; the smooth field stays.
+{
+  const m = E.newMap();
+  for (let i = 0; i < m.weight.length; i++) { const col = i % E.GRID_W; m.sum[i] = 0.3 + 0.2 * Math.sin(col / 20); m.weight[i] = 1; }
+  const smooth = Float32Array.from(m.sum), specks = [5000, 20111, 33333, 47000];
+  specks.forEach((i) => { m.sum[i] = 0.95; });
+  E.despeckle(m);
+  check("specks take the value round them", specks.every((i) => Math.abs(m.sum[i] - smooth[i]) < 0.05));
+  check("the smooth field is left alone", m.sum.every((v, i) => specks.includes(i) || Math.abs(v - smooth[i]) < 1e-6));
+}
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);

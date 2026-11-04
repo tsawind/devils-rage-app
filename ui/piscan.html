@@ -723,7 +723,7 @@
   let ticks = 0, lastRim = null, lastRefine = 0, lastRimCheck = 0, lastStore = 0;
   async function tick() {
     ticks++;
-    if (painting || (!running && ticks % 5)) return;
+    if (painting || (!running && !facing && ticks % 5)) return;
     painting = true;
     try {
       if (!frozen && $("client").value) {
@@ -762,7 +762,8 @@
           } else say("lockStatus", "Looking for this view on the planet's bare map… none fits yet? Lock on one building: if this client's graphics differ, a new version gets recorded.", "");
         }
         if (f && disc && $("auto").checked && !facing) autoStep(f);
-        if (f && running && facing && disc) {
+        // Locked on: keep following the planet whether or not Scan is on (painting needs Scan).
+        if (f && facing && disc) {
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
           // 1) A first guess from the last picture (EVE's camera can't roll: keep it upright).
           let tracked = false;
@@ -780,7 +781,7 @@
             const bareNow = $("resource").value === BARE, enough = bareNow ? 0.55 : 0.35;
             if (near && near.score >= enough) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; mapMisses = 0; }
             else if (near && tracked && !bareNow) { /* keep the tracked guess; the next picture is placed again */ }
-            else if (near && tracked) {
+            else if (near && tracked && running) {
               // Tracking is fine but the saved map disagrees: the map is what's wrong (recorded
               // under an older, wrong lock). Never jump to it; after a few such pictures, drop it.
               if (++mapMisses > 6) {
@@ -802,8 +803,10 @@
           }
           lost = ok ? null : { grey };
           if (!ok) prevGrey = grey;
-          if (ok) {
-            prevGrey = grey;
+          if (ok) prevGrey = grey;
+          if (ok && !running) {
+            // Following only.
+          } else if (ok) {
             if ($("resource").value === BARE) {
               if (!bare) bare = E.newBare();
               E.paint(bare, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, "record");
@@ -832,6 +835,7 @@
     const p = currentPlanet(), resource = $("resource").value, m = maps.get(resource);
     if (!p || !m) return;
     E.fillHoles(m, 4);
+    E.despeckle(m);
     const bytes = E.cells(m);
     let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
     say("saveStatus", "Saving…");
