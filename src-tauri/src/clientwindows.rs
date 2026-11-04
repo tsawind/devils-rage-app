@@ -86,14 +86,14 @@ mod win {
         Some(Spot { x: rect.left, y: rect.top, w: rect.right - rect.left, h: rect.bottom - rect.top })
     }
 
-    pub fn place(handle: isize, spot: Spot) -> bool {
+    pub fn place(handle: isize, to: Spot) -> bool {
         // Patch 121: only resize when the size really differs. A window's rectangle read back
         // comes out a few pixels off (invisible borders, display scaling), and setting it again
         // shrank the client a little each time (1918x1024 became 1914x1021).
-        let keep_size = spot(handle).is_some_and(|now| super::same_size(now, spot));
+        let keep_size = spot(handle).is_some_and(|now| super::same_size(now, to));
         let flags = SWP_NOZORDER | SWP_NOACTIVATE | if keep_size { SWP_NOSIZE } else { 0 };
         // SAFETY: as above; no activation and no z-order change, so focus stays where it is.
-        unsafe { SetWindowPos(handle as HWND, std::ptr::null_mut(), spot.x, spot.y, spot.w, spot.h, flags) != 0 }
+        unsafe { SetWindowPos(handle as HWND, std::ptr::null_mut(), to.x, to.y, to.w, to.h, flags) != 0 }
     }
 }
 
