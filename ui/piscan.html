@@ -736,7 +736,7 @@
     }
   }
 
-  let turnSpeed = 0, lastTurnAt = 0;
+  let turnSpeed = 0, lastTurnAt = 0, fpsCount = 0, fpsAt = 0, fps = 0;
   let ticks = 0, lastRim = null, lastRefine = 0, lastRimCheck = 0, lastStore = 0;
   async function tick() {
     ticks++;
@@ -781,6 +781,7 @@
         if (f && disc && $("auto").checked && !facing) autoStep(f);
         // Locked on: keep following the planet whether or not Scan is on (painting needs Scan).
         if (f && facing && disc) {
+          fpsCount++; if (performance.now() - fpsAt > 2000) { fps = fpsCount * 1000 / (performance.now() - fpsAt); fpsCount = 0; fpsAt = performance.now(); }
           const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
           // 1) A first guess from the last picture (EVE's camera can't roll: keep it upright).
           let tracked = false;
@@ -800,7 +801,11 @@
             const pts = E.samplePoints(f.data.data, f.w, f.h, disc, 600);
             const near = E.alignToMap(pts, ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
             // With a resource showing, EVE's colours weaken the match: a lower bar, and never a reason to drop the map.
-            const bareNow = $("resource").value === BARE, enough = bareNow ? 0.55 : 0.35;
+            // On the bare pass the map being recorded pulls the facing back as you come round to ground
+            // already painted (stops slow drift); low-contrast ground (Barren) matches itself only
+            // weakly, so its own map gets a lower bar, kept safe by the ±2° search.
+            const bareNow = $("resource").value === BARE, own = bareNow && bareVersion === freshVersion;
+            const enough = own ? 0.4 : bareNow ? 0.55 : 0.35;
             if (near && near.score >= enough) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; mapMisses = 0; }
             else if (near && tracked && !bareNow) { /* keep the tracked guess; the next picture is placed again */ }
             else if (near && tracked && running && bareVersion !== freshVersion) {
@@ -838,7 +843,7 @@
               E.paint(bare, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, "record");
               const cover = E.bareCoverage(bare);
               if (Date.now() - lastStore > 3000) { lastStore = Date.now(); storeBare(); }
-              say("scanStatus", cover > 0.97 ? "Bare planet recorded: switch EVE to a resource and pick it here." : `Bare planet ${Math.round(cover * 100)}% recorded. Still missing: ${E.missingHint({ weight: bare.weight }, facing.Q, facing.mirrored) || "a little here and there"}.`, "ok");
+              say("scanStatus", cover > 0.97 ? "Bare planet recorded: switch EVE to a resource and pick it here." : `Bare planet ${Math.round(cover * 100)}% recorded (${fps.toFixed(1)} pictures a second). Still missing: ${E.missingHint({ weight: bare.weight }, facing.Q, facing.mirrored) || "a little here and there"}.`, "ok");
             } else {
               const m = mapFor($("resource").value);
               E.paint(m, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, bare && E.bareCoverage(bare) > 0.2 ? bare : null);
