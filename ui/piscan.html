@@ -77,7 +77,8 @@
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
-        <div class="small" style="margin-bottom: 6px"><b>Easiest:</b> in EVE double-click the planet (your command center jumps to the middle), then zoom <b>all the way out</b>, then <button class="btn red" id="dcLock">Lock on: double-clicked</button></div>
+        <div class="small" style="margin-bottom: 6px"><b>Most exact:</b> in EVE double-click the planet (your command center jumps to the middle), press <button class="btn red" id="followCc">Follow my command center</button>, then zoom all the way out slowly: the cross follows it and it locks by itself.</div>
+        <div class="small" style="margin-bottom: 6px"><b>Quick:</b> double-click the planet, zoom <b>all the way out</b>, then <button class="btn red" id="dcLock">Lock on: double-clicked</button></div>
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
         <div class="status" id="autoStatus"></div>
         <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
@@ -630,6 +631,59 @@
     say("lockStatus", `Locked on your command center (${icon ? "found its icon" : "icon not seen: used where it usually sits"}). If the cross isn't exactly on it in EVE, click your command center in the picture: that sets it exactly.${fixed ? " " + fixed : ""}`, "ok");
     renderAnchors(); updateButtons(); drawShot(); drawFlat();
   }
+  /**
+   * Follow the command center out (Tsa's way): EVE's double-click puts it in the middle of the
+   * screen; the app then follows that spot picture by picture while you zoom all the way out
+   * (zooming tilts the camera, so it drifts up or down), and locks from it once the planet's edge
+   * shows and the picture holds still.
+   */
+  let follow = null;
+  function startFollow() {
+    const me = $("client").value;
+    const cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
+    if (!cc) return say("lockStatus", `${me || "This character"} has no command center on this planet.`, "warn");
+    if (!frame) return say("lockStatus", "No picture from that client.", "bad");
+    // Its icon near the middle if it shows, else the very middle (where the double-click put it).
+    const d = frame.data.data, W = frame.w, H = frame.h;
+    let sx = 0, sy = 0, n = 0;
+    for (let y = Math.round(H * 0.3); y < H * 0.7; y++) for (let x = Math.round(W * 0.4); x < W * 0.6; x++) {
+      const k = (y * W + x) * 4;
+      if (d[k + 1] >= 100 && d[k + 2] >= 110 && d[k] <= d[k + 1] - 25) { sx += x; sy += y; n++; }
+    }
+    const at = n >= 5 ? { x: sx / n, y: sy / n } : { x: W / 2, y: H / 2 };
+    follow = { cc, x: at.x, y: at.y, prev: E.halfGrey(d, W, H), still: 0, lastR: null, zoom: 1 };
+    facing = null; anchors = [{ kind: cc.kind, px: at.x, py: at.y }];
+    say("lockStatus", "Following your command center: now zoom all the way out, slowly (the cross should stay on it). It locks by itself when the planet's edge shows and the picture holds still.", "ok");
+    renderAnchors(); updateButtons(); drawShot();
+  }
+  function followStep(f) {
+    const g = E.halfGrey(f.data.data, f.w, f.h);
+    const t = E.followSpot(follow.prev, g, follow.x, follow.y, { reach: 24, min: 0.5 });
+    const moved = t ? Math.hypot(t.x - follow.x, t.y - follow.y) : 0;
+    if (t) { follow.x = t.x; follow.y = t.y; follow.zoom *= t.scale; }
+    follow.prev = g;
+    anchors = [{ kind: follow.cc.kind, px: follow.x, py: follow.y }];
+    const rim = E.rimRadius(f.data.data, f.w, f.h, null);
+    const steady = rim && follow.lastR && Math.abs(rim.r - follow.lastR) < rim.r * 0.005 && moved < 1.5 && rim.r < f.h * 0.4 && follow.zoom < 0.6;
+    follow.lastR = rim ? rim.r : null;
+    follow.still = steady ? follow.still + 1 : 0;
+    if (follow.still >= 6) {
+      disc = { cx: rim.cx, cy: rim.cy, r: rim.r, D: Math.sqrt((lensPx() / rim.r) ** 2 + 1) };
+      focal = lensPx();
+      const way = loadPole(), cc = follow.cc;
+      const Q = E.lockOne({ px: follow.x, py: follow.y, lat: cc.lat, lon: cc.lon }, disc, way.mirrored, way.up);
+      follow = null;
+      if (!Q) return say("lockStatus", "Couldn't lock: the planet's edge wasn't clear. Try again.", "bad");
+      facing = { Q, mirrored: way.mirrored, misses: [], owners: [$("client").value], one: { groups: new Map([[cc.kind, [cc]]]), way } };
+      forgetTrack(); frozen = false; mapMisses = 0;
+      const fixed = fitVersionsToLock();
+      say("lockStatus", `Locked: followed your command center all the way out.${fixed ? " " + fixed : ""}`, "ok");
+      renderAnchors(); updateButtons();
+    }
+    drawShot();
+  }
+  $("followCc").addEventListener("click", startFollow);
+
   /** Bare map versions that are off sideways (recorded under an older lock): turn them to fit this lock, and keep them that way. */
   function fitVersionsToLock() {
     const p = currentPlanet();
@@ -742,12 +796,13 @@
   let ticks = 0, lastRim = null, lastRefine = 0, lastRimCheck = 0, lastStore = 0;
   async function tick() {
     ticks++;
-    if (painting || (!running && !facing && ticks % 5)) return;
+    if (painting || (!running && !facing && !follow && ticks % 5)) return;
     painting = true;
     try {
       if (!frozen && $("client").value) {
         const f = await grab().catch(() => null);
         if (f) frame = f;
+        if (f && follow) followStep(f);
         if (f && !disc && $("auto").checked && ticks % 8 === 0) say("autoStatus", "Set the edge first: Click the edge, then click once on the planet's edge.", "warn");
         // Zoomed in EVE: the rim moves; with the camera's lens known, so does the distance.
         if (f && facing && disc && focal && $("follow").checked && Date.now() - lastRimCheck > 250) {
@@ -762,7 +817,7 @@
           }
         }
         // Bare map versions of this planet recorded: no lock needed, find which version and where.
-        if (f && disc && !facing && versions.length && Date.now() - lastFind > 700) {
+        if (f && disc && !facing && !follow && versions.length && Date.now() - lastFind > 700) {
           lastFind = Date.now();
           if (!isFinite(disc.D)) disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) }, focal = lensPx();
           const coarsePts = E.samplePoints(f.data.data, f.w, f.h, disc, 300, true);
@@ -780,7 +835,7 @@
             updateButtons();
           } else say("lockStatus", "Looking for this view on the planet's bare map… none fits yet? Lock on one building: if this client's graphics differ, a new version gets recorded.", "");
         }
-        if (f && disc && $("auto").checked && !facing) autoStep(f);
+        if (f && disc && $("auto").checked && !facing && !follow) autoStep(f);
         // Locked on: keep following the planet whether or not Scan is on (painting needs Scan).
         if (f && facing && disc) {
           fpsCount++; if (performance.now() - fpsAt > 2000) { fps = fpsCount * 1000 / (performance.now() - fpsAt); fpsCount = 0; fpsAt = performance.now(); }

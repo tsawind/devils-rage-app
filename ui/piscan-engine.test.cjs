@@ -243,5 +243,15 @@ check("picture ↔ planet round trip (close camera)", rt && Math.abs(rt[0] - 0.3
   check("the smooth field is left alone", m.sum.every((v, i) => specks.includes(i) || Math.abs(v - smooth[i]) < 1e-6));
 }
 
+// Following a spot through a zoom: the picture shrinks round the middle and slides; the spot is found again.
+{
+  const W2 = 400, H2 = 300, tex = (x, y) => 128 + 60 * Math.sin(x * 0.11) * Math.cos(y * 0.07) + 40 * Math.sin((x + 2 * y) * 0.05);
+  const frame = (scale, shiftY) => { const a = new Uint8ClampedArray(W2 * H2 * 4); for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) { const v = tex((x - W2 / 2) / scale + W2 / 2, (y - H2 / 2 - shiftY) / scale + H2 / 2); const k = (y * W2 + x) * 4; a[k] = a[k + 1] = a[k + 2] = v; a[k + 3] = 255; } return a; };
+  const a = E.halfGrey(frame(1, 0), W2, H2), b = E.halfGrey(frame(0.92, 6), W2, H2);
+  const spot = { x: 230, y: 110 }, want = { x: W2 / 2 + 0.92 * (spot.x - W2 / 2), y: H2 / 2 + 0.92 * (spot.y - H2 / 2) + 6 };
+  const t = E.followSpot(a, b, spot.x, spot.y);
+  check("a spot is followed through a zoom step (within 3 px)", t && Math.hypot(t.x - want.x, t.y - want.y) <= 3);
+}
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);

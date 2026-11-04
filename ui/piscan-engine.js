@@ -433,6 +433,53 @@
     return { R, used, of: as.length, spread: miss[Math.floor(miss.length / 2)], moved, ...(o.debug ? { as, bs, keep } : {}) };
   }
 
+  // ---- following one spot (the command center) while EVE zooms ----
+  /** Half-size grey picture (for following a spot through a zoom). */
+  function halfGrey(rgba, width, height) {
+    const w = width >> 1, h = height >> 1, out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const k = ((y * 2) * width + x * 2) * 4;
+      out[y * w + x] = 0.299 * rgba[k] + 0.587 * rgba[k + 1] + 0.114 * rgba[k + 2];
+    }
+    return { g: out, w, h };
+  }
+  /**
+   * Where a spot of the last picture is in this one, while the camera zooms (the picture grows or
+   * shrinks round that spot and slides up or down a little): the patch round it, scaled, searched
+   * nearby. Full-size picture coordinates in and out; null when nothing matches well.
+   */
+  function followSpot(prev, cur, x, y, opts) {
+    const o = opts || {}, R = o.radius || 18, reach = o.reach || 22;
+    const scales = o.scales || [0.8, 0.85, 0.9, 0.94, 0.97, 1, 1.03, 1.06, 1.1];
+    const px = x / 2, py = y / 2;
+    let best = null;
+    for (const sc of scales) {
+      // template: prev patch resampled so that it looks like it would at this scale
+      const tpl = new Float32Array((2 * R + 1) * (2 * R + 1));
+      let n = 0, mean = 0;
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+        const sx = Math.round(px + dx / sc), sy = Math.round(py + dy / sc);
+        const v = sx >= 0 && sy >= 0 && sx < prev.w && sy < prev.h ? prev.g[sy * prev.w + sx] : 0;
+        tpl[n++] = v; mean += v;
+      }
+      mean /= n;
+      let tv = 0;
+      for (let i = 0; i < n; i++) { tpl[i] -= mean; tv += tpl[i] * tpl[i]; }
+      if (tv < 1) continue;
+      for (let oy = -reach; oy <= reach; oy++) for (let ox = -reach; ox <= reach; ox++) {
+        const cx = Math.round(px) + ox, cy = Math.round(py) + oy;
+        if (cx - R < 0 || cy - R < 0 || cx + R >= cur.w || cy + R >= cur.h) continue;
+        let s = 0, ss = 0, st = 0, i = 0;
+        for (let dy = -R; dy <= R; dy++) { const row = (cy + dy) * cur.w; for (let dx = -R; dx <= R; dx++) { const v = cur.g[row + cx + dx]; s += v; ss += v * v; st += v * tpl[i++]; } }
+        const cv = ss - s * s / n;
+        if (cv < 1) continue;
+        const c = st / Math.sqrt(cv * tv);
+        if (!best || c > best.score) best = { score: c, x: cx * 2, y: cy * 2, scale: sc };
+      }
+    }
+    return best && best.score > (o.min || 0.6) ? best : null;
+  }
+
   // ---- painting ----
   function newMap() { return { sum: new Float32Array(GRID_W * GRID_H), weight: new Float32Array(GRID_W * GRID_H), best: new Float32Array(GRID_W * GRID_H) }; }
 
@@ -969,7 +1016,7 @@
     return { ...pose, Q, inliers: pairs.length };
   }
 
-  const api = { shiftBare, despeckle, GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
+  const api = { shiftBare, despeckle, halfGrey, followSpot, GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
     solveAnchors, solveAnchorsEitherWay, lockOne, northUp, poseQ, poseOf, upright, samplePoints, bareGrey, poseScore, alignToMap, findOnMap, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);
