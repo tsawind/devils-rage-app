@@ -21,6 +21,9 @@
   body.edit.through #frame { border-color: #3a6ea8; }
   /* The client in front right now. */
   body.active #frame { border: 3px solid #adff2f; }
+  /* Patch 114: in the pedal's hotkey group: orange round the outside (green inside it when in front). */
+  body.ingroup:not(.edit) #frame { border: 3px solid #ff8c1a; }
+  body.ingroup.active:not(.edit) #frame { box-shadow: inset 0 0 0 3px #adff2f; }
   body.login #name { color: #f0c040; }
   #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3;
          text-align: center; padding: 16px; color: #c98a5a; pointer-events: none; }
@@ -39,7 +42,19 @@
   body.edit #grip { display: block; }
   #close { position: fixed; top: 2px; right: 4px; width: 18px; height: 18px; line-height: 16px; text-align: center; z-index: 7;
            border-radius: 4px; background: #0008; color: #ccc; opacity: 0; transition: opacity .1s; cursor: pointer; }
-  body:hover #close { opacity: 1; }
+  /* Patch 114: the ✕ only while arranging (edit preview layout). */
+  body:not(.edit) #close { display: none; }
+  body.edit:hover #close { opacity: 1; }
+  /* The square: in / out of the pedal's hotkey group. Where the ✕ is; left of it while editing. */
+  #group { position: fixed; top: 2px; right: 4px; width: 14px; height: 14px; z-index: 8; display: none; cursor: pointer;
+           border: 2px solid #ff8c1a; border-radius: 3px; background: #0009; }
+  body.hasgroup #group { display: block; }
+  body.edit #group { right: 28px; }
+  body.ingroup #group { background: #ff8c1a; box-shadow: inset 0 0 0 2px #000; }
+  #group:hover { filter: brightness(1.3); }
+  body.hasgroup #name { padding-right: 26px; }
+  body.edit.hasgroup #name { padding-right: 50px; }
+  #bar input[type=number] { width: 48px; font: inherit; background: #111; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 0 2px; }
   #close:hover { background: #a8181f; color: #fff; }
 </style>
 </head>
@@ -54,10 +69,12 @@
     <label title="Show this client's preview when previews are open"><input type="checkbox" id="shown"> Shown</label>
     <label title="Clicks go straight through to the game; switch with the pedal / hotkeys"><input type="checkbox" id="through"> Click-through</label>
     <label title="How see-through the preview is">Opacity <input type="range" id="opacity" min="20" max="100" step="5"></label>
+    <label title="Size in pixels: type a width and height, Enter to apply">Size <input type="number" id="sizeW" min="80" max="4000" step="10"> × <input type="number" id="sizeH" min="45" max="4000" step="10"></label>
     <button id="done" title="Lock every preview in place">Done</button>
   </div>
   <div id="grip" title="Drag to resize"></div>
   <div id="close" title="Close this preview">✕</div>
+  <div id="group" title="In the pedal / hotkey group (orange frame). Click to take this client in or out of the cycle."></div>
 
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
@@ -84,6 +101,10 @@
     document.getElementById("shown").checked = !!m.enabled;
     document.getElementById("through").checked = !!m.clickThrough;
     document.getElementById("opacity").value = String(Math.round((m.opacity || 1) * 100));
+    // Patch 114: the hotkey-group square (group: null = no square).
+    document.body.classList.toggle("hasgroup", m.group !== null && m.group !== undefined);
+    document.body.classList.toggle("ingroup", m.group === true);
+    showSize();
   };
   invoke("preview_mode", { name }).then(window.__previewMode).catch(() => {});
   // The app pushes the client in front the moment it changes (no waiting for a picture).
@@ -110,8 +131,16 @@
   tick();
 
   // Click (without dragging) brings that client forward — not while arranging.
+  // Patch 114: a login screen preview can be dragged any time (it moves once the pointer travels).
+  const isLogin = /^Login \d+$/.test(name);
   let downAt = null;
-  drag.addEventListener("mousedown", (e) => { downAt = { x: e.screenX, y: e.screenY }; });
+  drag.addEventListener("mousedown", (e) => { if (e.button === 0) downAt = { x: e.screenX, y: e.screenY }; });
+  drag.addEventListener("mousemove", (e) => {
+    if (!downAt || mode.edit || !isLogin || !(e.buttons & 1)) return;
+    if (Math.abs(e.screenX - downAt.x) + Math.abs(e.screenY - downAt.y) < 5) return;
+    downAt = null;
+    invoke("preview_start_drag").catch(() => {});
+  });
   drag.addEventListener("mouseup", (e) => {
     if (!downAt) return;
     const moved = Math.abs(e.screenX - downAt.x) + Math.abs(e.screenY - downAt.y);
@@ -124,6 +153,37 @@
   document.getElementById("through").addEventListener("change", (e) => invoke("set_preview_client", { name, clickThrough: e.target.checked }).catch(() => {}));
   document.getElementById("opacity").addEventListener("input", (e) => invoke("set_preview_client", { name, opacity: Number(e.target.value) / 100 }).catch(() => {}));
   document.getElementById("done").addEventListener("click", () => invoke("set_preview_edit", { on: false }).catch(() => {}));
+
+  // The square: in / out of the hotkey group.
+  const groupBox = document.getElementById("group");
+  groupBox.addEventListener("mousedown", (e) => e.stopPropagation());
+  groupBox.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const on = !document.body.classList.contains("ingroup");
+    document.body.classList.toggle("ingroup", on);
+    invoke("set_preview_group", { name, on }).catch((err) => {
+      document.body.classList.toggle("ingroup", !on);
+      msg.textContent = String(err || "Couldn't change the group"); msg.hidden = false;
+      setTimeout(() => { msg.hidden = true; }, 3000);
+    });
+  });
+
+  // Patch 114: type a size (physical pixels, like the saved layout).
+  const sizeW = document.getElementById("sizeW"), sizeH = document.getElementById("sizeH");
+  function showSize() {
+    const dpr = window.devicePixelRatio || 1;
+    if (document.activeElement !== sizeW) sizeW.value = String(Math.round(window.innerWidth * dpr));
+    if (document.activeElement !== sizeH) sizeH.value = String(Math.round(window.innerHeight * dpr));
+  }
+  window.addEventListener("resize", showSize);
+  for (const box of [sizeW, sizeH]) {
+    box.addEventListener("mousedown", (e) => e.stopPropagation());
+    box.addEventListener("change", () => {
+      const width = Math.round(Number(sizeW.value)), height = Math.round(Number(sizeH.value));
+      if (width >= 80 && height >= 45) invoke("preview_resize", { width, height }).catch(() => {});
+    });
+    box.addEventListener("keydown", (e) => { if (e.key === "Enter") box.blur(); });
+  }
 
   // Resize from the corner (edit mode).
   const grip = document.getElementById("grip");

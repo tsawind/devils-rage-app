@@ -81,6 +81,7 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     #[cfg(desktop)]
     register_cycle_hotkeys(&app);
+    crate::previews::refresh_modes(&app);
     Ok(())
 }
 
@@ -200,6 +201,7 @@ pub fn store_seat(app: &AppHandle, data: &SeatData) -> Result<(), String> {
     log::info!("launch groups from SeAT: {} accounts, {} groups", data.accounts.len(), data.groups.len());
     #[cfg(desktop)]
     register_cycle_hotkeys(app);
+    crate::previews::refresh_modes(app);
     Ok(())
 }
 
@@ -383,6 +385,76 @@ pub fn save_seat_group_prefs(app: AppHandle, id: u64, prefs: GroupPrefs) -> Resu
     write_json(config_file(&app, "seat-group-prefs.json").ok_or("no config folder")?, &all)?;
     #[cfg(desktop)]
     register_cycle_hotkeys(&app);
+    crate::previews::refresh_modes(&app);
+    Ok(())
+}
+
+fn has_hotkey(group: &Group) -> bool {
+    [&group.forward_hotkey, &group.backward_hotkey].iter().any(|h| h.as_deref().is_some_and(|h| !h.trim().is_empty()))
+}
+
+/// Patch 114: is this character cycled by the pedal? In (and switched on) in any group with a
+/// hotkey. None when no group has a hotkey (the previews then show no square).
+pub fn hotkey_membership(app: &AppHandle, name: &str) -> Option<bool> {
+    let groups: Vec<Group> = all_groups(app).into_iter().filter(has_hotkey).collect();
+    if groups.is_empty() {
+        return None;
+    }
+    Some(groups.iter().any(|g| g.members.iter().any(|m| m == name) && !g.skipped.iter().any(|s| s == name)))
+}
+
+/// Patch 114: the preview's square. Switch the character on or off in every hotkey group it's
+/// in (like the toggle on its chip); a character in none is added to the first of this PC's
+/// hotkey groups.
+pub fn set_hotkey_member(app: &AppHandle, name: &str, on: bool) -> Result<(), String> {
+    let toggle = |skipped: &mut Vec<String>| {
+        skipped.retain(|s| s != name);
+        if !on {
+            skipped.push(name.to_string());
+        }
+    };
+    let mut found = false;
+    // SeAT's groups: the switched-off list is this PC's.
+    let seat = load_seat(app);
+    let mut prefs = load_prefs(app);
+    let mut seat_changed = false;
+    for g in &seat.groups {
+        let key = g.id.to_string();
+        let mut p = prefs.groups.get(&key).cloned().unwrap_or_default();
+        let keyed = [&p.forward_hotkey, &p.backward_hotkey].iter().any(|h| h.as_deref().is_some_and(|h| !h.trim().is_empty()));
+        if !keyed || !g.members.iter().any(|m| m.name == name) {
+            continue;
+        }
+        found = true;
+        toggle(&mut p.skipped);
+        prefs.groups.insert(key, p);
+        seat_changed = true;
+    }
+    if seat_changed {
+        write_json(config_file(app, "seat-group-prefs.json").ok_or("no config folder")?, &prefs)?;
+    }
+    // This PC's groups.
+    let mut groups = load(app).groups;
+    let mut local_changed = false;
+    for g in groups.iter_mut().filter(|g| has_hotkey(g)) {
+        if g.members.iter().any(|m| m == name) {
+            found = true;
+            toggle(&mut g.skipped);
+            local_changed = true;
+        }
+    }
+    if !found && on {
+        match groups.iter_mut().find(|g| has_hotkey(g)) {
+            Some(g) => {
+                g.members.push(name.to_string());
+                local_changed = true;
+            }
+            None => return Err(format!("{name} isn't in a hotkey group: add them on Your accounts first.")),
+        }
+    }
+    if local_changed {
+        save_launch_groups(app.clone(), groups)?;
+    }
     Ok(())
 }
 

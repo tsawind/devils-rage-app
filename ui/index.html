@@ -132,6 +132,16 @@
     <label title="Hide the preview of the client you're looking at; the rest stay"><input type="checkbox" id="pHide"> Hide the one in front</label>
     <label title="Previews for clients still at the login / character-select screen (off by default: a batch of alts at character select would each get a live window)"><input type="checkbox" id="pLogins"> Login screens too</label>
     <label title="When you press Done in edit layout: spots and sizes round to this grid, and edges close to another preview line up with it">Snap <select id="pSnap"><option value="0">off</option><option value="5">5 px</option><option value="10">10 px</option><option value="20">20 px</option></select></label>
+    <label title="A square on every preview (clickable and click-through ones): ticked = that client is in the pedal / hotkey cycle, and its preview gets an orange frame. Click the square to take it in or out."><input type="checkbox" id="pGroup"> Hotkey group squares</label>
+  </div>
+  <div class="plinks">
+    <span class="soon" style="margin: 0">Preview size:</span>
+    <label title="Width × height in pixels for every preview">
+      <input type="number" id="pW" min="80" max="4000" step="10" style="width: 64px"> × <input type="number" id="pH" min="45" max="4000" step="10" style="width: 64px">
+    </label>
+    <button id="pSame" title="Make every preview this size (open ones and the saved spots of the rest)">Make all this size</button>
+    <button id="pSmaller" title="Every preview 10% smaller">− Smaller</button>
+    <button id="pBigger" title="Every preview 10% bigger">+ Bigger</button>
   </div>
   <div class="plinks">
     <span class="soon" style="margin: 0">EVE windows:</span>
@@ -217,6 +227,32 @@
   pLogins.addEventListener("change", () => invoke("set_previews_logins", { on: pLogins.checked }).catch(() => {}));
   pHide.addEventListener("change", () => invoke("set_previews_hide_active", { on: pHide.checked }).catch(() => {}));
   pSnap.addEventListener("change", () => invoke("set_previews_snap", { grid: Number(pSnap.value) }).catch(() => {}));
+  // Patch 114: hotkey-group squares, and one size for all previews.
+  const pGroup = document.getElementById("pGroup"), pW = document.getElementById("pW"), pH = document.getElementById("pH");
+  const showSizes = () => invoke("preview_layout").then(l => {
+    pGroup.checked = !l || l.group_marks !== false;
+    // The size most previews have now (the first saved one breaks a tie).
+    const count = new Map();
+    for (const c of Object.values((l && l.clients) || {})) if (c.w && c.h) { const k = c.w + "x" + c.h; count.set(k, (count.get(k) || 0) + 1); }
+    const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
+    const [w, h] = top ? top[0].split("x") : ["320", "200"];
+    if (document.activeElement !== pW) pW.value = w;
+    if (document.activeElement !== pH) pH.value = h;
+  }).catch(() => {});
+  showSizes();
+  pGroup.addEventListener("change", () => invoke("set_previews_group_marks", { on: pGroup.checked }).catch(() => {}));
+  document.getElementById("pSame").addEventListener("click", async () => {
+    const width = Math.round(Number(pW.value)), height = Math.round(Number(pH.value));
+    if (!(width >= 80 && height >= 45)) { soon.textContent = "Type a width (80 or more) and a height (45 or more)."; return; }
+    await invoke("set_previews_size", { width, height }).catch(() => {});
+    soon.textContent = `Every preview is now ${width} × ${height}.`;
+  });
+  for (const [id, factor] of [["pSmaller", 0.9], ["pBigger", 1.1]]) {
+    document.getElementById(id).addEventListener("click", async () => {
+      await invoke("scale_previews", { factor }).catch(() => {});
+      setTimeout(showSizes, 700);
+    });
+  }
   invoke("client_windows_state").then(st => { cwAuto.checked = !!(st && st.auto); }).catch(() => {});
   cwAuto.addEventListener("change", () => invoke("client_windows_auto", { on: cwAuto.checked }).catch(() => {}));
   const cwSay = async (cmd) => { try { soon.textContent = await invoke(cmd); } catch (e) { soon.textContent = String(e); } };

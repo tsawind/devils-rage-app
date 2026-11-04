@@ -100,6 +100,10 @@ pub struct Layout {
     /// alts at character select would otherwise each get a live window).
     #[serde(default)]
     pub login_previews: bool,
+    /// Patch 114: the square on each preview (in / out of the pedal's hotkey group) and the
+    /// orange frame round the ones that are in it.
+    #[serde(default = "yes")]
+    pub group_marks: bool,
 }
 
 /// At most this many previews open by themselves (more can still be opened by hand).
@@ -119,6 +123,7 @@ impl Default for Layout {
             hide_active: false,
             snap: 10,
             login_previews: false,
+            group_marks: true,
         }
     }
 }
@@ -182,13 +187,16 @@ fn edit_mode(app: &AppHandle) -> bool {
 /// What a preview page needs to draw itself (sent on open and after every change).
 fn mode_json(app: &AppHandle, name: &str) -> serde_json::Value {
     let prefs = prefs_for(app, name);
-    let master = with_layout(app, |layout| layout.opacity);
+    let (master, marks) = with_layout(app, |layout| (layout.opacity, layout.group_marks));
+    // In / out of the pedal's hotkey group (None: no group has a hotkey, or squares are off).
+    let group = if marks && !crate::clipboard::is_login_label(name) { crate::launch::hotkey_membership(app, name) } else { None };
     serde_json::json!({
         "edit": edit_mode(app),
         "enabled": prefs.enabled,
         "clickThrough": prefs.click_through,
         "opacity": prefs.opacity,
         "master": master,
+        "group": group,
     })
 }
 
@@ -197,6 +205,7 @@ fn apply_mode(app: &AppHandle, window: &WebviewWindow, name: &str) {
     let prefs = prefs_for(app, name);
     let edit = edit_mode(app);
     let _ = window.set_ignore_cursor_events(!edit && prefs.click_through);
+    HOVER_OPEN.lock().unwrap().retain(|l| l != window.label());
     let _ = window.eval(format!(
         "window.__previewMode && window.__previewMode({});",
         mode_json(app, name)
@@ -339,7 +348,8 @@ fn build_preview(app: &AppHandle, name: &str) {
     let app_for_events = app.clone();
     let name_for_events = name.to_string();
     window.on_window_event(move |event| {
-        if !edit_mode(&app_for_events) {
+        // Login screen previews can be moved any time (patch 114); the rest only while editing.
+        if !edit_mode(&app_for_events) && !crate::clipboard::is_login_label(&name_for_events) {
             return;
         }
         match event {
@@ -553,6 +563,7 @@ pub fn start_watch(app: AppHandle) {
                 }
             }
             tick += 1;
+            hover_square(&app);
             if tick % 5 != 0 {
                 continue;
             }
@@ -653,6 +664,114 @@ pub fn set_previews_opacity(app: AppHandle, opacity: f64) {
     for (label, window) in app.webview_windows() {
         if let (true, Some(name)) = (label.starts_with(PREFIX), name_of_window(&window)) {
             apply_mode(&app, &window, &name);
+        }
+    }
+}
+
+/// Patch 114: the square on a preview: put that client in or out of the pedal's hotkey group.
+#[tauri::command]
+pub fn set_preview_group(app: AppHandle, name: String, on: bool) -> Result<(), String> {
+    crate::launch::set_hotkey_member(&app, &name, on)?;
+    refresh_modes(&app);
+    Ok(())
+}
+
+/// Home's switch: the hotkey-group square and orange frame on every preview.
+#[tauri::command]
+pub fn set_previews_group_marks(app: AppHandle, on: bool) {
+    with_layout(&app, |layout| layout.group_marks = on);
+    save_soon(&app);
+    refresh_modes(&app);
+}
+
+/// Send every open preview its mode again (after a group or a setting changed).
+pub fn refresh_modes(app: &AppHandle) {
+    for (label, window) in app.webview_windows() {
+        if let (true, Some(name)) = (label.starts_with(PREFIX), name_of_window(&window)) {
+            apply_mode(app, &window, &name);
+        }
+    }
+}
+
+/// Patch 114: every preview this size (physical pixels), open ones and the saved spots of the rest.
+#[tauri::command]
+pub fn set_previews_size(app: AppHandle, width: u32, height: u32) {
+    let (w, h) = (width.clamp(MIN_SIZE.0 as u32, 4000), height.clamp(MIN_SIZE.1 as u32, 4000));
+    resize_all(&app, |_| (w, h));
+}
+
+/// Patch 114: every preview bigger or smaller by `factor` (e.g. 1.1 or 0.9).
+#[tauri::command]
+pub fn scale_previews(app: AppHandle, factor: f64) {
+    let factor = factor.clamp(0.25, 4.0);
+    resize_all(&app, |(w, h)| (((w as f64) * factor).round() as u32, ((h as f64) * factor).round() as u32));
+}
+
+fn resize_all(app: &AppHandle, size: impl Fn((u32, u32)) -> (u32, u32)) {
+    let fit = |(w, h): (u32, u32)| (w.clamp(MIN_SIZE.0 as u32, 4000), h.clamp(MIN_SIZE.1 as u32, 4000));
+    let open: Vec<(String, WebviewWindow)> = app.webview_windows().into_iter().filter(|(l, _)| l.starts_with(PREFIX)).filter_map(|(_, w)| name_of_window(&w).map(|n| (n, w))).collect();
+    with_layout(app, |layout| {
+        for prefs in layout.clients.values_mut() {
+            if let (Some(w), Some(h)) = (prefs.w, prefs.h) {
+                let (w, h) = fit(size((w, h)));
+                prefs.w = Some(w);
+                prefs.h = Some(h);
+            }
+        }
+    });
+    for (name, window) in open {
+        let now = window.inner_size().map(|s| (s.width, s.height)).unwrap_or((DEFAULT_SIZE.0 as u32, DEFAULT_SIZE.1 as u32));
+        let saved = with_layout(app, |layout| layout.clients.get(&name).and_then(|p| p.w.zip(p.h)));
+        // Saved ones were sized above; an open one with no saved size is sized from what it is now.
+        let (w, h) = saved.unwrap_or_else(|| fit(size(now)));
+        let _ = window.set_size(PhysicalSize::new(w, h));
+        with_layout(app, |layout| {
+            let prefs = layout.clients.entry(name).or_default();
+            prefs.w = Some(w);
+            prefs.h = Some(h);
+        });
+    }
+    save_soon(app);
+}
+
+/// Patch 114: drag a preview by hand (login screen previews, outside edit mode).
+#[tauri::command]
+pub fn preview_start_drag(window: WebviewWindow) {
+    let _ = window.start_dragging();
+}
+
+/// Click-through previews let every click through to the game, so their square couldn't be
+/// clicked: while the pointer is over a click-through preview's square, that window takes
+/// clicks again (labels here are the ones currently taking them).
+static HOVER_OPEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn hover_square(app: &AppHandle) {
+    let (edit, marks) = with_layout(app, |layout| (layout.edit, layout.group_marks));
+    let cursor = if marks && !edit { app.cursor_position().ok() } else { None };
+    for (label, window) in app.webview_windows() {
+        if !label.starts_with(PREFIX) {
+            continue;
+        }
+        let Some(name) = name_of_window(&window) else { continue };
+        if edit || !prefs_for(app, &name).click_through {
+            continue;
+        }
+        let over = cursor.is_some_and(|c| {
+            let (Ok(pos), Ok(size), Ok(scale)) = (window.outer_position(), window.outer_size(), window.scale_factor()) else { return false };
+            // The square: 18 css px, 2 from the top, 4 from the right (preview.html), with some slack.
+            let (left, right) = (pos.x as f64 + size.width as f64 - 26.0 * scale, pos.x as f64 + size.width as f64);
+            let (top, bottom) = (pos.y as f64, pos.y as f64 + 24.0 * scale);
+            c.x >= left && c.x <= right && c.y >= top && c.y <= bottom
+        }) && crate::launch::hotkey_membership(app, &name).is_some();
+        let mut taking = HOVER_OPEN.lock().unwrap();
+        let was = taking.contains(&label);
+        if over != was {
+            let _ = window.set_ignore_cursor_events(!over);
+            if over {
+                taking.push(label);
+            } else {
+                taking.retain(|l| *l != label);
+            }
         }
     }
 }
