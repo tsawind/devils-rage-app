@@ -733,6 +733,7 @@
     }
   }
 
+  let turnSpeed = 0, lastTurnAt = 0;
   let ticks = 0, lastRim = null, lastRefine = 0, lastRimCheck = 0, lastStore = 0;
   async function tick() {
     ticks++;
@@ -782,7 +783,12 @@
           let tracked = false;
           if (prevGrey) {
             const t = (lastStep && E.trackRotation(prevGrey, grey, disc.D, { guess: lastStep })) || E.trackRotation(prevGrey, grey, disc.D);
-            if (t) { facing.Q = E.upright(E.mul(t.R, facing.Q)); lastStep = t.R; tracked = true; } else lastStep = null;
+            if (t) {
+              facing.Q = E.upright(E.mul(t.R, facing.Q)); lastStep = t.R; tracked = true;
+              // How fast the planet is turning (degrees a second, smoothed): above ~15 the next turn can be too big to follow.
+              const now = performance.now(), dt = Math.max(0.02, (now - (lastTurnAt || now - 40)) / 1000);
+              turnSpeed = 0.7 * turnSpeed + 0.3 * (t.moved * 180 / Math.PI / dt); lastTurnAt = now;
+            } else lastStep = null;
           }
           // 2) Placed on the bare planet map: no piling-up error; lost → found again anywhere on the planet.
           let ok = tracked || !prevGrey, placed = false;
@@ -839,6 +845,7 @@
           } else {
             say("scanStatus", mapDone() ? "Finding where this is on the planet map… (painting paused until it's sure)" : "Lost the grip (turned too fast): painting is paused. Turn back slowly to where it lost it and it picks up again, or press Re-centre / click one of your buildings.", "warn");
           }
+          if (ok && running && turnSpeed > 15) say("scanStatus", `Turn slower: ${Math.round(turnSpeed)}° a second. Keep it under 15 (one full turn in about 30 seconds) or it loses the planet.`, "warn");
           drawFlat(); updateButtons();
         }
         drawShot();
