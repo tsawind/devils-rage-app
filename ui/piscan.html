@@ -203,7 +203,8 @@
   // lists them, each map under piscan-bare4-<planet>-v<id>.
   const listKey = (p) => "piscan-bare4-" + p.planet_id + "-list";
   const versionKey = (p, id) => "piscan-bare4-" + p.planet_id + "-v" + id;
-  let versions = [], bareVersion = null, bareMirrored = false;
+  // freshVersion: the bare map being recorded right now (never dropped for not matching itself).
+  let versions = [], bareVersion = null, bareMirrored = false, freshVersion = null;
   function readVersions(p) {
     if (!p) return [];
     let list = [];
@@ -261,7 +262,7 @@
     const bytes = E.bareToBytes(bare);
     let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
     if (bareVersion === null) {
-      bareVersion = Date.now(); bareMirrored = !!(facing && facing.mirrored);
+      bareVersion = Date.now(); bareMirrored = !!(facing && facing.mirrored); freshVersion = bareVersion;
       versions.push({ id: bareVersion, mirrored: bareMirrored, label: `recorded on ${$("client").value || "?"}`, bare });
     }
     try {
@@ -665,13 +666,15 @@
   });
 
   // ---------- scanning ----------
+  const corpCoverage = new Map();
   function mapFor(resource) { if (!maps.has(resource)) maps.set(resource, E.newMap()); return maps.get(resource); }
   async function loadCorpScan(resource) {
     const p = currentPlanet();
     if (!p || maps.has(resource) || !(p.scans || []).some((s) => s.resource === resource)) return;
     try {
       const got = await invoke("piscan_cells", { planetId: p.planet_id, resource });
-      if (got && got.cells && !maps.has(resource)) maps.set(resource, E.fromCells(Uint8Array.from(atob(got.cells), (c) => c.charCodeAt(0))));
+      // A new scan starts on a blank map (SeAT merges it into the corp's on Save); the corp's is only for the coverage note.
+      if (got && got.cells) corpCoverage.set(resource, E.coverage(E.fromCells(Uint8Array.from(atob(got.cells), (c) => c.charCodeAt(0)))));
     } catch (e) { /* start fresh */ }
     drawFlat(); updateButtons();
   }
@@ -800,7 +803,7 @@
             const bareNow = $("resource").value === BARE, enough = bareNow ? 0.55 : 0.35;
             if (near && near.score >= enough) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; mapMisses = 0; }
             else if (near && tracked && !bareNow) { /* keep the tracked guess; the next picture is placed again */ }
-            else if (near && tracked && running) {
+            else if (near && tracked && running && bareVersion !== freshVersion) {
               // Tracking is fine but the saved map disagrees: the map is what's wrong (recorded
               // under an older, wrong lock). Never jump to it; after a few such pictures, drop it.
               if (++mapMisses > 6) {

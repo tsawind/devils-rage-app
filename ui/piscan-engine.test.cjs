@@ -94,7 +94,7 @@ for (let i = 0; i < 40; i++) {
 const drift = E.angle(E.apply(q, [0, 0, 1]), E.apply(truth, [0, 0, 1])) * 180 / Math.PI;
 console.log(`     after 40 frames: drift ${drift.toFixed(2)}°, coverage ${(E.coverage(map) * 100).toFixed(0)}%`);
 check("drift stays small over a long turn", drift < 3);
-check("a long turn covers much of the planet", E.coverage(map) > 0.4);
+check("a long turn paints a band round the planet (only the disc middle is used)", E.coverage(map) > 0.2);
 const bytes = E.cells(map);
 const at = (lat, lon) => bytes[Math.floor(lat / Math.PI * 180) * 360 + Math.floor(lon / (2 * Math.PI) * 360)];
 console.log("     hotspot cell", at(1.2, 2.0), "near", at(1.25, 2.05), at(1.15,1.95));

@@ -519,7 +519,7 @@
       const v = toSphere(x, y, disc);
       if (!v) continue;
       const square = facingOf(v, disc);
-      if (square < 0.35) continue; // near the edge the picture is too squashed to trust
+      if (square < PAINT_FACING) continue; // only the middle of the disc: near the edge the picture is squashed
       const { lat, lon } = latLon(apply(Qt, v), mirrored);
       const row = Math.min(GRID_H - 1, Math.floor(lat / Math.PI * GRID_H)), col = Math.min(GRID_W - 1, Math.floor(lon / (2 * Math.PI) * GRID_W));
       const cell = row * GRID_W + col, k = (y * width + x) * 4;
@@ -557,7 +557,9 @@
     return painted;
   }
 
-  const SETTLED = 0.85;
+  const SETTLED = 0.97;
+  /** Paint only within about 25° of the disc's middle (Tsa: the middle is the accurate part). */
+  const PAINT_FACING = 0.9;
   /**
    * EVE's resource fields are smooth, so a lone cell far from the cells round it is a speck
    * (glowing lava shining through the scan colours, a moving lava blob): it takes their median.
