@@ -576,15 +576,25 @@
   // 7.4% of the planet's radius down (seen on four recordings). Its blue icon is looked for near
   // there, so a slightly different zoom still locks right.
   const HOME_DOWN = 0.074;
-  function findCcIcon(f, near) {
-    let sx = 0, sy = 0, n = 0;
-    const d = f.data.data, R = Math.max(8, Math.round(disc.r * 0.07));
-    for (let y = Math.round(near.y - R); y <= near.y + R; y++) for (let x = Math.round(near.x - R); x <= near.x + R; x++) {
+  /** The command center's blue icon in a strip straight above and below the middle (the biggest blue-cyan blob there). */
+  function findCcIcon(f) {
+    const d = f.data.data, half = Math.max(6, Math.round(disc.r * 0.05)), reach = Math.round(disc.r * 0.16);
+    const bins = new Map();
+    for (let y = Math.round(disc.cy - reach); y <= disc.cy + reach; y++) for (let x = Math.round(disc.cx - half); x <= disc.cx + half; x++) {
       if (x < 0 || y < 0 || x >= f.w || y >= f.h) continue;
       const k = (y * f.w + x) * 4;
-      if (d[k + 1] >= 100 && d[k + 2] >= 100 && d[k] <= d[k + 1] - 20) { sx += x; sy += y; n++; }
+      if (!(d[k + 1] >= 100 && d[k + 2] >= 100 && d[k] <= d[k + 1] - 20)) continue;
+      const key = Math.floor(y / 8);
+      const bin = bins.get(key) || { sx: 0, sy: 0, n: 0 };
+      bin.sx += x; bin.sy += y; bin.n++; bins.set(key, bin);
     }
-    return n >= 3 && n <= 120 ? { x: sx / n, y: sy / n } : null;
+    // Neighbouring rows of 8 px belong together (an icon is about 10 px tall).
+    let best = null;
+    for (const [key, bin] of bins) {
+      const next = bins.get(key + 1), blob = next ? { sx: bin.sx + next.sx, sy: bin.sy + next.sy, n: bin.n + next.n } : bin;
+      if (blob.n >= 3 && blob.n <= 150 && (!best || blob.n > best.n)) best = blob;
+    }
+    return best ? { x: best.sx / best.n, y: best.sy / best.n } : null;
   }
   /**
    * One button: EVE double-clicked (command center in the middle), then zoomed all the way out.
@@ -603,8 +613,9 @@
     if (!disc) return say("lockStatus", "Couldn't find the planet's edge: use Click the edge.", "warn");
     disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
     focal = lensPx();
-    const guess = { x: disc.cx, y: disc.cy + HOME_DOWN * disc.r };
-    const icon = findCcIcon(frame, guess), at = icon || guess, way = loadPole();
+    // Zooming out tilts the camera toward the equator: a command center in the south half ends up below the middle, in the north half above it.
+    const guess = { x: disc.cx, y: disc.cy + (cc.lat > Math.PI / 2 ? 1 : -1) * HOME_DOWN * disc.r };
+    const icon = findCcIcon(frame), at = icon || guess, way = loadPole();
     const Q = E.lockOne({ px: at.x, py: at.y, lat: cc.lat, lon: cc.lon }, disc, way.mirrored, way.up);
     if (!Q) return say("lockStatus", "Couldn't lock: is the edge set?", "bad");
     facing = { Q, mirrored: way.mirrored, misses: [], owners: [me], one: { groups: new Map([[cc.kind, [cc]]]), way } };
