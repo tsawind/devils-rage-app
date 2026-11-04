@@ -511,7 +511,10 @@ mod hotkeys {
         let order = crate::cycle::expand_login(&active, &logins);
         let mut open: HashSet<String> = crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect();
         open.extend(logins.iter().map(|h| format!("login:{h}")));
-        if let Some(next) = crate::cycle::advance(&group_id, &order, &open, forward) {
+        // Step from the client in front now (a login window counts by its handle).
+        let front = crate::clipboard::foreground_handle();
+        let focused = if logins.contains(&front) { Some(format!("login:{front}")) } else { crate::clipboard::foreground_client() };
+        if let Some(next) = crate::cycle::advance(&group_id, &order, &open, focused.as_deref(), forward) {
             match crate::cycle::login_handle(&next) {
                 Some(handle) => crate::capture::focus_handle(handle),
                 None => crate::capture::focus_client(&next),

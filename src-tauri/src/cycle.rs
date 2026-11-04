@@ -32,8 +32,10 @@ pub fn login_handle(entry: &str) -> Option<isize> {
 /// Where each group is in its cycle: group id -> the character last brought forward.
 static CURSOR: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
-/// The next character to bring forward in `order`, skipping ones that aren't open. `current`
-/// is the one brought forward last. Wraps around; starts at the first open one.
+/// The next character to bring forward in `order`, skipping ones that aren't open, the way
+/// EVE-O Preview does it: from the client in front (`current`) one step down the list (or up,
+/// for backward), wrapping round. With no client of the group in front, forward starts at the
+/// top of the list and backward at the bottom.
 pub fn next_in_cycle(order: &[String], open: &HashSet<String>, current: Option<&str>, forward: bool) -> Option<String> {
     let live: Vec<&String> = order.iter().filter(|name| open.contains(*name)).collect();
     if live.is_empty() {
@@ -43,18 +45,18 @@ pub fn next_in_cycle(order: &[String], open: &HashSet<String>, current: Option<&
     let next = match at {
         Some(i) if forward => (i + 1) % live.len(),
         Some(i) => (i + live.len() - 1) % live.len(),
-        None => 0,
+        None if forward => 0,
+        None => live.len() - 1,
     };
     Some(live[next].clone())
 }
 
-/// Advance a group's cycle and return the character to focus (updating the stored cursor).
-pub fn advance(group_id: &str, order: &[String], open: &HashSet<String>, forward: bool) -> Option<String> {
+/// The group's next client from the one in front right now (`focused`), not from where the
+/// pedal last went: clicking a client by hand and then pressing the pedal goes to its neighbour.
+pub fn advance(group_id: &str, order: &[String], open: &HashSet<String>, focused: Option<&str>, forward: bool) -> Option<String> {
+    let next = next_in_cycle(order, open, focused, forward)?;
     let mut guard = CURSOR.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    let current = map.get(group_id).cloned();
-    let next = next_in_cycle(order, open, current.as_deref(), forward)?;
-    map.insert(group_id.to_string(), next.clone());
+    guard.get_or_insert_with(HashMap::new).insert(group_id.to_string(), next.clone());
     Some(next)
 }
 
@@ -115,13 +117,33 @@ mod tests {
     }
 
     #[test]
-    fn advance_remembers_and_moves_on() {
+    fn nothing_of_the_group_in_front_starts_at_the_top_or_the_bottom() {
+        let order = list(&["Darkness Holder", "DeltaMechanic", "William Russ", "MyThai"]);
+        let open = set(&["Darkness Holder", "DeltaMechanic", "William Russ", "MyThai"]);
+        assert_eq!(next_in_cycle(&order, &open, None, true).as_deref(), Some("Darkness Holder"));
+        assert_eq!(next_in_cycle(&order, &open, None, false).as_deref(), Some("MyThai"));
+        assert_eq!(next_in_cycle(&order, &open, Some("Someone Else"), false).as_deref(), Some("MyThai"));
+    }
+
+    #[test]
+    fn steps_from_the_client_in_front() {
+        let order = list(&["Darkness Holder", "DeltaMechanic", "William Russ", "MyThai"]);
+        let open = set(&["Darkness Holder", "DeltaMechanic", "William Russ", "MyThai"]);
+        // Clicked William Russ by hand: next is MyThai, previous DeltaMechanic.
+        assert_eq!(advance("g", &order, &open, Some("William Russ"), true).as_deref(), Some("MyThai"));
+        assert_eq!(advance("g", &order, &open, Some("William Russ"), false).as_deref(), Some("DeltaMechanic"));
+    }
+
+    #[test]
+    fn advance_moves_on_from_the_client_in_front() {
         forget("g");
         let order = list(&["A", "B", "C"]);
         let open = set(&["A", "B", "C"]);
-        assert_eq!(advance("g", &order, &open, true).as_deref(), Some("A"));
-        assert_eq!(advance("g", &order, &open, true).as_deref(), Some("B"));
-        assert_eq!(advance("g", &order, &open, false).as_deref(), Some("A"));
+        // Each press brings one forward; the next press starts from that one (now in front).
+        let first = advance("g", &order, &open, None, true);
+        assert_eq!(first.as_deref(), Some("A"));
+        assert_eq!(advance("g", &order, &open, first.as_deref(), true).as_deref(), Some("B"));
+        assert_eq!(advance("g", &order, &open, Some("B"), false).as_deref(), Some("A"));
         forget("g");
     }
 
