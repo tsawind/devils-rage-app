@@ -59,6 +59,11 @@ fn save(app: &AppHandle) {
     }
 }
 
+/// Sizes this close are the same window (rounding and borders), so nothing is resized.
+pub fn same_size(a: Spot, b: Spot) -> bool {
+    (a.w - b.w).abs() <= 10 && (a.h - b.h).abs() <= 10
+}
+
 /// Characters only: login screens ("Login 3") change number, so they have no spot of their own.
 pub fn keeps_a_spot(name: &str) -> bool {
     !name.starts_with("Login ") && name != crate::cycle::LOGIN_SCREENS
@@ -68,7 +73,7 @@ pub fn keeps_a_spot(name: &str) -> bool {
 mod win {
     use super::Spot;
     use windows_sys::Win32::Foundation::{HWND, RECT};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic, SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsIconic, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER};
 
     pub fn spot(handle: isize) -> Option<Spot> {
         let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
@@ -82,8 +87,13 @@ mod win {
     }
 
     pub fn place(handle: isize, spot: Spot) -> bool {
+        // Patch 121: only resize when the size really differs. A window's rectangle read back
+        // comes out a few pixels off (invisible borders, display scaling), and setting it again
+        // shrank the client a little each time (1918x1024 became 1914x1021).
+        let keep_size = spot(handle).is_some_and(|now| super::same_size(now, spot));
+        let flags = SWP_NOZORDER | SWP_NOACTIVATE | if keep_size { SWP_NOSIZE } else { 0 };
         // SAFETY: as above; no activation and no z-order change, so focus stays where it is.
-        unsafe { SetWindowPos(handle as HWND, std::ptr::null_mut(), spot.x, spot.y, spot.w, spot.h, SWP_NOZORDER | SWP_NOACTIVATE) != 0 }
+        unsafe { SetWindowPos(handle as HWND, std::ptr::null_mut(), spot.x, spot.y, spot.w, spot.h, flags) != 0 }
     }
 }
 
@@ -126,7 +136,8 @@ pub fn hold(app: &AppHandle) {
     for (name, handle) in crate::clipboard::open_clients() {
         let Some(spot) = with(app, |layout| spot_now(layout, &name)) else { continue };
         let Some(now) = window_spot(handle) else { continue };
-        if (now.x - spot.x).abs() > 2 || (now.y - spot.y).abs() > 2 || (now.w - spot.w).abs() > 2 || (now.h - spot.h).abs() > 2 {
+        // Moved off its spot, or resized by more than rounding: put it back.
+        if (now.x - spot.x).abs() > 4 || (now.y - spot.y).abs() > 4 || !same_size(now, spot) {
             win::place(handle, spot);
         }
     }
@@ -314,6 +325,12 @@ mod tests {
         // Leaving logi while still in dps: back down to the dps spot.
         assert_eq!(stack_move(&mut layout, "Tsawind", "logi", false, true, &["dps".into()], Some(BOTTOM_RIGHT)), Some(BOTTOM_LEFT));
         assert_eq!(layout.in_stack["Tsawind"], "dps");
+    }
+
+    #[test]
+    fn a_few_pixels_is_the_same_size() {
+        assert!(same_size(Spot { x: 0, y: 0, w: 1918, h: 1024 }, Spot { x: 5, y: 5, w: 1914, h: 1021 }));
+        assert!(!same_size(TOP_LEFT, Spot { x: 0, y: 0, w: 1920, h: 1080 }));
     }
 
     #[test]
