@@ -291,6 +291,7 @@ pub async fn group_setup_update(app: AppHandle, profile: String, setup: NewGroup
             login_screens: setup.login_screens,
             color: old.color,
             remember_windows: old.remember_windows,
+            hidden: old.hidden,
         },
     )?;
     let _ = crate::launch::seat_refresh(app.clone()).await;

@@ -34,6 +34,10 @@ pub struct Group {
     /// on the preview) and back to where it was when it leaves.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remember_windows: bool,
+    /// Patch 120: in the group and set up, but put away for now: not cycled, no square or frame
+    /// on its preview. Shown again from the Launch groups page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -72,6 +76,7 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
         .map(|g| {
             let members: Vec<String> = g.members.into_iter().take(150).collect();
             let skipped = g.skipped.into_iter().filter(|name| members.contains(name)).collect();
+            let hidden = g.hidden.into_iter().filter(|name| members.contains(name)).collect();
             Group {
             id: g.id,
             name: g.name.chars().take(60).collect(),
@@ -81,6 +86,7 @@ pub fn save_launch_groups(app: AppHandle, groups: Vec<Group>) -> Result<(), Stri
             backward_hotkey: g.backward_hotkey.filter(|h| !h.trim().is_empty()),
             color: clean_color(g.color),
             remember_windows: g.remember_windows,
+            hidden,
             }
         })
         .collect();
@@ -176,6 +182,10 @@ pub struct GroupPrefs {
     /// on the preview) and back to where it was when it leaves.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remember_windows: bool,
+    /// Patch 120: in the group and set up, but put away for now: not cycled, no square or frame
+    /// on its preview. Shown again from the Launch groups page.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -272,7 +282,7 @@ pub fn all_groups(app: &AppHandle) -> Vec<Group> {
             if p.login_screens {
                 members.push(crate::cycle::LOGIN_SCREENS.to_string());
             }
-            Group { id: format!("seat-{}", g.id), name: g.name, members, skipped: p.skipped, forward_hotkey: p.forward_hotkey, backward_hotkey: p.backward_hotkey, color: p.color, remember_windows: p.remember_windows }
+            Group { id: format!("seat-{}", g.id), name: g.name, members, skipped: p.skipped, forward_hotkey: p.forward_hotkey, backward_hotkey: p.backward_hotkey, color: p.color, remember_windows: p.remember_windows, hidden: p.hidden }
         })
         .collect();
     out.extend(load(app).groups);
@@ -397,6 +407,7 @@ pub fn save_seat_group_prefs(app: AppHandle, id: u64, prefs: GroupPrefs) -> Resu
         login_screens: prefs.login_screens,
         color: clean_color(prefs.color),
         remember_windows: prefs.remember_windows,
+        hidden: prefs.hidden.into_iter().take(150).collect(),
     };
     crate::cycle::forget(&format!("seat-{id}"));
     all.groups.insert(id.to_string(), clean);
@@ -418,9 +429,35 @@ fn clean_color(color: Option<String>) -> Option<String> {
     color.filter(|c| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit()))
 }
 
-/// Patch 116: the stacks (groups with a pedal / hotkey), in the order the launch groups page shows them.
+/// Patch 116: the stacks (groups with a pedal / hotkey), in the stack order (patch 120: set on the
+/// Launch groups page; stacks not in it yet follow, as the page lists them).
 pub fn stack_groups(app: &AppHandle) -> Vec<Group> {
-    all_groups(app).into_iter().filter(has_hotkey).collect()
+    let order = load_stack_order(app);
+    let mut stacks: Vec<Group> = all_groups(app).into_iter().filter(has_hotkey).collect();
+    stacks.sort_by_key(|g| order.iter().position(|id| *id == g.id).unwrap_or(usize::MAX));
+    stacks
+}
+
+fn load_stack_order(app: &AppHandle) -> Vec<String> {
+    config_file(app, "stack-order.json").and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// Patch 120: the stacks in order (first = the square furthest right on the previews).
+#[tauri::command]
+pub fn stack_order(app: AppHandle) -> Vec<serde_json::Value> {
+    stack_groups(&app)
+        .iter()
+        .enumerate()
+        .map(|(i, g)| serde_json::json!({ "id": g.id, "name": g.name, "color": g.color.clone().unwrap_or_else(|| STACK_COLORS[i % STACK_COLORS.len()].to_string()) }))
+        .collect()
+}
+
+/// Patch 120: save the stack order (the page's ▲ ▼).
+#[tauri::command]
+pub fn save_stack_order(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    write_json(config_file(&app, "stack-order.json").ok_or("no config folder")?, &ids.into_iter().take(100).collect::<Vec<_>>())?;
+    crate::previews::refresh_modes(&app);
+    Ok(())
 }
 
 /// Where this character stands in each stack, for its preview's squares: "on" (cycled), "off"
@@ -430,7 +467,7 @@ pub fn stacks_for(app: &AppHandle, name: &str) -> Vec<serde_json::Value> {
         .iter()
         .enumerate()
         .map(|(i, g)| {
-            let state = if !g.members.iter().any(|m| m == name) {
+            let state = if !g.members.iter().any(|m| m == name) || g.hidden.iter().any(|h| h == name) {
                 "out"
             } else if g.skipped.iter().any(|s| s == name) {
                 "off"
@@ -479,7 +516,7 @@ pub fn set_stack_member(app: &AppHandle, group_id: &str, name: &str, on: bool) -
     // Stacks it's still cycled in that move windows (for where its window goes on leaving).
     let still_on: Vec<String> = stack_groups(app)
         .into_iter()
-        .filter(|g| g.id != group_id && g.remember_windows && g.members.iter().any(|m| m == name) && !g.skipped.iter().any(|s| s == name))
+        .filter(|g| g.id != group_id && g.remember_windows && g.members.iter().any(|m| m == name) && !g.skipped.iter().any(|s| s == name) && !g.hidden.iter().any(|s| s == name))
         .map(|g| g.id)
         .collect();
     crate::clientwindows::stack_changed(app, name, group_id, on, group.remember_windows, &still_on);
@@ -607,7 +644,7 @@ mod hotkeys {
         let group: Option<Group> = all_groups(app).into_iter().find(|g| g.id == group_id);
         let Some(group) = group else { return };
         let logins = crate::clipboard::open_login_windows();
-        let active: Vec<String> = group.members.iter().filter(|m| !group.skipped.contains(m)).cloned().collect();
+        let active: Vec<String> = group.members.iter().filter(|m| !group.skipped.contains(m) && !group.hidden.contains(m)).cloned().collect();
         let order = crate::cycle::expand_login(&active, &logins);
         let mut open: HashSet<String> = crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect();
         open.extend(logins.iter().map(|h| format!("login:{h}")));

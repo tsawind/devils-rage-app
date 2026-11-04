@@ -69,6 +69,13 @@
   .stack { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); }
   .stack label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .stack input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; }
+  .chip.hid { opacity: .35; border-style: dotted; }
+  .chip.hid b::after { content: " · hidden"; font-weight: 400; color: var(--muted); }
+  .chip .eye { border: 0; background: none; color: var(--muted); padding: 0 2px; font-size: 12px; }
+  .chip .eye:hover { color: var(--text); }
+  .stack .order { display: inline-flex; gap: 2px; align-items: center; }
+  .stack .order button { border: 1px solid var(--line); background: #121216; color: var(--text); border-radius: 5px; padding: 0 7px; font-size: 12px; }
+  .stack .order button:disabled { opacity: .3; cursor: default; }
   .empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 22px; text-align: center; }
 </style>
 </head>
@@ -120,6 +127,7 @@
   async function load() {
     seat = await invoke("seat_launch_groups").catch(() => seat);
     groups = await invoke("launch_groups").catch(() => []);
+    stacks = await invoke("stack_order").catch(() => []);
     openClients = await invoke("launch_known_characters").catch(() => []);
     const ready = await invoke("launcher_ready").catch(() => false);
     document.getElementById("pathWarn").hidden = !!ready;
@@ -137,10 +145,12 @@
   // whether its clients' EVE windows move in and out with it.
   const STACK_COLORS = ["#ff8c1a", "#3ccf4e", "#3d8bff", "#b36bff", "#20c8d8", "#ff5fa2"];
   const hasKey = (g) => !!((g.forward_hotkey || "").trim() || (g.backward_hotkey || "").trim());
-  function stackRow(g, stackIndex, onChange) {
+  let stacks = [];
+  function stackRow(g, id, onChange) {
     const row = el("div", "stack");
-    if (stackIndex < 0) { row.append(el("span", null, "Set a pedal / hotkey to make this a stack (a square on each preview).")); return row; }
-    const color = el("input"); color.type = "color"; color.value = g.color || STACK_COLORS[stackIndex % STACK_COLORS.length];
+    const at = stacks.findIndex(x => x.id === id);
+    if (!hasKey(g) || at < 0) { row.append(el("span", null, "Set a pedal / hotkey to make this a stack (a square on each preview).")); return row; }
+    const color = el("input"); color.type = "color"; color.value = g.color || stacks[at].color;
     color.title = "This stack's color: its square on every preview, and the frame when a client is taken out";
     color.addEventListener("change", () => { g.color = color.value; onChange(); });
     const cl = el("label"); cl.append(color, document.createTextNode("Stack color"));
@@ -149,26 +159,44 @@
     const rl = el("label");
     rl.title = "Click a preview's square to join this stack and its EVE window moves to its spot here; untick it and the window goes back to where it was. The first time, drag the window into the stack yourself: leaving remembers the spot.";
     rl.append(box, document.createTextNode("Remember their window locations"));
-    row.append(cl, rl);
+    // Patch 120: stack order = the squares on the previews, first one furthest right.
+    const order = el("span", "order");
+    order.title = "Order of the squares on the previews: stack 1 is the square furthest right";
+    const up = el("button", null, "▲"), down = el("button", null, "▼");
+    up.disabled = at === 0; down.disabled = at === stacks.length - 1;
+    const move = async (by) => {
+      const ids = stacks.map(x => x.id);
+      [ids[at], ids[at + by]] = [ids[at + by], ids[at]];
+      await invoke("save_stack_order", { ids }).catch(e => status("Couldn't save: " + e));
+      stacks = await invoke("stack_order").catch(() => stacks);
+      render();
+    };
+    up.addEventListener("click", () => move(-1));
+    down.addEventListener("click", () => move(1));
+    order.append(document.createTextNode(`Stack ${at + 1} of ${stacks.length} `), up, down);
+    row.append(order, cl, rl);
     return row;
-  }
-  // Stacks in the order the previews show them: Your accounts' groups first, then this PC's.
-  function stackIndexOf(g) {
-    const all = [...seat.groups.map(x => x.prefs), ...groups].filter(hasKey);
-    return all.indexOf(g);
   }
 
   // Patch 66: SeAT's launch groups, with this PC's pedal keys, switches and login screens.
-  function chipFor(name, skipped, onToggle) {
+  function chipFor(name, skipped, onToggle, hidden, onHide) {
     const live = name === LOGIN ? logins > 0 : openClients.includes(name);
     const front = name === LOGIN ? /^Login \d+$/.test(active || "") : active === name;
-    const chip = el("span", "chip" + (live ? "" : " off") + (front ? " front" : "") + (skipped ? " skip" : ""));
+    const chip = el("span", "chip" + (live ? "" : " off") + (front ? " front" : "") + (skipped ? " skip" : "") + (hidden ? " hid" : ""));
     const sw = el("button", "sw");
     sw.title = skipped ? "Off: the pedal skips this one. Click to turn on." : "On: in the cycle. Click to skip it.";
     sw.addEventListener("click", onToggle);
     chip.append(sw, el("b", null, name));
     if (name === LOGIN) chip.append(el("span", "n", logins ? `${logins} open` : "none open"));
+    if (onHide && name !== LOGIN) chip.append(eyeButton(hidden, onHide));
     return chip;
+  }
+  // Patch 120: hide a character in a group: kept and set up, but not cycled and no square on its preview.
+  function eyeButton(hidden, onHide) {
+    const eye = el("button", "eye", hidden ? "◌" : "◉");
+    eye.title = hidden ? "Hidden: not used from the previews or the pedal. Click to show it again." : "Hide: keep it in this group, set up, but not used (no square on its preview, not cycled).";
+    eye.addEventListener("click", (e) => { e.stopPropagation(); onHide(); });
+    return eye;
   }
 
   function renderSeat() {
@@ -187,7 +215,9 @@
       const members = el("div", "members");
       if (!g.members.length) members.append(el("span", "chip off", "No characters ticked yet: tick this group on characters in Your accounts"));
       const toggle = (m) => () => { prefs.skipped = prefs.skipped.includes(m) ? prefs.skipped.filter(v => v !== m) : [...prefs.skipped, m]; save(); render(); };
-      g.members.forEach(m => members.append(chipFor(m.name, prefs.skipped.includes(m.name), toggle(m.name))));
+      prefs.hidden = prefs.hidden || [];
+      const hide = (m) => () => { prefs.hidden = prefs.hidden.includes(m) ? prefs.hidden.filter(v => v !== m) : [...prefs.hidden, m]; save(); render(); };
+      g.members.forEach(m => members.append(chipFor(m.name, prefs.skipped.includes(m.name), toggle(m.name), prefs.hidden.includes(m.name), hide(m.name))));
       if (prefs.login_screens) members.append(chipFor(LOGIN, prefs.skipped.includes(LOGIN), toggle(LOGIN)));
       const opts = el("div", "add");
       const ls = el("label"); ls.style.fontSize = "13px"; ls.style.color = "var(--muted)";
@@ -226,7 +256,7 @@
         catch (e) { status(String(e)); document.getElementById("pathWarn").hidden = false; }
       });
       row.append(open);
-      card.append(top, members, opts, cyc, stackRow(prefs, stackIndexOf(prefs), () => { save(); render(); }), row, check);
+      card.append(top, members, opts, cyc, stackRow(prefs, "seat-" + g.id, () => { save(); render(); }), row, check);
       host.append(card);
     });
   }
@@ -254,7 +284,8 @@
         const live = m === LOGIN ? logins > 0 : openClients.includes(m);
         const front = m === LOGIN ? /^Login \d+$/.test(active || "") : active === m;
         const skipped = (g.skipped || []).includes(m);
-        const chip = el("span", "chip" + (live ? "" : " off") + (front ? " front" : "") + (skipped ? " skip" : ""));
+        const hidden = (g.hidden || []).includes(m);
+        const chip = el("span", "chip" + (live ? "" : " off") + (front ? " front" : "") + (skipped ? " skip" : "") + (hidden ? " hid" : ""));
         const sw = el("button", "sw");
         sw.title = skipped ? "Off: the pedal skips this one. Click to turn on." : "On: in the cycle. Click to skip it.";
         sw.addEventListener("click", () => {
@@ -265,6 +296,10 @@
         chip.title = m === LOGIN ? "Every client at the login / character-select screen" : live ? "Open now" : "Not running right now";
         chip.append(el("b", null, m));
         if (m === LOGIN) chip.append(el("span", "n", logins ? `${logins} open` : "none open"));
+        if (m !== LOGIN) chip.append(eyeButton(hidden, () => {
+          g.hidden = hidden ? (g.hidden || []).filter(v => v !== m) : [...(g.hidden || []), m];
+          save(); render();
+        }));
         const x = el("button", "x", "✕");
         x.addEventListener("click", () => { g.members = g.members.filter(v => v !== m); save(); render(); });
         chip.append(x);
@@ -314,7 +349,7 @@
       const hint = el("span", "note"); hint.style.margin = "0"; hint.textContent = "then click these clients in the launcher";
       row.append(open, hint);
 
-      card.append(top, members, add, cyc, stackRow(g, stackIndexOf(g), () => { save(); render(); }), row);
+      card.append(top, members, add, cyc, stackRow(g, g.id, () => { save(); render(); }), row);
       host.append(card);
     });
   }
@@ -392,6 +427,8 @@
       const fresh = await invoke("launch_groups").catch(() => null);
       const freshSeat = await invoke("seat_launch_groups").catch(() => null);
       if (fresh && JSON.stringify(fresh) !== JSON.stringify(groups)) { groups = fresh; changed = true; }
+      const freshStacks = await invoke("stack_order").catch(() => null);
+      if (freshStacks && JSON.stringify(freshStacks) !== JSON.stringify(stacks)) { stacks = freshStacks; changed = true; }
       if (freshSeat && JSON.stringify(freshSeat.groups) !== JSON.stringify(seat.groups)) { seat = freshSeat; changed = true; }
     }
     const typing = (document.activeElement && ["INPUT", "SELECT"].includes(document.activeElement.tagName)) || document.querySelector(".key.listen") || document.querySelector(".chip.dragging");
