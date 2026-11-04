@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview settings</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92; --red:#a8181f; --red-hi:#d6242c; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; user-select: none; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .grow { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  .back { background: none; border: 0; color: var(--muted); }
+  .back:hover { color: var(--text); }
+  main { flex: 1; overflow: auto; padding: 16px 20px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); position: sticky; top: -16px; background: var(--bg); }
+  td { padding: 4px 6px; border-bottom: 1px solid #1d1d22; white-space: nowrap; }
+  tr.off td { opacity: .55; }
+  td.name { font-weight: 600; }
+  td.name small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  input[type=number] { width: 66px; background: #0d0d10; border: 1px solid var(--line); border-radius: 5px; color: var(--text); padding: 2px 5px; font: inherit; }
+  input[type=range] { width: 90px; vertical-align: middle; }
+  .btn { border: 1px solid var(--line); border-radius: 7px; background: #121216; color: var(--text); padding: 3px 10px; }
+  .btn:hover { border-color: var(--red-hi); }
+  .status { color: var(--muted); font-size: 13px; min-height: 1.4em; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">DR</span>
+  <h1>Preview settings</h1>
+  <span class="grow"></span>
+  <button class="btn" id="reload">↻ Read where they are now</button>
+  <button class="back" id="home">← Home</button>
+</header>
+<main>
+  <p class="note">Every client's preview in one place, for previews too small to show their own settings.
+     Position and size are in screen pixels (X, Y = the top-left corner). Changes apply straight away; ✓ Set moves an open preview to the X, Y, W, H you typed.</p>
+  <table>
+    <thead><tr><th>Client</th><th>Shown</th><th>Click-through</th><th>Opacity</th><th>X</th><th>Y</th><th>W</th><th>H</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="status" id="status"></p>
+</main>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const say = (t) => { document.getElementById("status").textContent = t || ""; };
+  function num(value, min) { const i = el("input"); i.type = "number"; i.step = "1"; if (min != null) i.min = String(min); i.value = value == null ? "" : String(value); return i; }
+  async function load() {
+    const data = await invoke("preview_settings").catch((e) => { say(String(e)); return { clients: [] }; });
+    const body = document.getElementById("rows");
+    body.innerHTML = "";
+    for (const c of data.clients) {
+      const tr = el("tr", c.enabled ? "" : "off");
+      const name = el("td", "name", c.name);
+      name.append(el("small", null, c.previewOpen ? "preview open" : c.running ? "running" : "not running"));
+      const shown = el("input"); shown.type = "checkbox"; shown.checked = !!c.enabled;
+      shown.addEventListener("change", () => { tr.className = shown.checked ? "" : "off"; invoke("set_preview_client", { name: c.name, enabled: shown.checked }).catch((e) => say(String(e))); });
+      const through = el("input"); through.type = "checkbox"; through.checked = !!c.clickThrough;
+      through.addEventListener("change", () => invoke("set_preview_client", { name: c.name, clickThrough: through.checked }).catch((e) => say(String(e))));
+      const op = el("input"); op.type = "range"; op.min = "20"; op.max = "100"; op.step = "5"; op.value = String(Math.round((c.opacity || 1) * 100));
+      const opVal = el("span", null, op.value + "%");
+      op.addEventListener("input", () => { opVal.textContent = op.value + "%"; invoke("set_preview_client", { name: c.name, opacity: Number(op.value) / 100 }).catch(() => {}); });
+      const x = num(c.x), y = num(c.y), w = num(c.w, 80), h = num(c.h, 45);
+      const set = el("button", "btn", "✓ Set");
+      const apply = async () => {
+        const v = [x, y, w, h].map(i => Math.round(Number(i.value)));
+        if (v.some(n => !Number.isFinite(n)) || [x, y, w, h].some(i => i.value === "")) { say(`Fill in X, Y, W and H for ${c.name}.`); return; }
+        await invoke("set_preview_spot", { name: c.name, x: v[0], y: v[1], w: v[2], h: v[3] }).catch((e) => say(String(e)));
+        say(`${c.name}: ${v[2]} × ${v[3]} at ${v[0]}, ${v[1]}.`);
+      };
+      set.addEventListener("click", apply);
+      for (const i of [x, y, w, h]) i.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(); });
+      const cells = [name, shown, through, [op, document.createTextNode(" "), opVal], x, y, w, h, set];
+      for (const c of cells) {
+        if (c.tagName === "TD") { tr.append(c); continue; }
+        const td = el("td"); [].concat(c).forEach(n => td.append(n)); tr.append(td);
+      }
+      body.append(tr);
+    }
+    if (!data.clients.length) say("No previews yet: open some from Home first.");
+  }
+  document.getElementById("reload").addEventListener("click", () => { load(); say("Read where every open preview is now."); });
+  document.getElementById("home").addEventListener("click", () => { location.href = "index.html"; });
+  load();
+</script>
+</body>
+</html>

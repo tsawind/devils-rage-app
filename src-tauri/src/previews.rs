@@ -385,9 +385,6 @@ pub fn set_preview_edit(app: AppHandle, on: bool) -> Result<(), String> {
         // Make sure every open client has a preview to arrange.
         let _ = open_previews(app.clone());
     }
-    if !on {
-        snap_all(&app);
-    }
     for (label, window) in app.webview_windows() {
         if !label.starts_with(PREFIX) {
             continue;
@@ -480,6 +477,7 @@ pub fn preview_interval(app: AppHandle) -> u64 {
 }
 
 /// The snap grid in pixels (0 = off), for arranging EVE windows too.
+#[allow(dead_code)]
 pub fn snap_grid(app: &AppHandle) -> u32 {
     with_layout(app, |layout| layout.snap)
 }
@@ -515,6 +513,8 @@ pub fn snap_rect(rect: (i32, i32, i32, i32), others: &[(i32, i32, i32, i32)], gr
     (x, y, w, h)
 }
 
+/// Not used for now (patch 119: no snapping by itself on Done); kept for the coming snap settings.
+#[allow(dead_code)]
 fn snap_all(app: &AppHandle) {
     let grid = with_layout(app, |layout| layout.snap) as i32;
     if grid == 0 {
@@ -790,6 +790,59 @@ fn hover_square(app: &AppHandle) {
             }
         }
     }
+}
+
+/// Patch 119: a preview's spot and size typed on the Preview settings page (physical pixels).
+#[tauri::command]
+pub fn set_preview_spot(app: AppHandle, name: String, x: i32, y: i32, w: u32, h: u32) {
+    let (w, h) = (w.clamp(MIN_SIZE.0 as u32, 4000), h.clamp(MIN_SIZE.1 as u32, 4000));
+    with_layout(&app, |layout| {
+        let prefs = layout.clients.entry(name.clone()).or_default();
+        prefs.x = Some(x);
+        prefs.y = Some(y);
+        prefs.w = Some(w);
+        prefs.h = Some(h);
+    });
+    save_soon(&app);
+    if let Some(window) = app.get_webview_window(&label_for(&name)) {
+        let _ = window.set_position(PhysicalPosition::new(x, y));
+        let _ = window.set_size(PhysicalSize::new(w, h));
+    }
+}
+
+/// Patch 119: every preview's settings and where its window is now, for the Preview settings page.
+#[tauri::command]
+pub fn preview_settings(app: AppHandle) -> serde_json::Value {
+    let open: Vec<String> = crate::clipboard::open_clients().into_iter().map(|(n, _)| n).collect();
+    let mut names: Vec<String> = with_layout(&app, |layout| layout.clients.keys().cloned().collect());
+    for name in &open {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
+    names.sort_by_key(|n| (crate::clipboard::is_login_label(n), n.to_lowercase()));
+    let rows: Vec<serde_json::Value> = names
+        .iter()
+        .map(|name| {
+            let prefs = prefs_for(&app, name);
+            // Where its preview window really is now, when it's open.
+            let live = app.get_webview_window(&label_for(name)).and_then(|w| Some((w.outer_position().ok()?, w.inner_size().ok()?)));
+            let (x, y, w, h) = match live {
+                Some((p, s)) => (Some(p.x), Some(p.y), Some(s.width), Some(s.height)),
+                None => (prefs.x, prefs.y, prefs.w, prefs.h),
+            };
+            serde_json::json!({
+                "name": name,
+                "running": open.contains(name),
+                "previewOpen": live.is_some(),
+                "enabled": prefs.enabled,
+                "clickThrough": prefs.click_through,
+                "opacity": prefs.opacity,
+                "x": x, "y": y, "w": w, "h": h,
+            })
+        })
+        .collect();
+    serde_json::json!({ "clients": rows })
 }
 
 /// Resize the calling preview (its corner handle in edit mode), in physical pixels.

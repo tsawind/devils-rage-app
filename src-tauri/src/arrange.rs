@@ -1,7 +1,7 @@
 //! Patch 117: arrange the EVE client windows themselves, for clients in **Fixed Window** mode
 //! (no title bar, so EVE can't be dragged by hand). Arrange puts a see-through handle of ours
 //! over every logged-in client: drag a handle and its client's window follows, pull its corner
-//! and the window resizes. Done snaps them to the preview snap grid, lines up edges, remembers
+//! and the window resizes. Done remembers
 //! every spot (in a stack's spot when the client is in one) and takes the handles away.
 //!
 //! This moves the game's window the way dragging its title bar would (SetWindowPos); nothing
@@ -55,16 +55,12 @@ pub fn arrange_windows(app: AppHandle, on: bool) -> Result<String, String> {
     } else {
         ARRANGING.store(false, Ordering::Relaxed);
         let handles: Vec<tauri::WebviewWindow> = app.webview_windows().into_iter().filter(|(l, _)| l.starts_with(PREFIX)).map(|(_, w)| w).collect();
-        // Snap: grid from the previews' setting, edges within 12 px of a neighbour line up.
-        let grid = crate::previews::snap_grid(&app) as i32;
-        let mut placed: Vec<(i32, i32, i32, i32)> = Vec::new();
+        // Exactly where you left them (patch 119: no snapping by itself).
         for window in &handles {
             let Some(name) = name_of(window) else { continue };
             let Some(r) = rect_of(window) else { continue };
-            let (x, y, w, h) = if grid > 0 { crate::previews::snap_rect((r.x, r.y, r.w, r.h), &placed, grid, 12) } else { (r.x, r.y, r.w, r.h) };
-            placed.push((x, y, w, h));
             if let Some(handle) = handle_of(&name) {
-                clientwindows::place_window(handle, Spot { x, y, w, h });
+                clientwindows::place_window(handle, r);
             }
         }
         let said = clientwindows::client_windows_remember(app.clone()).unwrap_or_else(|e| e);

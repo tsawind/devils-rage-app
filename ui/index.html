@@ -131,7 +131,7 @@
     <label title="Open the previews by themselves when EVE clients start"><input type="checkbox" id="pAuto"> Open by themselves</label>
     <label title="Hide the preview of the client you're looking at; the rest stay"><input type="checkbox" id="pHide"> Hide the one in front</label>
     <label title="Previews for clients still at the login / character-select screen (off by default: a batch of alts at character select would each get a live window)"><input type="checkbox" id="pLogins"> Login screens too</label>
-    <label title="When you press Done in edit layout: spots and sizes round to this grid, and edges close to another preview line up with it">Snap <select id="pSnap"><option value="0">off</option><option value="5">5 px</option><option value="10">10 px</option><option value="20">20 px</option></select></label>
+    <button id="pSettings" title="Every preview's settings in one place: shown, click-through, opacity, and its exact spot and size">Preview settings…</button>
     <label title="A square on every preview (clickable and click-through ones): ticked = that client is in the pedal / hotkey cycle, and its preview gets an orange frame. Click the square to take it in or out."><input type="checkbox" id="pGroup"> Hotkey group squares</label>
   </div>
   <div class="plinks">
@@ -222,13 +222,13 @@
   const pAuto = document.getElementById("pAuto");
   invoke("preview_layout").then(l => { pAuto.checked = !l || l.auto_open !== false; }).catch(() => {});
   pAuto.addEventListener("change", () => invoke("set_previews_auto", { on: pAuto.checked }).catch(() => {}));
-  const pHide = document.getElementById("pHide"), pSnap = document.getElementById("pSnap"), cwAuto = document.getElementById("cwAuto");
-  invoke("preview_layout").then(l => { pHide.checked = !!(l && l.hide_active); pSnap.value = String(l && l.snap !== undefined ? l.snap : 10); }).catch(() => {});
+  const pHide = document.getElementById("pHide"), cwAuto = document.getElementById("cwAuto");
+  invoke("preview_layout").then(l => { pHide.checked = !!(l && l.hide_active); }).catch(() => {});
+  document.getElementById("pSettings").addEventListener("click", () => { location.href = "previews.html"; });
   const pLogins = document.getElementById("pLogins");
   invoke("preview_layout").then(l => { pLogins.checked = !!(l && l.login_previews); }).catch(() => {});
   pLogins.addEventListener("change", () => invoke("set_previews_logins", { on: pLogins.checked }).catch(() => {}));
   pHide.addEventListener("change", () => invoke("set_previews_hide_active", { on: pHide.checked }).catch(() => {}));
-  pSnap.addEventListener("change", () => invoke("set_previews_snap", { grid: Number(pSnap.value) }).catch(() => {}));
   // Patch 114: hotkey-group squares, and one size for all previews.
   const pGroup = document.getElementById("pGroup"), pW = document.getElementById("pW"), pH = document.getElementById("pH");
   const showSizes = () => invoke("preview_layout").then(l => {
@@ -280,7 +280,7 @@
     try {
       await invoke("set_preview_edit", { on });
       showEdit(on);
-      soon.textContent = on ? "Editing: drag previews, resize from the yellow corner, pick Shown / Click-through / Opacity on each. Lock when done." : "Previews locked in place.";
+      soon.textContent = on ? "Editing: drag previews, resize from the yellow corner. Small ones: use Preview settings… for their settings. Lock when done." : "Previews locked in place.";
     } catch (e) { soon.textContent = String(e); }
   });
   document.getElementById("pClose").addEventListener("click", async () => { await invoke("close_previews").catch(() => {}); showEdit(false); soon.textContent = "Previews closed."; });

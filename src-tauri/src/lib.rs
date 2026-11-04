@@ -354,6 +354,8 @@ pub fn run() {
             previews::set_previews_size,
             previews::scale_previews,
             previews::preview_start_drag,
+            previews::set_preview_spot,
+            previews::preview_settings,
             previews::import_eveo,
             launch::launch_groups,
             launch::save_launch_groups,
