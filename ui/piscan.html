@@ -77,7 +77,7 @@
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
-        <div class="small" style="margin-bottom: 6px"><b>Easiest:</b> in EVE double-click the planet (your command center jumps to the middle), then zoom <b>all the way out</b>, press <b>Find edge</b>, then <button class="btn red" id="dcLock">Lock on: double-clicked</button></div>
+        <div class="small" style="margin-bottom: 6px"><b>Easiest:</b> in EVE double-click the planet (your command center jumps to the middle), then zoom <b>all the way out</b>, then <button class="btn red" id="dcLock">Lock on: double-clicked</button></div>
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
         <div class="status" id="autoStatus"></div>
         <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
@@ -92,7 +92,7 @@
       <div class="step"><div class="n">4</div><div>
         <h3>Scan</h3>
         <div class="muted small"><b>Once per planet:</b> zoomed all the way out, EVE on <b>No filter</b>, pick <b>Bare planet</b> below, press Scan and turn the planet all the way round (top and bottom too). Every picture is placed on that map, so it can't slide; lose it and it finds itself again. <b>After that, no lock needed:</b> open the planet, set the edge, and the app finds where it is on its own. <b>Then for each resource:</b> in EVE's Scan panel drag both ends of the colour band right out (and leave them), pick the same resource here, press <b>Scan</b>, turn the planet round once, <b>Save to SeAT</b>.</div>
-        <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
+        <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><button class="btn" id="recentre" title="In EVE double-click the planet, zoom all the way out, then press this. A scan keeps going.">Re-centre on command center</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
         <div class="row" style="display: block"><div class="meter"><i id="cover"></i></div></div>
         <div class="status" id="scanStatus"></div>
       </div></div>
@@ -152,15 +152,8 @@
   }
   /** After a lock: use the bare map version that fits this client's look; none fits → a new one gets recorded. */
   function checkMapAgainstLock() {
-    if (!frame || !facing || !versions.length) return;
-    const best = bestVersionAt(facing.Q, facing.mirrored);
-    if (best && best.score >= 0.55) {
-      useVersion(best.v);
-      if (versions.length > 1) say("scanStatus", `Using bare map version "${best.v.label}" (fits this client's graphics).`, "ok");
-    } else {
-      dropVersion();
-      say("scanStatus", `None of this planet's ${versions.length} bare map version(s) match how this client draws it (different graphics settings?). Pick Bare planet and Scan once: it's saved as a new version, and the others are kept.`, "warn");
-    }
+    const said = fitVersionsToLock();
+    if (said) say("scanStatus", said, /No bare map/.test(said) ? "warn" : "ok");
   }
   function forgetTrack() { prevGrey = null; lastStep = null; keys = []; lost = null; lostRun = 0; }
   const BARE = "__bare";
@@ -579,27 +572,76 @@
     updateButtons(); drawShot();
   }
   // EVE's double-click puts your command center in the middle; zooming all the way out from there
-  // always lands on the same view (measured on two recordings, identical to the pixel): the command
-  // center then sits 7.5° from the planet's middle, toward the lower right (32° below the right
-  // horizontal). With north standing straight up, that's a lock with no clicks.
-  const DC_ANGLE = 7.52 * Math.PI / 180, DC_DIR = 32.1 * Math.PI / 180;
-  $("dcLock").addEventListener("click", () => {
+  // tilts the camera only, so the command center ends up straight below the planet's middle,
+  // 7.4% of the planet's radius down (seen on four recordings). Its blue icon is looked for near
+  // there, so a slightly different zoom still locks right.
+  const HOME_DOWN = 0.074;
+  function findCcIcon(f, near) {
+    let sx = 0, sy = 0, n = 0;
+    const d = f.data.data, R = Math.max(8, Math.round(disc.r * 0.07));
+    for (let y = Math.round(near.y - R); y <= near.y + R; y++) for (let x = Math.round(near.x - R); x <= near.x + R; x++) {
+      if (x < 0 || y < 0 || x >= f.w || y >= f.h) continue;
+      const k = (y * f.w + x) * 4;
+      if (d[k + 1] >= 100 && d[k + 2] >= 100 && d[k] <= d[k + 1] - 20) { sx += x; sy += y; n++; }
+    }
+    return n >= 3 && n <= 120 ? { x: sx / n, y: sy / n } : null;
+  }
+  /**
+   * One button: EVE double-clicked (command center in the middle), then zoomed all the way out.
+   * Finds the edge and the command center's icon and locks on. A bare map recorded under an older,
+   * sideways-off lock is turned to fit (and saved that way). Keeps any scan going.
+   */
+  async function lockHome() {
     const me = $("client").value;
     const cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
     if (!cc) return say("lockStatus", `${me || "This character"} has no command center on this planet.`, "warn");
-    if (!disc || !frame) return say("lockStatus", "Zoom all the way out and press Find edge first.", "warn");
+    const f = await grab().catch(() => null);
+    if (f) frame = f;
+    if (!frame) return say("lockStatus", "No picture from that client.", "bad");
+    const rim = E.rimRadius(frame.data.data, frame.w, frame.h, null);
+    if (rim && rim.r >= 40) disc = { cx: rim.cx, cy: rim.cy, r: rim.r };
+    if (!disc) return say("lockStatus", "Couldn't find the planet's edge: use Click the edge.", "warn");
     disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
-    const v = [Math.sin(DC_ANGLE) * Math.cos(DC_DIR), -Math.sin(DC_ANGLE) * Math.sin(DC_DIR), Math.cos(DC_ANGLE)];
-    const at = E.toPicture(v, disc), way = loadPole();
+    focal = lensPx();
+    const guess = { x: disc.cx, y: disc.cy + HOME_DOWN * disc.r };
+    const icon = findCcIcon(frame, guess), at = icon || guess, way = loadPole();
     const Q = E.lockOne({ px: at.x, py: at.y, lat: cc.lat, lon: cc.lon }, disc, way.mirrored, way.up);
     if (!Q) return say("lockStatus", "Couldn't lock: is the edge set?", "bad");
     facing = { Q, mirrored: way.mirrored, misses: [], owners: [me], one: { groups: new Map([[cc.kind, [cc]]]), way } };
     anchors = [{ kind: cc.kind, px: at.x, py: at.y }];
-    focal = lensPx(); forgetTrack(); frozen = false; mapMisses = 0; say("autoStatus", "");
-    checkMapAgainstLock();
-    say("lockStatus", "Locked on from the double-click view. Click a building in EVE so your network shows: the green rings should sit on it. (Only right if you double-clicked and then zoomed all the way out.)", "ok");
-    renderAnchors(); updateButtons(); drawShot();
-  });
+    forgetTrack(); frozen = false; mapMisses = 0; say("autoStatus", "");
+    const fixed = fitVersionsToLock();
+    say("lockStatus", `Locked on your command center (${icon ? "found its icon" : "icon not seen: used where it usually sits"}). The cross should sit on it in EVE.${fixed ? " " + fixed : ""}`, "ok");
+    renderAnchors(); updateButtons(); drawShot(); drawFlat();
+  }
+  /** Bare map versions that are off sideways (recorded under an older lock): turn them to fit this lock, and keep them that way. */
+  function fitVersionsToLock() {
+    const p = currentPlanet();
+    if (!p || !frame || !facing || !versions.length) return "";
+    const pose = E.poseOf(facing.Q), enough = $("resource").value === BARE ? 0.55 : 0.35;
+    const coarse = E.samplePoints(frame.data.data, frame.w, frame.h, disc, 300, true), fine = E.samplePoints(frame.data.data, frame.w, frame.h, disc, 600);
+    let best = null;
+    for (const v of versions) {
+      if (v.mirrored !== facing.mirrored) continue;
+      const here = E.poseScore(fine, E.bareGrey(v.bare), facing.Q, v.mirrored);
+      if (here !== null && here >= enough && (!best || here > best.score)) best = { v, score: here, bare: v.bare, shift: 0 };
+      const r = E.alignToMap(coarse, E.bareGrey(v.bare, true), v.mirrored, pose, 15 * DEG, 1 * DEG);
+      const rf = r && E.alignToMap(fine, E.bareGrey(v.bare), v.mirrored, r, 1 * DEG, 0.25 * DEG);
+      if (!rf || Math.abs(rf.pitch - pose.pitch) > 1.5 * DEG) continue;
+      const dy = (rf.yaw - pose.yaw) / DEG;
+      if (Math.abs(dy) < 0.3) continue;
+      for (const sh of [dy, -dy]) {
+        const turned = E.shiftBare(v.bare, sh), sc = E.poseScore(fine, E.bareGrey(turned), facing.Q, v.mirrored);
+        if (sc !== null && sc >= enough && (!best || sc > best.score)) best = { v, score: sc, bare: turned, shift: sh };
+      }
+    }
+    if (!best) { dropVersion(); return "No bare map version fits this view: pick Bare planet and Scan once to record one for these graphics."; }
+    if (best.shift) { best.v.bare = best.bare; useVersion(best.v); storeBare(); }
+    else useVersion(best.v);
+    return best.shift ? `The bare map was ${Math.abs(best.shift).toFixed(1)}° off sideways (recorded under the old lock): turned to fit and saved.` : "";
+  }
+  $("dcLock").addEventListener("click", lockHome);
+  $("recentre").addEventListener("click", lockHome);
   $("flip").addEventListener("click", () => {
     if (!facing || !facing.one) return;
     const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);

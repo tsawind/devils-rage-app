@@ -485,6 +485,24 @@
   }
 
   /**
+   * The same bare map turned round the pole by `deg` degrees of longitude (for a map that was
+   * recorded under a lock that was off sideways: EVE's camera only turns about the pole and
+   * tilts, so a sideways error is a pure longitude shift).
+   */
+  function shiftBare(bare, deg) {
+    const out = newBare(), sh = deg * GRID_W / 360;
+    for (let row = 0; row < GRID_H; row++) for (let col = 0; col < GRID_W; col++) {
+      const from = col - sh, a = Math.floor(from), f = from - a;
+      const i0 = row * GRID_W + ((a % GRID_W) + GRID_W) % GRID_W, i1 = row * GRID_W + (((a + 1) % GRID_W) + GRID_W) % GRID_W, i = row * GRID_W + col;
+      const w0 = bare.weight[i0] > 0 ? 1 - f : 0, w1 = bare.weight[i1] > 0 ? f : 0;
+      if (w0 + w1 <= 0) continue;
+      for (let c = 0; c < 3; c++) out.rgb[i * 3 + c] = (w0 * bare.rgb[i0 * 3 + c] / bare.weight[i0] + w1 * (bare.weight[i1] > 0 ? bare.rgb[i1 * 3 + c] / bare.weight[i1] : 0)) / (w0 + w1);
+      out.weight[i] = 1; out.best[i] = Math.max(bare.best ? bare.best[i0] : 1, 0);
+    }
+    return out;
+  }
+
+  /**
    * Paint one picture onto a map: every disc pixel facing the camera well enough. With `bare`
    * (a bare-planet map) it's a resource map, unmixed against the planet's own colours; with
    * `bare === "record"`, `map` is a bare map being recorded.
@@ -920,7 +938,7 @@
     return { ...pose, Q, inliers: pairs.length };
   }
 
-  const api = { GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
+  const api = { shiftBare, GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
     solveAnchors, solveAnchorsEitherWay, lockOne, northUp, poseQ, poseOf, upright, samplePoints, bareGrey, poseScore, alignToMap, findOnMap, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);

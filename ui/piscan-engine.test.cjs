@@ -222,5 +222,15 @@ check("picture ↔ planet round trip (close camera)", rt && Math.abs(rt[0] - 0.3
   check("a saved bare map isn't repainted", E.bareToBytes(saved).every((x, i) => x === first[i]));
 }
 
+// A bare map recorded under a lock that was off sideways is a pure longitude shift: it turns back.
+{
+  const b = E.newBare();
+  for (let i = 0; i < b.weight.length; i++) { const col = i % E.GRID_W; b.rgb[i * 3] = col % 256; b.rgb[i * 3 + 1] = 50; b.rgb[i * 3 + 2] = 50; b.weight[i] = 1; }
+  const there = E.shiftBare(b, 8.75), back = E.shiftBare(there, -8.75);
+  let worst = 0; for (let i = 0; i < b.weight.length; i++) { const col = i % E.GRID_W; if (col > 20 && col < 230) worst = Math.max(worst, Math.abs(back.rgb[i * 3] - b.rgb[i * 3])); }
+  check("a bare map turned 8.75° and back comes back", worst < 1);
+  check("turning moves it along the longitude", Math.abs(there.rgb[(10 * E.GRID_W + 100) * 3] - 91.25) < 0.01);
+}
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);
