@@ -256,7 +256,7 @@
     else if (go === "previews") invoke("open_previews").catch(e => status(String(e), "bad"));
     else if (go === "accounts") invoke("open_site", { site: "accounts", remember: false }).catch(e => status(String(e), "bad"));
   }));
-  $("home").addEventListener("click", () => { location.href = "index.html"; });
+  $("home").addEventListener("click", () => { location.href = "index.html#groups"; });
 
   (async () => {
     try { data = await invoke("tuning_read"); }

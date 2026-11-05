@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assets</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92; --red:#a8181f; --red-hi:#d6242c; --ok:#7fd67f; --warn:#f0c040; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .grow { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  .back { background: none; border: 0; color: var(--muted); }
+  main { flex: 1; overflow: auto; padding: 16px 20px; max-width: 980px; width: 100%; margin: 0 auto; }
+  h2 { font-size: 15px; margin: 18px 0 8px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 12px 14px; margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+  .stat b { display: block; font-size: 20px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .modes { display: flex; gap: 8px; flex-wrap: wrap; }
+  .mode { border: 1px solid var(--line); border-radius: 10px; background: #121216; color: var(--text); padding: 10px 14px; min-width: 150px; text-align: left; }
+  .mode b { display: block; }
+  .mode span { color: var(--muted); font-size: 12px; }
+  .mode.on { border-color: var(--red-hi); background: #2a0f12; }
+  label.dial { display: grid; grid-template-columns: 210px 1fr 90px; gap: 10px; align-items: center; font-size: 13px; margin: 6px 0; }
+  label.dial output { color: var(--warn); text-align: right; }
+  label.tick { display: inline-flex; gap: 6px; align-items: center; margin: 4px 14px 4px 0; font-size: 13px; }
+  input[type=number] { width: 120px; background: #0d0d10; border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 3px 6px; font: inherit; }
+  ol.steps { margin: 0; padding-left: 22px; }
+  ol.steps li { margin: 6px 0; }
+  ol.steps li small { color: var(--muted); display: block; }
+  ol.steps li.done { opacity: .45; text-decoration: line-through; }
+  .tag { font-size: 11px; border-radius: 999px; padding: 0 7px; margin-left: 6px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.hi { border-color: var(--red-hi); color: #f3c6c6; }
+  .loss { font-size: 22px; font-weight: 700; }
+  .loss.bad { color: #ff7b7b; } .loss.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">DR</span>
+  <h1>Assets</h1>
+  <span class="grow"></span>
+  <button class="back" id="home">← Home</button>
+</header>
+<main>
+  <h2>Overview <span class="tag">from SeAT: coming</span></h2>
+  <p class="note">Characters, ships, items and m³ by character, account and division hangar, Omega / Alpha, clones and value: this fills in once SeAT reads every director's assets (each director's division is the number in their title). Until then, put rough numbers in the planner below.</p>
+  <div class="grid" id="overview">
+    <div class="card stat"><b>—</b><span>Characters (Omega / Alpha)</span></div>
+    <div class="card stat"><b>—</b><span>Ships · items · m³</span></div>
+    <div class="card stat"><b>—</b><span>In Daisy's Fortizar</span></div>
+    <div class="card stat"><b>—</b><span>Jump clones · implants</span></div>
+  </div>
+  <button class="mode" id="piscan" style="margin-top:4px"><b>PI planet scan</b><span>Map a planet's resources for the corp</span></button>
+
+  <h2>Plan</h2>
+  <div class="modes">
+    <button class="mode" data-mode="vacation"><b>🏖 Vacation</b><span>Away for a while: shrink what's at risk</span></button>
+    <button class="mode" data-mode="war"><b>⚔ War</b><span>Hostiles active: keep fighting, protect the rest</span></button>
+    <button class="mode" data-mode="eviction"><b>☠ Being evicted</b><span>Structure will fall: get value out or into coffins</span></button>
+  </div>
+
+  <div class="card" id="dials" hidden>
+    <label class="dial">Days away / how long it lasts <input type="range" id="days" min="1" max="60" value="7"><output id="daysV"></output></label>
+    <label class="dial">Threat level <input type="range" id="risk" min="1" max="5" value="2"><output id="riskV"></output></label>
+    <label class="dial">Hours I can spend packing <input type="range" id="hours" min="0.5" max="12" step="0.5" value="3"><output id="hoursV"></output></label>
+    <label class="dial">Logins I can juggle <input type="range" id="logins" min="1" max="40" value="10"><output id="loginsV"></output></label>
+    <div>
+      <label class="tick"><input type="checkbox" id="hasCaps" checked> Capitals (carriers, dreads)</label>
+      <label class="tick"><input type="checkbox" id="hasCharon" checked> Charons</label>
+      <label class="tick"><input type="checkbox" id="hasBowhead" checked> Bowheads</label>
+      <label class="tick"><input type="checkbox" id="hasEscape"> Battleships with something in the escape bay</label>
+      <label class="tick"><input type="checkbox" id="borrowCorp" checked> Borrow corp capitals (division 1)</label>
+    </div>
+    <label class="dial">Omega coffins ready <input type="range" id="omegas" min="0" max="30" value="4"><output id="omegasV"></output></label>
+    <label class="dial">Alpha coffins available <input type="range" id="alphas" min="0" max="60" value="10"><output id="alphasV"></output></label>
+    <label class="dial">Rough value in the Fortizar (b ISK) <input type="number" id="inStructure" min="0" step="0.5" value="20"><span></span></label>
+    <label class="dial">Of that, I'll move out / into coffins (b ISK) <input type="number" id="moving" min="0" step="0.5" value="12"><span></span></label>
+    <label class="dial">Clones + implants in the Fortizar (b ISK) <input type="number" id="clones" min="0" step="0.1" value="1"><span></span></label>
+  </div>
+
+  <div class="card" id="result" hidden>
+    <div class="grid">
+      <div><span class="note">If the Fortizar dies while I'm away, I lose about</span><div class="loss" id="loss"></div><span class="note" id="lossNote"></span></div>
+      <div><span class="note">Packing time needed (rough)</span><div class="loss" id="time"></div><span class="note" id="timeNote"></span></div>
+    </div>
+  </div>
+  <div class="card" id="stepsCard" hidden>
+    <b>Steps</b> <span class="note">(click a step when done)</span>
+    <ol class="steps" id="steps"></ol>
+  </div>
+  <p class="note">Wormhole space has no asset safety: when a structure dies, part of its fit, the core and a wreck drop, and everyone's hangars spill into containers that the attackers can loot or shoot (show info shows whose they are). All clones in it are destroyed. Repackaging a ship destroys its rigs.</p>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const KEY = "dr.assets.plan";
+  const fields = ["days", "risk", "hours", "logins", "omegas", "alphas", "inStructure", "moving", "clones", "hasCaps", "hasCharon", "hasBowhead", "hasEscape", "borrowCorp"];
+  let mode = null, done = new Set();
+  try { const saved = JSON.parse(localStorage.getItem(KEY) || "{}"); mode = saved.mode || null; done = new Set(saved.done || []);
+        for (const f of fields) if (saved[f] !== undefined) { const e = $(f); if (e.type === "checkbox") e.checked = saved[f]; else e.value = saved[f]; } } catch (e) {}
+  function save() {
+    const o = { mode, done: [...done] };
+    for (const f of fields) { const e = $(f); o[f] = e.type === "checkbox" ? e.checked : e.value; }
+    try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) {}
+  }
+  const RISK = ["", "quiet", "some traffic", "hostiles seen", "hostile fleets", "eviction fleet"];
+  function steps() {
+    const v = (id) => Number($(id).value), c = (id) => $(id).checked;
+    const risk = v("risk"), hours = v("hours"), out = [];
+    const add = (id, text, why, hi) => out.push({ id, text, why, hi });
+    const coffinsNeeded = (c("hasCaps") ? 2 : 0) + (c("hasCharon") ? 2 : 0) + (c("hasBowhead") ? 1 : 0) + (c("borrowCorp") ? 1 : 0);
+    const short = Math.max(0, coffinsNeeded - v("omegas"));
+    add("list", "Write down what's in your division hangar and ship hangar: biggest ISK first.", "Pack by value per minute: the top 20% of items is usually most of the ISK.", true);
+    if (mode === "vacation" && risk <= 2) add("keep", "Low threat: leave cheap, bulky and doctrine stuff in the Fortizar.", "Only move what would really hurt to lose; time is better spent on the expensive things.");
+    if (c("hasBowhead")) add("bowhead", "Bowhead first: fill its ship maintenance bay with your most valuable RIGGED ships (assembled).", "Rigged ships keep their rigs in a ship maintenance bay; repackaging destroys rigs and costs hours to refit.", true);
+    if (c("hasCaps")) add("caps", "Carriers: rigged ships into the ship maintenance bay, modules / ammo / loot into the fleet hangar. Dreads: fleet hangar with modules.", "Capitals are their own coffins: board them, fill them, log them out in space.");
+    if (c("hasCharon")) add("charon", "Charons: packaged ships, modules, PI and loot by value (m³ is the limit, not mass).", "Package only ships with no rigs or cheap rigs; minerals and bulky low-value stuff last.", true);
+    if (c("hasEscape")) add("escape", "Battleships with something in the escape bay: do these last, or leave them if time is short.", "Taking the escape bay contents out before they fit a maintenance bay is slow.");
+    if (c("borrowCorp")) add("borrow", "Borrow division 1 capitals for extra space: note who took what (corp hangar log).", "Put it back in division 1 after the trip.");
+    if (short > 0) add("omega", `You need about ${short} more Omega coffin${short === 1 ? "" : "s"}: weekend Omega pass + injectors (≈9 or fewer) on alphas, inject the hauler / capital skills remotely.`, "Alphas can't fly Charons, Bowheads or capitals.", true);
+    add("logout", "Log every coffin out in space: off-grid safe spot, not at the Fortizar, not at a hole. Don't log them in while the threat lasts.", risk >= 4 ? "High threat: days to months in space; log in only when the hole is quiet." : "Check the chain before you log back in.", true);
+    add("clones", "Clones: jump out of expensive implant clones, or accept losing them (every clone in the Fortizar dies with it).", `≈ ${v("clones")} b ISK of clones / implants in it.`);
+    if (mode !== "vacation") add("trash", "While the structure still lets you (before hull): repackage / trash what can't leave.", "Structure services go offline as it's reinforced; plan to be done before the last timer.", true);
+    if (mode === "eviction") add("seed", "Seed a cyno-free exit: scout holes out, roll for a highsec / lowsec link, and move coffins in the quiet window.", "The structure's armor and hull timers are the deadline.", true);
+    if (mode === "war") add("fight", "Keep doctrine ships for the fight in the Fortizar; move everything else into coffins.", "What you don't need to fight with doesn't need to be at risk.");
+    add("tell", "Tell the other directors what you packed and where (division hangar notes / Discord).", "Corp mates can loot your containers if the structure dies while we hold the field.");
+    if (hours < coffinsNeeded * 0.5) add("time", `Not enough time: ${hours} h for about ${coffinsNeeded} hulls. Do the top steps only.`, "Rough: 20–40 min per hull to fill, fly and log out.", true);
+    return { list: out, need: coffinsNeeded };
+  }
+  function draw() {
+    for (const id of ["days", "risk", "hours", "logins", "omegas", "alphas"]) $(id + "V").textContent = id === "risk" ? `${$("risk").value} · ${RISK[$("risk").value]}` : id === "hours" ? $("hours").value + " h" : $(id).value;
+    document.querySelectorAll(".mode[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+    for (const id of ["dials", "result", "stepsCard"]) $(id).hidden = !mode;
+    if (!mode) return;
+    const inS = Number($("inStructure").value) || 0, mv = Math.min(inS, Number($("moving").value) || 0), cl = Number($("clones").value) || 0;
+    const loss = inS - mv + cl;
+    $("loss").textContent = loss.toFixed(1) + " b ISK";
+    $("loss").className = "loss " + (loss > 5 ? "bad" : "ok");
+    $("lossNote").textContent = `${(inS - mv).toFixed(1)} b left in the hangars + ${cl.toFixed(1)} b clones. If we hold the field, some of it comes back from the containers.`;
+    const { list, need } = steps();
+    $("time").textContent = (need * 0.5).toFixed(1) + " h";
+    $("timeNote").textContent = `≈ 30 min per hull (${need} hulls); you have ${$("hours").value} h.`;
+    const ol = $("steps"); ol.innerHTML = "";
+    for (const s of list) {
+      const li = document.createElement("li");
+      li.className = done.has(s.id) ? "done" : "";
+      li.innerHTML = "";
+      li.append(s.text);
+      if (s.hi) { const t = document.createElement("span"); t.className = "tag hi"; t.textContent = "big"; li.append(t); }
+      const sm = document.createElement("small"); sm.textContent = s.why; li.append(sm);
+      li.addEventListener("click", () => { done.has(s.id) ? done.delete(s.id) : done.add(s.id); save(); draw(); });
+      ol.append(li);
+    }
+  }
+  document.querySelectorAll(".mode[data-mode]").forEach(b => b.addEventListener("click", () => { mode = mode === b.dataset.mode ? null : b.dataset.mode; save(); draw(); }));
+  for (const f of fields) $(f).addEventListener("input", () => { save(); draw(); });
+  $("home").addEventListener("click", () => { location.href = "index.html"; });
+  $("piscan").addEventListener("click", () => { location.href = "piscan.html"; });
+  draw();
+</script>
+</body>
+</html>

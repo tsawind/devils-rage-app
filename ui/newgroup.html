@@ -331,7 +331,7 @@
   $("name").addEventListener("input", render);
   $("filter").addEventListener("input", renderAccounts);
   $("preset").addEventListener("change", () => usePreset($("preset").value));
-  $("home").addEventListener("click", () => { location.href = "index.html"; });
+  $("home").addEventListener("click", () => { location.href = "index.html#groups"; });
 
   (async () => {
     PRESETS.forEach(p => $("preset").append(new Option(p.name, p.id)));

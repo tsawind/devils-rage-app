@@ -129,7 +129,7 @@
     temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Microorganisms"],
   };
   const say = (id, text, kind) => { const el = $(id); el.textContent = text || ""; el.className = "status" + (kind ? " " + kind : ""); };
-  $("home").addEventListener("click", () => { location.href = "index.html"; });
+  $("home").addEventListener("click", () => { location.href = "index.html#groups"; });
 
   const shot = $("shot"), sctx = shot.getContext("2d", { willReadFrequently: true });
   const flat = $("flat"), fctx = flat.getContext("2d");

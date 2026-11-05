@@ -410,7 +410,7 @@
     await refreshSeat(true);
   });
   document.getElementById("editSeat").addEventListener("click", () => { location.href = (seat.seat || "https://seatdevilsrage.duckdns.org") + "/devilsrage/your-accounts"; });
-  document.getElementById("home").addEventListener("click", () => { location.href = "index.html"; });
+  document.getElementById("home").addEventListener("click", () => { location.href = "index.html#groups"; });
   document.getElementById("setPath").addEventListener("click", () => { location.href = "settings.html"; });
 
   load().then(() => refreshSeat(true));
