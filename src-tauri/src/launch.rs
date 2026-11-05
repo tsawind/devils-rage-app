@@ -322,6 +322,43 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Patch 123: your characters' assets and your division hangar from SeAT, saved on this PC
+/// (assets-snapshot.json); with `offline` (or SeAT unreachable), the last saved copy.
+#[tauri::command]
+pub async fn seat_assets(app: AppHandle, offline: bool) -> Result<serde_json::Value, String> {
+    let path = config_file(&app, "assets-snapshot.json").ok_or("no config folder")?;
+    let saved = || std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    if offline {
+        return saved().ok_or_else(|| "Nothing saved on this PC yet: load from SeAT once.".to_string());
+    }
+    let fresh: Result<serde_json::Value, String> = async {
+        let (cookies, _) = seat_session(&app)?;
+        let response = reqwest::Client::new()
+            .get(format!("{}/devilsrage/assets.json", crate::SEAT_URL))
+            .header("Accept", "application/json")
+            .header("Cookie", cookies)
+            .timeout(std::time::Duration::from_secs(90))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("SeAT answered {} (sign in to SeAT in the app again?)", response.status()));
+        }
+        response.json::<serde_json::Value>().await.map_err(|_| "SeAT didn't send assets (signed out? open SeAT once)".to_string())
+    }
+    .await;
+    match fresh {
+        Ok(data) => {
+            write_json(path.clone(), &data)?;
+            Ok(data)
+        }
+        Err(err) => saved().map(|mut d| {
+            d["offlineBecause"] = serde_json::Value::String(err.clone());
+            d
+        }).ok_or(err),
+    }
+}
+
 pub(crate) async fn fetch_seat(app: &AppHandle) -> Result<SeatData, String> {
     let (cookies, _) = seat_session(app)?;
     let response = reqwest::Client::new()

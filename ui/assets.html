@@ -49,14 +49,10 @@
   <button class="back" id="home">← Home</button>
 </header>
 <main>
-  <h2>Overview <span class="tag">from SeAT: coming</span></h2>
-  <p class="note">Characters, ships, items and m³ by character, account and division hangar, Omega / Alpha, clones and value: this fills in once SeAT reads every director's assets (each director's division is the number in their title). Until then, put rough numbers in the planner below.</p>
-  <div class="grid" id="overview">
-    <div class="card stat"><b>—</b><span>Characters (Omega / Alpha)</span></div>
-    <div class="card stat"><b>—</b><span>Ships · items · m³</span></div>
-    <div class="card stat"><b>—</b><span>In Daisy's Fortizar</span></div>
-    <div class="card stat"><b>—</b><span>Jump clones · implants</span></div>
-  </div>
+  <h2>Overview <button class="mode" id="load" style="min-width:0;padding:3px 10px;margin-left:8px">↻ Load from SeAT</button> <span class="note" id="loaded"></span></h2>
+  <p class="note">Your characters' assets and your division hangar (the number in your title), from SeAT; a copy is kept on this PC. Values are CCP's adjusted prices, rough.</p>
+  <div class="grid" id="overview"></div>
+  <div class="card" id="places" hidden></div>
   <button class="mode" id="piscan" style="margin-top:4px"><b>PI planet scan</b><span>Map a planet's resources for the corp</span></button>
 
   <h2>Plan</h2>
@@ -90,6 +86,19 @@
       <div><span class="note">If the Fortizar dies while I'm away, I lose about</span><div class="loss" id="loss"></div><span class="note" id="lossNote"></span></div>
       <div><span class="note">Packing time needed (rough)</span><div class="loss" id="time"></div><span class="note" id="timeNote"></span></div>
     </div>
+  </div>
+  <div class="card" id="packCard" hidden>
+    <b>What goes where (Daisy: J145735)</b> <span class="note">from your SeAT assets, most valuable first. Check bay sizes with Show info.</span>
+    <div style="margin:6px 0">
+      <label class="tick">Charons <input type="number" id="charons" value="2" min="0" style="width:60px"></label>
+      <label class="tick">Caldari Freighter <select id="cfLvl"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label class="tick">Bowheads <input type="number" id="bowheads" value="1" min="0" style="width:60px"></label>
+      <label class="tick">ORE Freighter <select id="ofLvl"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select></label>
+      <label class="tick">Carrier maintenance bays, m³ (all) <input type="number" id="carrierSmb" value="0" step="50000"></label>
+      <div class="note" id="bays"></div>
+      <input type="hidden" id="smb"><input type="hidden" id="cargo">
+    </div>
+    <div id="pack"></div>
   </div>
   <div class="card" id="stepsCard" hidden>
     <b>Steps</b> <span class="note">(click a step when done)</span>
@@ -163,7 +172,70 @@
   for (const f of fields) $(f).addEventListener("input", () => { save(); draw(); });
   $("home").addEventListener("click", () => { location.href = "index.html"; });
   $("piscan").addEventListener("click", () => { location.href = "piscan.html"; });
+  // Patch 123: real assets from SeAT.
+  let data = null;
+  const isk = (n) => n >= 1e9 ? (n / 1e9).toFixed(1) + " b" : n >= 1e6 ? (n / 1e6).toFixed(0) + " m" : Math.round(n / 1e3) + " k";
+  const DAISY = /J145735/;
+  function overview() {
+    if (!data) return;
+    const items = data.items || [];
+    const sum = (list, f) => list.reduce((a, x) => a + (x[f] || 0), 0);
+    const ships = items.filter(x => x.ship), daisy = items.filter(x => DAISY.test(x.place));
+    $("loaded").textContent = (data.offlineBecause ? "Saved copy (SeAT: " + data.offlineBecause + ") · " : "") + "from " + new Date(data.generated).toLocaleString();
+    const card = (b, t) => `<div class="card stat"><b>${b}</b><span>${t}</span></div>`;
+    $("overview").innerHTML = card(data.characters.length, "Characters" + (data.divisions.length ? " · division " + data.divisions.join("/") : ""))
+      + card(isk(sum(items, "value")) + " ISK", `${ships.length} ships · ${items.length - ships.length} item stacks`)
+      + card(isk(sum(daisy, "value")) + " ISK", `In Daisy (J145735) · ${Math.round(sum(daisy, "m3")).toLocaleString()} m³`)
+      + card(isk(sum(items.filter(x => /^Division/.test(x.owner)), "value")) + " ISK", "Division hangar");
+    const by = new Map();
+    for (const x of items) by.set(x.place, (by.get(x.place) || 0) + x.value);
+    const top = [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+    $("places").hidden = false;
+    $("places").innerHTML = "<b>Where it is</b><br>" + top.map(([p, v]) => `${p}: <b>${isk(v)}</b>`).join(" · ");
+    pack();
+  }
+  // Charon: 465,000 m³ +5% / Caldari Freighter level, × 1.275³ (3 × Expanded Cargohold II).
+  // Bowhead: 1,600,000 m³ ship maintenance bay +5% / ORE Freighter level.
+  function bays() {
+    const charon = 465000 * (1 + 0.05 * Number($("cfLvl").value)) * Math.pow(1.275, 3);
+    const bowhead = 1600000 * (1 + 0.05 * Number($("ofLvl").value));
+    $("cargo").value = Math.round(charon * (Number($("charons").value) || 0));
+    $("smb").value = Math.round(bowhead * (Number($("bowheads").value) || 0) + (Number($("carrierSmb").value) || 0));
+    $("bays").textContent = `One Charon (3 × Expanded Cargohold II): ${Math.round(charon).toLocaleString()} m³ · one Bowhead: ${Math.round(bowhead).toLocaleString()} m³ · total cargo ${Number($("cargo").value).toLocaleString()} m³, maintenance bays ${Number($("smb").value).toLocaleString()} m³`;
+  }
+  function pack() {
+    bays();
+    if (!data || !mode) { $("packCard").hidden = true; return; }
+    $("packCard").hidden = false;
+    // Top-level things in Daisy: assembled ships (with what's in them) and loose items / packaged ships.
+    const daisy = (data.items || []).filter(x => DAISY.test(x.place) && !/Slot|DroneBay|Cargo|FleetHangar|ShipHangar|Specialized/.test(x.flag) || (DAISY.test(x.place) && x.ship && x.assembled));
+    const ships = daisy.filter(x => x.ship && x.assembled).sort((a, b) => b.value - a.value);
+    const loose = daisy.filter(x => !(x.ship && x.assembled)).sort((a, b) => b.value / Math.max(1, b.m3) - a.value / Math.max(1, a.m3));
+    let smb = Number($("smb").value) || 0, cargo = Number($("cargo").value) || 0, inSmb = [], inCargo = [], left = 0;
+    for (const s of ships) { if (s.m3 <= smb) { smb -= s.m3; inSmb.push(s); } else left += s.value; }
+    for (const i of loose) { if (i.m3 <= cargo && i.value > 0) { cargo -= i.m3; inCargo.push(i); } else left += i.value; }
+    const row = (x) => `<li>${x.qty > 1 ? x.qty + " × " : ""}${x.type}${x.rigged ? ' <span class="tag hi">rigged</span>' : ""} <small>${x.owner} · ${isk(x.value)} · ${Math.round(x.m3).toLocaleString()} m³${x.in ? " · in " + x.in : ""}</small></li>`;
+    $("pack").innerHTML =
+      `<p><b>1. Ship maintenance bays</b> (Bowhead / carriers, assembled — rigs survive): ${inSmb.length} ships, ${isk(inSmb.reduce((a, x) => a + x.value, 0))}</p><ol class="steps">${inSmb.slice(0, 40).map(row).join("")}</ol>`
+      + `<p><b>2. Charons</b> (best ISK per m³ first): ${inCargo.length} stacks, ${isk(inCargo.reduce((a, x) => a + x.value, 0))}</p><ol class="steps">${inCargo.slice(0, 40).map(row).join("")}</ol>`
+      + `<p><b>3. Left in the Fortizar:</b> about <b>${isk(left)}</b> (doesn't fit, or too cheap per m³). Packaged ships' m³ here is their assembled size, so Charons fit more than shown.</p>`;
+    $("inStructure").value = ((daisy.reduce((a, x) => a + x.value, 0)) / 1e9).toFixed(1);
+    $("moving").value = ((inSmb.concat(inCargo).reduce((a, x) => a + x.value, 0)) / 1e9).toFixed(1);
+  }
+  async function load(offline) {
+    $("loaded").textContent = offline ? "" : "Loading from SeAT…";
+    try { data = await invoke("seat_assets", { offline }); overview(); draw(); }
+    catch (e) { $("loaded").textContent = String(e); }
+  }
+  $("load").addEventListener("click", () => load(false));
+  for (const id of ["charons", "cfLvl", "bowheads", "ofLvl", "carrierSmb"]) {
+    try { const v = localStorage.getItem("dr.assets." + id); if (v !== null) $(id).value = v; } catch (e) {}
+    $(id).addEventListener("input", () => { try { localStorage.setItem("dr.assets." + id, $(id).value); } catch (e) {} draw(); });
+  }
+  const drawPlan = draw;
+  draw = function () { drawPlan(); pack(); };
   draw();
+  load(true);
 </script>
 </body>
 </html>
