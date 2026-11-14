@@ -360,6 +360,7 @@ pub fn run() {
             launch::save_stack_order,
             launch::seat_assets,
             launch::seat_asset_mode,
+            launch::group_accounts_from_launcher,
             previews::import_eveo,
             launch::launch_groups,
             launch::save_launch_groups,

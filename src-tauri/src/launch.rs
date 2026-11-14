@@ -384,6 +384,112 @@ pub async fn seat_asset_mode(app: AppHandle, scope: String, mode: Option<String>
     Ok(body["message"].as_str().unwrap_or("Saved.").to_string())
 }
 
+/// Patch 125: which characters the EVE launcher loaded for each account, from its logs on this
+/// PC (%APPDATA%\EVE Online\logs): "Fetching details for N character(s) { characterIds: [...] }"
+/// then "Fetched N character details { userId: ... }". The latest log wins.
+pub fn launcher_accounts() -> Vec<(u64, Vec<u64>)> {
+    let Some(dir) = dirs::config_dir().map(|d| d.join("EVE Online").join("logs")) else { return Vec::new() };
+    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+        .map(|r| {
+            r.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("eve-online-launcher-") && n.ends_with(".log")))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    let mut accounts: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+    for file in files {
+        let Ok(text) = std::fs::read_to_string(&file) else { continue };
+        accounts_from_log(&text, &mut accounts);
+    }
+    accounts.into_iter().filter(|(_, c)| !c.is_empty()).collect()
+}
+
+/// One launcher log: each "characterIds: [...]" belongs to the next "character details ... userId".
+pub fn accounts_from_log(text: &str, accounts: &mut std::collections::BTreeMap<u64, Vec<u64>>) {
+    const IDS: &str = "characterIds: [";
+    const DONE: &str = "character details";
+    let mut pending: Vec<u64> = Vec::new();
+    let mut rest = text;
+    loop {
+        let fetching = rest.find(IDS);
+        let fetched = rest.find(DONE);
+        match (fetching, fetched) {
+            (Some(a), b) if b.is_none_or(|b| a < b) => {
+                let after = &rest[a + IDS.len()..];
+                let end = after.find(']').unwrap_or(0);
+                pending = after[..end].split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                rest = &after[end..];
+            }
+            (_, Some(b)) => {
+                let after = &rest[b + DONE.len()..];
+                let line = after.lines().next().unwrap_or("");
+                let user = line.find("userId:").and_then(|i| line[i + 7..].trim_start().split(|c: char| !c.is_ascii_digit()).next().and_then(|n| n.parse::<u64>().ok()));
+                if let Some(user) = user.filter(|_| !pending.is_empty()) {
+                    // A character moved to another account: drop it from the old one.
+                    for list in accounts.values_mut() {
+                        list.retain(|c| !pending.contains(c));
+                    }
+                    accounts.insert(user, std::mem::take(&mut pending));
+                }
+                rest = after;
+            }
+            _ => break,
+        }
+    }
+}
+
+/// Patch 125: group Your accounts on SeAT from the launcher's logs. Only characters SeAT already
+/// has for you are sent (characters it doesn't know never leave this PC).
+#[tauri::command]
+pub async fn group_accounts_from_launcher(app: AppHandle) -> Result<String, String> {
+    let found = launcher_accounts();
+    if found.is_empty() {
+        return Err("No accounts in the EVE launcher's logs on this PC (open the launcher once).".into());
+    }
+    let (cookies, xsrf) = seat_session(&app)?;
+    let xsrf = xsrf.ok_or("SeAT's session is missing: open SeAT in the app once, then try again")?;
+    let client = reqwest::Client::new();
+    let mine: serde_json::Value = client
+        .get(format!("{}/devilsrage/accounts/mine.json", crate::SEAT_URL))
+        .header("Accept", "application/json")
+        .header("Cookie", cookies.clone())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|_| "SeAT didn't answer (signed out? open SeAT once)".to_string())?;
+    let known: std::collections::HashSet<u64> = mine["character_ids"].as_array().map(|a| a.iter().filter_map(|v| v.as_u64()).collect()).unwrap_or_default();
+    let accounts: Vec<serde_json::Value> = found
+        .into_iter()
+        .filter_map(|(user, chars)| {
+            let chars: Vec<u64> = chars.into_iter().filter(|c| known.contains(c)).take(3).collect();
+            (!chars.is_empty()).then(|| serde_json::json!({ "user_id": user, "character_ids": chars }))
+        })
+        .collect();
+    if accounts.is_empty() {
+        return Err("None of the launcher's characters are on SeAT for you.".into());
+    }
+    let response = client
+        .post(format!("{}/devilsrage/accounts/launcher-import", crate::SEAT_URL))
+        .header("Accept", "application/json")
+        .header("Cookie", cookies)
+        .header("X-XSRF-TOKEN", xsrf)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .json(&serde_json::json!({ "accounts": accounts }))
+        .timeout(std::time::Duration::from_secs(60))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(body["message"].as_str().map(str::to_string).unwrap_or_else(|| format!("SeAT answered {status}")));
+    }
+    Ok(body["message"].as_str().unwrap_or("Done.").to_string())
+}
+
 pub(crate) async fn fetch_seat(app: &AppHandle) -> Result<SeatData, String> {
     let (cookies, _) = seat_session(app)?;
     let response = reqwest::Client::new()
@@ -758,6 +864,20 @@ pub fn cycle_shortcut_fired(app: &AppHandle, shortcut: &tauri_plugin_global_shor
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launcher_log_groups_characters_by_account() {
+        let log = "2026-11-14 16:29:13.100    app     info:    [esi] Fetching details for 3 character(s)    { characterIds: [ 94408493, 96155001, 2122190658 ] }\n\
+2026-11-14 16:29:13.630    app     info:    [virtual-goods] Fetched Plex status    {\n  userId: 10979282,\n  balance: 0\n}\n\
+2026-11-14 16:29:13.700    app     info:    [esi] Fetched 3 character details    { userId: 10979282 }\n\
+2026-11-14 16:38:42.000    app     info:    [esi] Fetching details for 2 character(s)    { characterIds: [ 93976142, 96155001 ] }\n\
+2026-11-14 16:38:42.300    app     info:    [esi] Fetched 2 character details    { userId: 7205846 }\n";
+        let mut accounts = std::collections::BTreeMap::new();
+        accounts_from_log(log, &mut accounts);
+        // 96155001 moved to the second account in the later lines.
+        assert_eq!(accounts[&10979282], vec![94408493, 2122190658]);
+        assert_eq!(accounts[&7205846], vec![93976142, 96155001]);
+    }
 
     #[test]
     fn groups_round_trip_through_json() {
