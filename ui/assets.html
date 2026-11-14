@@ -80,7 +80,7 @@
   <h2>If nothing is done</h2>
   <div class="card" id="nothing"><span class="note">Load from SeAT first.</span></div>
 
-  <h2>Who's who <span class="note">HD = in a Main / Second / Third launch group · one character per account can be online</span></h2>
+  <h2>Who's who <span class="note">tick HD / Coffins / Can coffin on each character in Your accounts · one character per account can be online</span></h2>
   <div class="card" id="roles"><span class="note">Load from SeAT first.</span></div>
 
   <h2>Clones <span class="note">slide from doing nothing to saving everything</span></h2>
@@ -107,8 +107,7 @@
     <ol class="steps" id="steps"></ol>
   </div>
 
-  <h2>Hulls <label class="tick"><input type="checkbox" id="showAll"> Show other divisions and directors</label>
-    <button class="btn" id="makeCoffins">Make "Coffins" + "Can coffin" launch groups</button> <span class="note" id="coffinMsg"></span></h2>
+  <h2>Hulls <label class="tick"><input type="checkbox" id="showAll"> Show other divisions and directors</label></h2>
   <div class="card" id="hullsCard"><span class="note">Load from SeAT first.</span></div>
   <div class="card" id="peopleCard" hidden></div>
   <p class="note">Coffins: non-combat characters sitting in a freighter or Bowhead, logged out docked; if the structure dies they're ejected into space in it. An Alpha can log in inside a hull it can't fly, use its hangars and log out, but only <b>one Alpha can be online at a time</b> across all accounts, and if it leaves the ship it can't board again. A weekend Omega lets several log in together. Wormhole space has no asset safety: hangars spill into containers, every jump clone in the structure dies, repackaging destroys rigs.</p>
@@ -138,8 +137,11 @@
   const hullGroup = (type) => ((data.hulls || []).find(h => h.type === type) || {}).group;
   const myHulls = () => (data.hulls || []).filter(h => h.mine !== false && h.home);
   const sitterOf = (h) => pilots().find(p => p.ship_item_id && p.ship_item_id === h.item_id);
-  const role = (p) => hd.has(p.name) ? "hd" : canCap(p).length || COMBAT.includes(p.ship_group) ? "cap" : HAULER.includes(p.ship_group) ? "coffin" : canHaul(p).length ? "can" : "other";
-  const ROLE_NAME = { hd: "Home defence (HD)", cap: "Capital pilots", coffin: "Coffins (sitting in a hauler)", can: "Can coffin", other: "Others" };
+  // Roles are what you ticked on Your accounts (HD, Coffins, Can coffin; Main / Second / Third count as HD).
+  const isHd = (p) => (p.roles || []).some(r => ["hd", "main", "second", "third"].includes(r)) || hd.has(p.name);
+  const role = (p) => isHd(p) ? "hd" : (p.roles || []).includes("coffin") ? "coffin" : (p.roles || []).includes("can-coffin") ? "can" : "other";
+  const hdName = (p) => (p.groups || []).find(g => /^(hd|main|second|third)/i.test(g)) || hd.get(p.name) || "";
+  const ROLE_NAME = { hd: "Home defence (HD)", coffin: "Coffins", can: "Can coffin", other: "Not ticked yet (Your accounts → HD / Coffins / Can coffin)" };
 
   // HD: the Main / Second / Third launch groups, from SeAT's groups and this PC's.
   async function loadHd() {
@@ -187,11 +189,11 @@
       <div class="kv">${["Combat capitals", "Haulers", "Subcaps", "No ship / pod"].filter(k => by.has(k)).map(k => `<b>${k} (${by.get(k).length})</b><span>${by.get(k).map(p => `<span title="${esc(p.ship)} · ${p.home ? "Daisy" : esc(p.system)}">${esc(p.name)}</span>`).join(", ")}</span>`).join("")}</div>`;
   }
   function roles() {
-    const groups = { hd: [], cap: [], coffin: [], can: [], other: [] };
+    const groups = { hd: [], coffin: [], can: [], other: [] };
     for (const p of pilots()) groups[role(p)].push(p);
     const near = (p) => (p.near || []).filter(n => COMBAT.includes(hullGroup(n.type))).sort((a, b) => a.missing - b.missing).slice(0, 2).map(n => `${esc(n.type)} (${n.missing} lvl)`).join(", ");
     const row = (p) => `<tr><td>${esc(p.name)} ${tag(p)}</td><td class="note">${acct(p)}</td><td>${esc(p.ship || "—")} <span class="note">${p.home ? "" : esc(p.system)}</span></td>
-      <td>${hd.has(p.name) ? esc(hd.get(p.name)) : ""}</td><td class="wrap">${esc(canCap(p).join(", "))}${!canCap(p).length && (p.could || []).some(t => COMBAT.includes(hullGroup(t))) ? '<span class="note">with Omega</span>' : ""}</td>
+      <td>${esc(hdName(p))}</td><td class="wrap">${esc(canCap(p).join(", "))}${!canCap(p).length && (p.could || []).some(t => COMBAT.includes(hullGroup(t))) ? '<span class="note">with Omega</span>' : ""}</td>
       <td class="wrap note">${esc(canHaul(p).join(", "))}</td><td class="wrap note">${near(p)}</td></tr>`;
     $("roles").innerHTML = `<table class="t roles"><tr><th>Character</th><th>Account</th><th>Sits in</th><th>HD group</th><th>Capitals</th><th>Haulers</th><th>Close to a capital</th></tr>
       ${Object.entries(groups).filter(([, l]) => l.length).map(([k, l]) => `<tr><td colspan="7" class="sec">${ROLE_NAME[k]} · ${l.length}</td></tr>${l.map(row).join("")}`).join("")}</table>`;
@@ -247,9 +249,10 @@
       else { p = pool.find(p => !used.has(p.name) && (p.could || []).includes(r.h.type)); if (p) r.status = "needs Omega"; }
       if (p) { r.pilot = p; used.add(p.name); } else r.status = "nobody free can fly it";
     };
+    // Combat capitals: HD pilots. Haulers: Coffins first, then Can coffin. Nobody else.
     const home = pilots().filter(p => p.home);
-    for (const r of rows.filter(r => !r.pilot && r.combat)) pick(r, [...home.filter(p => hd.has(p.name)), ...home.filter(p => !hd.has(p.name) && canCap(p).length)]);
-    for (const r of rows.filter(r => !r.pilot && !r.combat)) pick(r, home.filter(p => !hd.has(p.name) && !canCap(p).length));
+    for (const r of rows.filter(r => !r.pilot && r.combat)) pick(r, home.filter(isHd));
+    for (const r of rows.filter(r => !r.pilot && !r.combat)) pick(r, [...home.filter(p => role(p) === "coffin"), ...home.filter(p => role(p) === "can")]);
     return rows;
   }
   function fill(rows, list, okLoss) {
@@ -354,20 +357,6 @@
     try { msg.textContent = await invoke("seat_asset_mode", { scope: "corp", mode: want, threat: 4, days: null }); } catch (e) { msg.textContent = String(e); }
     mode = want; store.set("mode", mode); await load(false);
   }));
-  // Coffins: sitting in a hauler. Can coffin: in Daisy, not HD, not a capital pilot, can board a hauler now.
-  $("makeCoffins").addEventListener("click", async () => {
-    if (!data) { $("coffinMsg").textContent = "Load from SeAT first."; return; }
-    const sets = { "Coffins": pilots().filter(p => role(p) === "coffin").map(p => p.name), "Can coffin": pilots().filter(p => p.home && role(p) === "can").map(p => p.name) };
-    try {
-      const groups = await invoke("launch_groups");
-      for (const [name, members] of Object.entries(sets)) {
-        const g = groups.find(x => x.name === name);
-        if (g) g.members = members; else groups.push({ id: name === "Coffins" ? "coffins" : "can-coffin", name, members, skipped: [] });
-      }
-      await invoke("save_launch_groups", { groups });
-      $("coffinMsg").textContent = `Coffins: ${sets["Coffins"].length} · Can coffin: ${sets["Can coffin"].length}`;
-    } catch (e) { $("coffinMsg").textContent = String(e); }
-  });
   load(true);
 </script>
 </body>
