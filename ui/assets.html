@@ -215,7 +215,7 @@
       const mine = (data.clones || []).filter(c => c.home && c.character === p.name).sort((a, b) => b.value - a.value);
       if (!mine.length) continue;
       // HD characters keep their HD clone (named "HD…" in game) even if another is worth more.
-      const hdClone = isHd(p) ? mine.find(c => /\bHD\b/i.test(c.name || "")) : null;
+      const hdClone = isHd(p) ? mine.find(c => /\bHD\b/i.test(c.name || "") || /Amulet/i.test(setName(c))) : null;
       const pick = hdClone || mine[0];
       const gain = pick.value - (p.implants_value || 0);
       if (gain > 0 || hdClone) acts.push({ p, clone: pick, hd: !!hdClone, gain: Math.max(0, gain), lost: mine.filter(c => c !== pick).reduce((a, c) => a + c.value, 0) + (p.implants_value || 0) });
@@ -223,7 +223,18 @@
     return acts.sort((a, b) => b.gain - a.gain);
   }
   // "“HD Amulet” (HG Amulet Alpha, Beta… · 2.7 b)": the clone's in-game name and its implants.
-  const cloneLabel = (c) => `${c.name ? "“" + esc(c.name) + "” " : ""}<span title="${esc((c.implant_names || []).join(", "))}">${c.implants} implants${(c.implant_names || []).length ? " (" + esc(c.implant_names.slice(0, 2).join(", ")) + (c.implant_names.length > 2 ? "…" : "") + ")" : ""}</span> · ${isk(c.value)}`;
+  // ESI doesn't send clone names, so a clone is named by its implant set: "HG Amulet set",
+  // "Ascendancy set", or its main hardwirings ("Gunslinger, Rogue"), or "Blank".
+  const SETS = ["Amulet", "Ascendancy", "Crystal", "Halo", "Snake", "Talisman", "Asklepian", "Nirvana", "Rapture", "Grail", "Spur", "Talon", "Jackal", "Virtue", "Centurion", "Edge", "Harvest", "Nomad", "Savior", "Hydra", "Genolution", "Mimesis"];
+  function setName(c) {
+    const names = c.implant_names || [];
+    if (!names.length) return "Blank";
+    const counts = SETS.map(set => [set, names.filter(n => new RegExp("\\b" + set + "\\b", "i").test(n))]).filter(([, l]) => l.length >= 2).sort((a, b) => b[1].length - a[1].length);
+    if (counts.length) { const [set, l] = counts[0]; const grade = /^HG /.test(l[0]) ? "HG " : /^MG /.test(l[0]) ? "MG " : /^LG /.test(l[0]) ? "LG " : ""; return `${grade}${set} set${l.length < 6 ? ` (${l.length})` : ""}`; }
+    const brands = [...new Set(names.map(n => (n.match(/'([^']+)'/) || [])[1]).filter(Boolean))];
+    return brands.length ? brands.slice(0, 3).join(", ") : `${names.length} implants`;
+  }
+  const cloneLabel = (c) => `<b>${c.name ? esc(c.name) : esc(setName(c))}</b> <span class="note" title="${esc((c.implant_names || []).join(", "))}">${c.implants} implants · ${isk(c.value)}</span>`;
   function clones() {
     const acts = cloneActions(), total = (data.clones || []).filter(c => c.home).reduce((a, c) => a + c.value, 0);
     cloneSteps = Math.min(cloneSteps, acts.length);
