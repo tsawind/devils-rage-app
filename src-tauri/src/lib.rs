@@ -359,6 +359,7 @@ pub fn run() {
             launch::stack_order,
             launch::save_stack_order,
             launch::seat_assets,
+            launch::seat_asset_mode,
             previews::import_eveo,
             launch::launch_groups,
             launch::save_launch_groups,

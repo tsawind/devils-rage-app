@@ -39,6 +39,10 @@
   .tag.hi { border-color: var(--red-hi); color: #f3c6c6; }
   .loss { font-size: 22px; font-weight: 700; }
   .loss.bad { color: #ff7b7b; } .loss.ok { color: var(--ok); }
+  table.t { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 6px; }
+  table.t td, table.t th { padding: 3px 6px; border-bottom: 1px solid #1d1d22; text-align: left; }
+  table.t th { color: var(--muted); font-weight: 500; }
+  .short { color: #ff7b7b; font-weight: 600; } .enough { color: var(--ok); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -53,9 +57,13 @@
   <p class="note">Your characters' assets and your division hangar (the number in your title), from SeAT; a copy is kept on this PC. Values are CCP's adjusted prices, rough.</p>
   <div class="grid" id="overview"></div>
   <div class="card" id="places" hidden></div>
+  <div class="card" id="hullsCard" hidden></div>
+  <div class="card" id="peopleCard" hidden></div>
   <button class="mode" id="piscan" style="margin-top:4px"><b>PI planet scan</b><span>Map a planet's resources for the corp</span></button>
 
   <h2>Plan</h2>
+  <div class="card" id="corpBanner" hidden style="border-color:var(--red-hi);background:#2a0f12"></div>
+  <p class="note" id="modeMsg"></p>
   <div class="modes">
     <button class="mode" data-mode="vacation"><b>🏖 Vacation</b><span>Away for a while: shrink what's at risk</span></button>
     <button class="mode" data-mode="war"><b>⚔ War</b><span>Hostiles active: keep fighting, protect the rest</span></button>
@@ -124,7 +132,7 @@
     const v = (id) => Number($(id).value), c = (id) => $(id).checked;
     const risk = v("risk"), hours = v("hours"), out = [];
     const add = (id, text, why, hi) => out.push({ id, text, why, hi });
-    const coffinsNeeded = (c("hasCaps") ? 2 : 0) + (c("hasCharon") ? 2 : 0) + (c("hasBowhead") ? 1 : 0) + (c("borrowCorp") ? 1 : 0);
+    const coffinsNeeded = data && data.hulls ? myHomeHulls().length + (c("borrowCorp") ? 1 : 0) : (c("hasCaps") ? 2 : 0) + (c("hasCharon") ? 2 : 0) + (c("hasBowhead") ? 1 : 0) + (c("borrowCorp") ? 1 : 0);
     const short = Math.max(0, coffinsNeeded - v("omegas"));
     add("list", "Write down what's in your division hangar and ship hangar: biggest ISK first.", "Pack by value per minute: the top 20% of items is usually most of the ISK.", true);
     if (mode === "vacation" && risk <= 2) add("keep", "Low threat: leave cheap, bulky and doctrine stuff in the Fortizar.", "Only move what would really hurt to lose; time is better spent on the expensive things.");
@@ -168,7 +176,27 @@
       ol.append(li);
     }
   }
-  document.querySelectorAll(".mode[data-mode]").forEach(b => b.addEventListener("click", () => { mode = mode === b.dataset.mode ? null : b.dataset.mode; save(); draw(); }));
+  // Patch 124: Vacation is yours (saved on SeAT, directors see it); War / Being evicted are the
+  // corp's, set by a director for everyone.
+  document.querySelectorAll(".mode[data-mode]").forEach(b => b.addEventListener("click", async () => {
+    const want = mode === b.dataset.mode ? null : b.dataset.mode;
+    const corpMode = data && data.corp_mode ? data.corp_mode.mode : null;
+    const msg = $("modeMsg");
+    if (b.dataset.mode !== "vacation" || (want === null && corpMode)) {
+      const target = b.dataset.mode === "vacation" ? null : want;
+      if (data && !data.leader) {
+        if (!target || target === corpMode) { mode = target; save(); draw(); return; }
+        msg.textContent = "Only directors can turn War or Being evicted on for the corp. Showing the plan for you only.";
+        mode = want; save(); draw(); return;
+      }
+      if (data && target !== corpMode && !confirm(target ? `Turn ${b.querySelector("b").textContent.trim()} on for EVERYONE in the corp?` : `Turn ${corpMode} off for the corp?`)) return;
+      try { msg.textContent = await invoke("seat_asset_mode", { scope: "corp", mode: target, threat: Number($("risk").value), days: null }); } catch (e) { msg.textContent = String(e); }
+      mode = want; save(); await load(false); return;
+    }
+    mode = want; save(); draw();
+    try { msg.textContent = await invoke("seat_asset_mode", { scope: "me", mode: want, threat: Number($("risk").value), days: Number($("days").value) }); }
+    catch (e) { msg.textContent = "Not saved on SeAT (" + e + "): only this PC knows."; }
+  }));
   for (const f of fields) $(f).addEventListener("input", () => { save(); draw(); });
   $("home").addEventListener("click", () => { location.href = "index.html"; });
   $("piscan").addEventListener("click", () => { location.href = "piscan.html"; });
@@ -178,7 +206,8 @@
   const DAISY = /J145735/;
   function overview() {
     if (!data) return;
-    const items = data.items || [];
+    // Yours and your division (directors also get everyone's divisions: those are in the table below).
+    const items = (data.items || []).filter(x => x.mine !== false);
     const sum = (list, f) => list.reduce((a, x) => a + (x[f] || 0), 0);
     const ships = items.filter(x => x.ship), daisy = items.filter(x => DAISY.test(x.place));
     $("loaded").textContent = (data.offlineBecause ? "Saved copy (SeAT: " + data.offlineBecause + ") · " : "") + "from " + new Date(data.generated).toLocaleString();
@@ -192,7 +221,66 @@
     const top = [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
     $("places").hidden = false;
     $("places").innerHTML = "<b>Where it is</b><br>" + top.map(([p, v]) => `${p}: <b>${isk(v)}</b>`).join(" · ");
+    hullsAndPilots();
+    people();
+    corpBanner();
+    autofill();
     pack();
+  }
+  const CAPS = ["Carrier", "Supercarrier", "Dreadnought", "Lancer Dreadnought", "Force Auxiliary", "Titan", "Capital Industrial Ship"];
+  const myHomeHulls = () => (data.hulls || []).filter(h => h.mine !== false && DAISY.test(h.place));
+  function hullsAndPilots() {
+    const hulls = data.hulls || [];
+    if (!hulls.length) { $("hullsCard").hidden = true; return; }
+    $("hullsCard").hidden = false;
+    const home = myHomeHulls(), pilots = (data.pilots || []).filter(p => p.home);
+    const gap = home.length - pilots.length;
+    const rows = hulls.map(h => `<tr><td>${h.owner}</td><td><b>${h.type}</b> <span class="note">${h.group}</span></td><td>${h.place}</td><td>${h.smb ? Math.round(h.smb).toLocaleString() + " m³ bay" : h.cargo ? Math.round(h.cargo).toLocaleString() + " m³ cargo" : ""}</td></tr>`).join("");
+    $("hullsCard").innerHTML = `<b>Freighters, Bowheads, capitals</b>
+      <p>${home.length} in Daisy (yours and your division) · ${pilots.length} of your characters are in Daisy now ·
+      ${gap > 0 ? `<span class="short">${gap} short: bring ${gap} more character${gap === 1 ? "" : "s"} in (Omega for these hulls)</span>` : `<span class="enough">enough pilots</span>`}</p>
+      <table class="t"><tr><th>Owner</th><th>Hull</th><th>Where</th><th>Space (base)</th></tr>${rows}</table>`;
+  }
+  function people() {
+    const list = data.people || [];
+    if (!data.leader || !list.length) { $("peopleCard").hidden = true; return; }
+    $("peopleCard").hidden = false;
+    const corpOn = data.corp_mode;
+    $("peopleCard").innerHTML = `<b>Directors' divisions</b> <span class="note">(you see these as a director)</span>
+      <table class="t"><tr><th>Who</th><th>Division</th><th>In Daisy</th><th>Status</th><th></th></tr>${list.map(p => {
+        const away = p.vacation;
+        const atRisk = (away || corpOn) && p.division_in_home > 0;
+        return `<tr><td>${p.main}</td><td>${p.division}</td><td>${isk(p.division_in_home)}</td><td>${away ? `🏖 away${away.until ? " until " + new Date(away.until).toLocaleDateString() : ""} · threat ${away.threat}` : "here"}</td>
+          <td>${atRisk ? `<span class="short">grab from division ${p.division} / contact ${p.main}</span>` : ""}</td></tr>`;
+      }).join("")}</table>`;
+  }
+  function corpBanner() {
+    const c = data.corp_mode;
+    $("corpBanner").hidden = !c;
+    if (c) {
+      $("corpBanner").innerHTML = `<b>${c.mode === "war" ? "⚔ WAR" : "☠ BEING EVICTED"}</b> is on for the whole corp (threat ${c.threat}) since ${new Date(c.since).toLocaleString()}. Follow the steps below.`;
+      mode = c.mode;
+    } else if (data.my_mode && data.my_mode.mode === "vacation") {
+      mode = "vacation";
+      if (data.my_mode.threat) $("risk").value = data.my_mode.threat;
+    } else if (mode === "war" || mode === "eviction") {
+      mode = null;
+    }
+  }
+  // The dials from your SeAT assets (you can still move them).
+  function autofill() {
+    const home = myHomeHulls();
+    const count = (t) => home.filter(h => h.type === t).length;
+    $("charons").value = count("Charon");
+    $("bowheads").value = count("Bowhead");
+    $("carrierSmb").value = Math.round(home.filter(h => ["Carrier", "Supercarrier", "Force Auxiliary"].includes(h.group)).reduce((a, h) => a + (h.smb || 0), 0));
+    $("hasCharon").checked = count("Charon") > 0;
+    $("hasBowhead").checked = count("Bowhead") > 0;
+    $("hasCaps").checked = home.some(h => CAPS.includes(h.group));
+    $("borrowCorp").checked = (data.hulls || []).some(h => h.division === 1 && CAPS.includes(h.group) && DAISY.test(h.place));
+    $("logins").value = Math.max(1, (data.pilots || []).filter(p => p.home).length);
+    $("omegas").value = Math.min(30, home.length);
+    save();
   }
   // Charon: 465,000 m³ +5% / Caldari Freighter level, × 1.275³ (3 × Expanded Cargohold II).
   // Bowhead: 1,600,000 m³ ship maintenance bay +5% / ORE Freighter level.
@@ -208,7 +296,7 @@
     if (!data || !mode) { $("packCard").hidden = true; return; }
     $("packCard").hidden = false;
     // Top-level things in Daisy: assembled ships (with what's in them) and loose items / packaged ships.
-    const daisy = (data.items || []).filter(x => DAISY.test(x.place) && !/Slot|DroneBay|Cargo|FleetHangar|ShipHangar|Specialized/.test(x.flag) || (DAISY.test(x.place) && x.ship && x.assembled));
+    const daisy = (data.items || []).filter(x => x.mine !== false).filter(x => DAISY.test(x.place) && !/Slot|DroneBay|Cargo|FleetHangar|ShipHangar|Specialized/.test(x.flag) || (DAISY.test(x.place) && x.ship && x.assembled));
     const ships = daisy.filter(x => x.ship && x.assembled).sort((a, b) => b.value - a.value);
     const loose = daisy.filter(x => !(x.ship && x.assembled)).sort((a, b) => b.value / Math.max(1, b.m3) - a.value / Math.max(1, a.m3));
     let smb = Number($("smb").value) || 0, cargo = Number($("cargo").value) || 0, inSmb = [], inCargo = [], left = 0;

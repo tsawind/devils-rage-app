@@ -359,6 +359,31 @@ pub async fn seat_assets(app: AppHandle, offline: bool) -> Result<serde_json::Va
     }
 }
 
+/// Patch 124: set or clear a plan on SeAT: scope "corp" (War / Being evicted, directors) or
+/// "me" (Vacation, the others' directors see it).
+#[tauri::command]
+pub async fn seat_asset_mode(app: AppHandle, scope: String, mode: Option<String>, threat: Option<u8>, days: Option<u32>) -> Result<String, String> {
+    let (cookies, xsrf) = seat_session(&app)?;
+    let xsrf = xsrf.ok_or("SeAT's session is missing: open SeAT in the app once, then try again")?;
+    let response = reqwest::Client::new()
+        .post(format!("{}/devilsrage/assets/mode", crate::SEAT_URL))
+        .header("Accept", "application/json")
+        .header("Cookie", cookies)
+        .header("X-XSRF-TOKEN", xsrf)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .json(&serde_json::json!({ "scope": scope, "mode": mode, "threat": threat, "days": days }))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(body["message"].as_str().map(str::to_string).unwrap_or_else(|| format!("SeAT answered {status}")));
+    }
+    Ok(body["message"].as_str().unwrap_or("Saved.").to_string())
+}
+
 pub(crate) async fn fetch_seat(app: &AppHandle) -> Result<SeatData, String> {
     let (cookies, _) = seat_session(app)?;
     let response = reqwest::Client::new()
