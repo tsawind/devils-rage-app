@@ -87,6 +87,7 @@
   <div class="card" id="clones"><span class="note">Load from SeAT first.</span></div>
 
   <h2>Plan</h2>
+  <div class="card" id="needCard" hidden></div>
   <div class="card" id="corpBanner" hidden style="border-color:var(--red-hi);background:#2a0f12"></div>
   <div class="modes">
     <button class="mode" data-mode="vacation"><b>🏖 Vacation</b><span>Yours: away for a while</span></button>
@@ -298,8 +299,9 @@
     const put = (r, x) => { r.load.push(x); r.loadM3 += x.m3; r.loadValue += x.value; left -= x.value; };
     for (const s of top.filter(x => x.ship && x.assembled).sort((a, b) => b.value - a.value)) { if (left <= okLoss) break; const r = room("ships", s.m3); if (r) put(r, s); else repackage.push(s); }
     for (const s of repackage) if (left > okLoss) left -= s.value;
-    for (const i of top.filter(x => !(x.ship && x.assembled) && x.value > 0).sort((a, b) => b.value / Math.max(1, b.m3) - a.value / Math.max(1, a.m3))) { if (left <= okLoss) break; const r = room("cargo", i.m3); if (r) put(r, i); }
-    return { total, left: Math.max(0, left), repackage };
+    const unplaced = [];
+    for (const i of top.filter(x => !(x.ship && x.assembled) && x.value > 0).sort((a, b) => b.value / Math.max(1, b.m3) - a.value / Math.max(1, a.m3))) { if (left <= okLoss) break; const r = room("cargo", i.m3); if (r) put(r, i); else unplaced.push(i); }
+    return { total, left: Math.max(0, left), repackage, unplaced };
   }
   // One login per character: sit in its best ship (it leaves with the pilot when the structure
   // dies), dump everything else it owns in Daisy into the division hangar for the coffins, and
@@ -396,7 +398,31 @@
     else if (data.my_mode && data.my_mode.mode === "vacation") mode = "vacation";
     else if (mode === "war" || mode === "eviction") mode = null;
   }
-  function render() { overview(); corpBanner(); nothing(); roles(); clones(); hulls(); draw(); }
+  // ---------- what's missing to pack everything ----------
+  // New coffins are trained to the coffin plans' levels: Caldari Freighter 2, ORE Freighter 3.
+  const NEW = { freighter: { "Caldari Freighter": 2, "ORE Freighter": 3 } };
+  function needs() {
+    const rows = assign(), list = logins(rows);
+    const division = (data.items || []).filter(x => x.home && x.division);
+    const f = fill(rows, [...division, ...list.flatMap(x => x.dump)], 0);
+    const shipsM3 = f.repackage.reduce((a, x) => a + x.m3, 0), cargoM3 = f.unplaced.reduce((a, x) => a + x.m3, 0);
+    const moreBowheads = Math.ceil(shipsM3 / bowheadCap(NEW)), moreCharons = Math.ceil(cargoM3 / charonCap(NEW));
+    const haul = rows.filter(r => !r.combat), unpiloted = haul.filter(r => !r.pilot).length;
+    const used = new Set(rows.filter(r => r.pilot).map(r => r.pilot.name));
+    const spare = pilots().filter(p => p.home && ["coffin", "can"].includes(role(p)) && !used.has(p.name) && !p.in_big_hull).length;
+    const morePilots = Math.max(0, unpiloted + moreBowheads + moreCharons - spare);
+    const lines = [];
+    const ok = !moreBowheads && !moreCharons && !morePilots;
+    lines.push(`<b>${ok ? "✓ You can pack everything." : "To pack everything you have in Daisy:"}</b> ${isk(f.total)} to load · ${haul.length} haulers (${haul.filter(r => r.h.type === "Charon").length} Charons, ${haul.filter(r => r.h.type === "Bowhead").length} Bowheads, ${haul.filter(r => ["Carrier", "Supercarrier"].includes(r.h.group)).length} carriers)`);
+    if (moreBowheads) lines.push(`<span class="short">+${moreBowheads} Bowhead${moreBowheads === 1 ? "" : "s"}</span> for ${f.repackage.length} assembled ships (${Math.round(shipsM3).toLocaleString()} m³) that don't fit, or repackage them (rigs are lost)`);
+    if (moreCharons) lines.push(`<span class="short">+${moreCharons} Charon${moreCharons === 1 ? "" : "s"}</span> for ${Math.round(cargoM3).toLocaleString()} m³ of items that don't fit`);
+    if (unpiloted || moreBowheads || moreCharons) lines.push(morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} in Daisy</span> (${unpiloted} haulers have nobody who can fly them${moreBowheads + moreCharons ? `, ${moreBowheads + moreCharons} new ones` : ""}; ${spare} spare coffins can't fly them yet: Coffin plan + injectors)` : `<span class="enough">enough coffin characters</span> (${spare} spare)`);
+    const charonStep = Math.round(465000 * 0.05 * Math.pow(1.275, 3)), bowheadStep = Math.round(1600000 * 0.05);
+    lines.push(`<span class="note">Each Caldari Freighter level adds ${charonStep.toLocaleString()} m³ to a Charon (2 → 4: +${(2 * charonStep).toLocaleString()}), each ORE Freighter level ${bowheadStep.toLocaleString()} m³ to a Bowhead. At level 2 / 3 a new Charon holds ${Math.round(charonCap(NEW)).toLocaleString()} m³, a Bowhead ${Math.round(bowheadCap(NEW)).toLocaleString()} m³.${moreCharons + moreBowheads ? ` Training coffins to 4 would cut what's missing by about ${Math.round(100 * 0.1 / 1.1)}% (Charons) / ${Math.round(100 * 0.05 / 1.15)}% (Bowheads).` : ""}</span>`);
+    $("needCard").hidden = false;
+    $("needCard").innerHTML = lines.join("<br>");
+  }
+  function render() { overview(); corpBanner(); nothing(); roles(); clones(); hulls(); needs(); draw(); }
 
   // ---------- actions ----------
   async function load(offline) {
