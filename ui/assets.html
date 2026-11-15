@@ -90,14 +90,15 @@
   <div class="card scope" id="scope" hidden></div>
   <div class="grid" id="overview"></div>
 
+  <details class="section" open><summary><h2>Coffins <span class="note">loaded when there's a threat (vacation, war, eviction): each person packs their own things and their division</span></h2></summary>
+  <div class="card" id="coffinCard"><span class="note">Load from SeAT first.</span></div></details>
+
   <details class="section" open><summary><h2>If nothing is done</h2></summary>
   <div class="card" id="nothing"><span class="note">Load from SeAT first.</span></div></details>
 
   <details class="section" id="rolesSection" open><summary><h2>Who's who <span class="note">tick HD / Coffins / Can coffin on each character in Your accounts · one character per account can be online · click a character for assets, clones, skills</span></h2></summary>
   <div class="card" id="roles"><span class="note">Load from SeAT first.</span></div></details>
 
-  <details class="section" open><summary><h2>Coffins <span class="note">loaded when there's a threat (vacation, war, eviction): each person packs their own things and their division</span></h2></summary>
-  <div class="card" id="coffinCard"><span class="note">Load from SeAT first.</span></div></details>
 
   <h2>Clones <span class="note">slide from doing nothing to saving everything</span></h2>
   <div class="card" id="clones"><span class="note">Load from SeAT first.</span></div>
@@ -315,7 +316,7 @@
     const chip = (t, cls = "", title = "") => `<span class="tag ${cls}"${title ? ` title="${esc(title)}"` : ""}>${t}</span>`;
     const omegaUntil = p.account && p.account.omega_until ? ` · Omega until ${new Date(p.account.omega_until).toLocaleDateString()}` : "";
     const lines = [`<b>Clone state</b><span>${cloneState(p) ? `${cloneState(p).k === "Alpha" ? '<span class="short">Alpha</span>' : "Omega"}${cloneState(p).sure ? "" : "?"} <span class="note">· ${esc(cloneState(p).why)}</span>` : "unknown"}</span>`];
-    lines.push(`<b>Skill points</b><span>${p.sp ? (p.sp / 1e6).toFixed(2) + "m" : "—"}${p.sp_free ? ` · ${(p.sp_free / 1e6).toFixed(2)}m unallocated` : ""} · ${p.queue ? `${p.queue} in queue, ends ${new Date(p.queue_ends).toLocaleString()}` : '<span class="short">queue empty</span>'}</span>`);
+    lines.push(`<b>Skill points</b><span>${p.sp ? (p.sp / 1e6).toFixed(2) + "m" : "—"}${p.sp_free ? ` · ${(p.sp_free / 1e6).toFixed(2)}m unallocated` : ""} · ${p.queue ? `${p.queue} in queue${p.queue_ends && new Date(p.queue_ends).getFullYear() > 2000 ? ", ends " + new Date(p.queue_ends).toLocaleString() : ' · <span class="short">paused</span>'}` : '<span class="short">queue empty</span>'}</span>`);
     const can = p.can || [], could = p.could || [];
     lines.push(`<b>Flies now${p.alpha ? " (as Alpha)" : ""}</b><span class="chips">${can.map(t => chip(esc(t), BIG.includes(hullGroup(t)) ? "omega" : "")).join("") || '<span class="note">none of the ships here</span>'}</span>`);
     if (could.length) lines.push(`<b>${p.alpha ? '<span class="short">Needs Omega</span>' : "Needs Omega"}</b><span class="chips">${could.map(t => chip(esc(t), "alpha", "trained, but an Alpha clone can't use the skills")).join("")}</span>`);
@@ -400,6 +401,9 @@
       rows.push({ h, combat: COMBAT.includes(h.group), ...holds(h, s), load: [], loadValue: 0, loadM3: 0, pilot: s || null, status: s ? "sits in it" : "" });
       if (s) used.add(s.name);
     }
+    // Carriers are rollers (exposed, sometimes suicided): coffin them last, with what's left.
+    const carrier = (r) => ["Carrier", "Supercarrier"].includes(r.h.group);
+    rows.sort((a, b) => (carrier(a) ? 1 : 0) - (carrier(b) ? 1 : 0));
     const pick = (r, pool) => {
       let p = pool.find(p => !used.has(p.name) && (p.can || []).includes(r.h.type));
       if (p) r.status = "can board now";
@@ -425,7 +429,7 @@
   // Bowheads / carriers take the ships whose rigs are worth the most per m³; every other ship is
   // repackaged (packaged size, rigs lost) and goes in freight containers with the items. Cargo
   // holds count whole Enormous Freight Containers (4 in a cargo-fitted Charon).
-  function fill(rows, list, okLoss) {
+  function fill(rows, list, okLoss, pilotedOnly = false) {
     // What's in a freight container moves with it (its 250k already counts it).
     const inBox = new Map();
     for (const x of list) if (/Freight Container/.test(x.in || "")) inBox.set(x.holder, (inBox.get(x.holder) || 0) + x.value);
@@ -441,7 +445,7 @@
     const inside = (x) => (x.ship && x.assembled && kept.get(x.item_id)) || { value: 0, m3: 0 };
     const total = top.reduce((a, x) => a + x.value + inside(x).value, 0) + list.filter(x => /Freight Container/.test(x.in || "")).reduce((a, x) => a + x.value, 0);
     let left = total, rigLost = 0;
-    const repackage = [], unplaced = [], room = (kind, m3) => rows.find(r => r.kind === kind && r.cap - r.loadM3 >= m3);
+    const repackage = [], unplaced = [], room = (kind, m3) => rows.find(r => r.kind === kind && (!pilotedOnly || r.pilot) && r.cap - r.loadM3 >= m3);
     const put = (r, x, m3) => { const v = x.value + (inBox.get(x.item_id) || 0) + (x.ship && x.assembled ? inside(x).value : 0); r.load.push(x); r.loadM3 += m3; r.loadValue += v; left -= v; };
     const ships = top.filter(x => x.ship && x.assembled).map(x => ({ x, rig: (rigs.get(x.item_id) || {}).value || 0 })).sort((a, b) => b.rig / b.x.m3 - a.rig / a.x.m3);
     const cargo = [];
@@ -474,7 +478,7 @@
     for (const p of pilots().filter(p => p.home)) {
       const own = items.filter(x => x.owner === p.name);
       const inShip = (ship) => own.filter(x => x.holder === ship.item_id).reduce((a, x) => a + x.value, 0);
-      let sit = own.find(x => x.item_id === p.ship_item_id) || null, already = !!sit, grab = null;
+      let sit = own.find(x => x.item_id === p.ship_item_id) || (p.ship && p.home ? own.find(x => x.ship && x.assembled && x.type === p.ship && x.home) : null) || null, already = !!sit, grab = null;
       const assigned = rows.find(r => r.pilot && r.pilot.name === p.name && r.status !== "sits in it");
       // A hull picked for this character (an HD pilot's dread, a coffin's freighter): it's
       // taken from the hangar, and the ship it sits in now goes in the hangar with the rest.
@@ -498,7 +502,7 @@
     const picked = list.slice(0, n), saved = picked.reduce((a, x) => a + x.saves, 0), all = list.reduce((a, x) => a + x.saves, 0);
     // The coffins then load the division hangar: what was there plus what the logins dumped.
     const division = (data.items || []).filter(x => x.home && inDiv(x));
-    const f = fill(rows, [...division, ...picked.flatMap(x => x.dump)], 0);
+    const f = fill(rows, [...division, ...picked.flatMap(x => x.dump)], 0, true);
     const haul = rows.filter(r => !r.combat);
     $("baysLine").textContent = `${haul.length} coffin hulls in ${HOME()}: ${Math.round(haul.filter(r => r.kind === "cargo").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ cargo · ${Math.round(haul.filter(r => r.kind === "ships").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ maintenance bays ·`;
     $("bars").innerHTML = `<div class="bar"><div class="top"><b>${n} of ${list.length} logins</b> <span class="note">in pedal order</span><span>≈ ${n * 5} min one at a time (less with launch groups) · <span class="enough">${isk(saved)} saved</span> · <span class="short">${isk(all - saved)} not logged in</span></span></div>
@@ -545,8 +549,8 @@
     for (const h of list) { if (!groups.has(h.owner)) groups.set(h.owner, []); groups.get(h.owner).push(h); }
     const key = ([owner, hs]) => hs[0].division ? `0${String(hs[0].division).padStart(2, "0")}` : `1${owner.toLowerCase()}`;
     $("hullsCard").innerHTML = [...groups.entries()].sort((a, b) => key(a).localeCompare(key(b))).map(([owner, hs]) => {
-      const count = new Map(); for (const h of hs) count.set(h.type, (count.get(h.type) || 0) + 1);
-      return `<details><summary><b>${esc(owner)}</b><span class="note grow">${[...count.entries()].map(([t, n]) => (n > 1 ? n + " × " : "") + esc(t)).join(", ")}</span><span class="note">${hs.some(h => h.home) ? HOME() : esc(hs[0].place)}</span></summary>
+      const count = new Map(); for (const h of hs) { const k = h.type + (h.home ? "" : ` (${(h.place || "elsewhere").split(" - ")[0]})`); count.set(k, (count.get(k) || 0) + 1); }
+      return `<details><summary><b>${esc(owner)}</b><span class="note grow">${[...count.entries()].map(([t, n]) => (n > 1 ? n + " × " : "") + esc(t)).join(", ")}</span><span class="note">${[...new Set(hs.map(h => h.home ? HOME() : (h.place || "").split(" - ")[0]))].map(esc).join(" · ")}</span></summary>
         <table class="t">${hs.map(h => { const s = sitterOf(h); return `<tr><td>${esc(h.type)} <span class="note">${esc(h.group)}</span></td><td>${esc(h.place)}</td><td>${s ? "🧑 " + esc(s.name) : '<span class="note">empty</span>'}</td></tr>`; }).join("")}</table></details>`;
     }).join("") + [...(data.divisions || [])].filter(d => (all || d === 1 || d === data.my_division) && !list.some(h => h.division === d)).sort((a, b) => a - b)
       .map(d => `<details><summary><b>Division ${d}${divName(d) ? ` (${esc(divName(d))})` : ""}</b><span class="note grow">no freighters, Bowheads or capitals</span></summary></details>`).join("") || '<span class="note">No freighters, Bowheads or capitals.</span>';
@@ -575,11 +579,14 @@
     const moreCharons = Math.ceil(cargoM3 / (4 * ENORMOUS));
     const haul = rows.filter(r => !r.combat), unpiloted = haul.filter(r => !r.pilot).length;
     const used = new Set(rows.filter(r => r.pilot).map(r => r.pilot.name));
-    const spare = pilots().filter(p => p.home && ["coffin", "can"].includes(role(p)) && !used.has(p.name) && !p.in_big_hull).length;
+    // Spare coffins only help if they can fly (or are trained for) an empty hull or a new Charon.
+    const empty = haul.filter(r => !r.pilot).map(r => r.h.type).concat(moreCharons ? ["Charon"] : []);
+    const spareAll = pilots().filter(p => p.home && ["coffin", "can"].includes(role(p)) && !used.has(p.name) && !p.in_big_hull);
+    const spare = spareAll.filter(p => empty.some(t => (p.can || []).includes(t) || (p.could || []).includes(t))).length;
     const morePilots = Math.max(0, unpiloted + moreCharons - spare);
     // Enormous Freight Containers: in Daisy (yours + your division) and elsewhere.
     const stock = (home) => (data.items || []).filter(x => x.type === "Enormous Freight Container" && (x.division ? inDiv(x) : x.mine !== false) && !!x.home === home).reduce((a, x) => a + x.qty, 0);
-    const ok = !moreCharons && !morePilots;
+    const ok = !moreCharons && !morePilots && !unpiloted;
     const lines = [`<b>${ok ? "✓ You can pack everything." : `To pack everything you have in ${HOME()}:`}</b> ${isk(f.total)} to load · ${haul.length} haulers (${haul.filter(r => r.h.type === "Charon").length} Charons, ${haul.filter(r => r.h.type === "Bowhead").length} Bowheads, ${haul.filter(r => ["Carrier", "Supercarrier"].includes(r.h.group)).length} carriers)`];
     lines.push(`Repackage <b>${f.repackage.length} ships</b> (rigs worth ${isk(f.rigLost)} lost); the ${f.repackage.length ? "rest" : ""} rigged ships worth keeping go in the Bowheads / carriers.`);
     lines.push(`<b>${f.containers} Enormous Freight Containers</b> of cargo (or the same m³ in smaller ones) · you have ${stock(true)} in ${HOME()}, ${stock(false)} elsewhere${f.containers > stock(true) ? ` · <span class="short">bring ${f.containers - stock(true)} in</span>` : ""}`);
@@ -588,7 +595,7 @@
     const have = (size, home) => (data.items || []).filter(x => x.type === size + " Freight Container" && (x.division ? inDiv(x) : x.mine !== false) && !!x.home === home).reduce((a, x) => a + x.qty, 0);
     lines.push(`<span class="note">Containers in ${HOME()}: ${SIZES.map(([n, m3]) => `${have(n, true)} ${n} (${m3 / 1000}k)`).join(" · ")} — elsewhere: ${SIZES.map(([n]) => `${have(n, false)} ${n}`).join(" · ")}. Any mix works; one Enormous = 2 Giant + a bit = 5 Huge.</span>`);
     if (moreCharons) lines.push(`<span class="short">+${moreCharons} Charon${moreCharons === 1 ? "" : "s"}</span> for ${Math.round(cargoM3).toLocaleString()} m³ that don't fit`);
-    lines.push(unpiloted || moreCharons ? (morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} in ${HOME()}</span> (${unpiloted} haulers have nobody who can fly them; ${spare} spare coffins can't fly them yet: Coffin plan + injectors)` : `<span class="enough">enough coffin characters</span> (${spare} spare)`) : `<span class="enough">every hauler has a coffin</span>`);
+    lines.push(unpiloted || moreCharons ? (morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} who can fly ${[...new Set(empty)].join(" / ")}</span> (${unpiloted} hulls have nobody who can fly them${spareAll.length - spare > 0 ? `; ${spareAll.length - spare} spare coffins aren't trained for them yet: Coffin plan + injectors` : ""})` : `<span class="enough">enough coffin characters</span> (${spare} trained and free)`) : `<span class="enough">every hauler has a coffin</span>`);
     $("needCard").hidden = false;
     $("needCard").innerHTML = lines.join("<br>");
   }
@@ -599,17 +606,19 @@
   function coffins() {
     const rows = assign(), list = logins(rows);
     const division = (data.items || []).filter(x => x.home && inDiv(x));
-    const f = fill(rows, [...division, ...list.flatMap(x => x.dump)], 0);
+    const f = fill(rows, [...division, ...list.flatMap(x => x.dump)], 0, true);
     const haul = rows.filter(r => !r.combat);
     const ticked = pilots().filter(p => ["coffin", "can"].includes(role(p)));
-    const looks = pilots().filter(p => p.home && role(p) === "other" && HAULER.includes(p.ship_group));
+    const coffinPlans = (data.plans || []).filter(pl => /coffin/i.test(pl.name));
     const mates = (p) => pilots().filter(q => q !== p && p.account && q.account && q.account.id === p.account.id);
     let ready = 0;
     const line = (p) => {
       const r = haul.find(r => r.pilot && r.pilot.name === p.name), bad = [], notes = [];
-      if (role(p) === "other") bad.push("not ticked: tick Coffins on Your accounts");
+      const free = haul.filter(x => !x.pilot).map(x => x.h.type);
+      const pct = Math.max(0, ...coffinPlans.map(pl => ((p.plans || {})[pl.id] || {}).pct || 0));
       if (!p.home) bad.push(`not in ${HOME()} (${esc(p.system || "?")})`);
-      else if (!r) bad.push(role(p) === "can" ? "spare (no hull left for it)" : "no hull for it");
+      else if (!r && free.length) bad.push(`can't fly the free ${[...new Set(free)].join(" / ")} yet${coffinPlans.length ? ` · Coffin plan ${pct}%` : ""}`);
+      else if (!r) bad.push(role(p) === "can" ? "spare: every hull has a pilot" : "no hull left for it");
       else if (r.status === "needs Omega") bad.push("needs Omega to fly it");
       if (p.alpha) notes.push("Alpha: one online at a time");
       const hd = mates(p).filter(q => role(q) === "hd");
@@ -620,11 +629,12 @@
         <td>${r && r.load.length ? `${isk(r.loadValue)} <span class="note">· ${Math.round(100 * r.loadM3 / Math.max(1, r.cap))}% full</span>` : ""}</td>
         <td>${bad.map(b => `<span class="short">${b}</span>`).join(" · ") || '<span class="enough">ready</span>'}${notes.length ? ` <span class="note">· ${notes.join(" · ")}</span>` : ""}</td></tr>`;
     };
-    const body = [...ticked, ...looks].sort((a, b) => (role(a) === "coffin" ? 0 : role(a) === "can" ? 1 : 2) - (role(b) === "coffin" ? 0 : role(b) === "can" ? 1 : 2)).map(line).join("");
+    const group = (k, title) => { const l = ticked.filter(p => role(p) === k); return l.length ? `<tr><td colspan="5" class="sec">${title} · ${l.length}</td></tr>${l.map(line).join("")}` : ""; };
+    const body = group("coffin", "Coffins") + group("can", "Can coffin");
     const empty = haul.filter(r => !r.pilot), counted = [personalOn() ? "your things" : "", ...[...divs()].filter(Boolean).sort((a, b) => a - b).map(d => "division " + d)].filter(Boolean).join(" + ");
     const cargo = haul.filter(r => r.kind === "cargo" && r.pilot).reduce((a, r) => a + r.cap, 0), bays = haul.filter(r => r.kind === "ships" && r.pilot).reduce((a, r) => a + r.cap, 0);
-    $("coffinCard").innerHTML = `<div><b>${ready} of ${ticked.length + looks.length} coffins ready</b> · ${m3(cargo)} cargo + ${m3(bays)} ship bays with a pilot ·
-        <b>${isk(f.total - f.left)} of ${isk(f.total)}</b> (${counted || "nothing ticked"}) fits${f.left > 0 ? ` · <span class="short">${isk(f.left)} doesn't</span>: others grab what they can, the rest drops or dies` : ' · <span class="enough">everything fits</span>'}</div>
+    $("coffinCard").innerHTML = `<div><b>${ready} of ${ticked.length} coffins ready</b> · ${m3(cargo)} cargo + ${m3(bays)} ship bays with a pilot ·
+        <b>${isk(f.total - f.left)} of ${isk(f.total)}</b> (${counted || "nothing ticked"}) fits in hulls that have a pilot${f.left > 0 ? ` · <span class="short">${isk(f.left)} doesn't</span>: others grab what they can, the rest drops or dies` : ' · <span class="enough">everything fits</span>'}</div>
       ${empty.length ? `<div class="note" style="margin-top:4px">Hulls here with no coffin: <span class="short">${empty.map(r => esc(r.h.type) + " (" + esc(r.h.owner) + ")").join(", ")}</span></div>` : ""}
       ${body ? `<table class="t"><tr><th>Coffin</th><th>Hull</th><th>Holds</th><th>Would carry</th><th>Status</th></tr>${body}</table>` : `<p class="note">No coffins yet: tick Coffins (or Can coffin) on the characters in Your accounts.</p>`}`;
   }
