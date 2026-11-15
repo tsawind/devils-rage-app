@@ -227,11 +227,20 @@
   // ESI doesn't send clone names, so a clone is named by its implant set: "HG Amulet set",
   // "Ascendancy set", or its main hardwirings ("Gunslinger, Rogue"), or "Blank".
   const SETS = ["Amulet", "Ascendancy", "Crystal", "Halo", "Snake", "Talisman", "Asklepian", "Nirvana", "Rapture", "Grail", "Spur", "Talon", "Jackal", "Virtue", "Centurion", "Edge", "Harvest", "Nomad", "Savior", "Hydra", "Genolution", "Mimesis"];
+  // A set is graded by its Omega (slot 6), the expensive one that boosts the rest; without it
+  // the set is "no Omega" (e.g. Crystals run on slots 1-5).
   function setName(c) {
     const names = c.implant_names || [];
     if (!names.length) return "Blank";
-    const counts = SETS.map(set => [set, names.filter(n => new RegExp("\\b" + set + "\\b", "i").test(n))]).filter(([, l]) => l.length >= 2).sort((a, b) => b[1].length - a[1].length);
-    if (counts.length) { const [set, l] = counts[0]; const grade = /^HG /.test(l[0]) ? "HG " : /^MG /.test(l[0]) ? "MG " : /^LG /.test(l[0]) ? "LG " : ""; return `${grade}${set} set${l.length < 6 ? ` (${l.length})` : ""}`; }
+    const grade = (n) => (n.match(/^(HG|MG|LG) /) || [])[1] || "";
+    const sets = SETS.map(set => [set, names.filter(n => new RegExp("\\b" + set + "\\b", "i").test(n))]).filter(([, l]) => l.length >= 2).sort((a, b) => b[1].length - a[1].length);
+    if (sets.length) {
+      const [set, l] = sets[0];
+      const omega = l.find(n => /Omega\b/.test(n));
+      if (!omega) { const g = grade(l[0]); return `${g ? g + " " : ""}${set} set, no Omega${l.length < 5 ? ` (${l.length})` : ""}`; }
+      const g = grade(omega), others = [...new Set(l.filter(n => n !== omega).map(grade))].filter(x => x && x !== g);
+      return `${g ? g + " " : ""}${set} set${others.length ? ` (+${others.join("/")})` : ""}${l.length < 6 ? ` (${l.length})` : ""}`;
+    }
     const brands = [...new Set(names.map(n => (n.match(/'([^']+)'/) || [])[1]).filter(Boolean))];
     return brands.length ? brands.slice(0, 3).join(", ") : `${names.length} implants`;
   }
@@ -291,17 +300,34 @@
     for (const r of rows) Object.assign(r, holds(r.h, r.pilot));
     return rows;
   }
+  // Rig value of each assembled ship (rigs are lost when it's repackaged).
+  const rigValue = () => { const m = new Map(); for (const x of data.items || []) if (/^RigSlot/.test(x.flag)) m.set(x.holder, (m.get(x.holder) || 0) + x.value); return m; };
+  const ENORMOUS = 250000;
+  // Bowheads / carriers take the ships whose rigs are worth the most per m³; every other ship is
+  // repackaged (packaged size, rigs lost) and goes in freight containers with the items. Cargo
+  // holds count whole Enormous Freight Containers (4 in a cargo-fitted Charon).
   function fill(rows, list, okLoss) {
+    const rigs = rigValue();
     const top = list.filter(x => !BIG.includes(x.group) && (!INSIDE.test(x.flag) || (x.ship && x.assembled)));
     const total = top.reduce((a, x) => a + x.value, 0);
-    let left = total;
-    const repackage = [], room = (kind, m3) => rows.find(r => r.kind === kind && r.cap - r.loadM3 >= m3);
-    const put = (r, x) => { r.load.push(x); r.loadM3 += x.m3; r.loadValue += x.value; left -= x.value; };
-    for (const s of top.filter(x => x.ship && x.assembled).sort((a, b) => b.value - a.value)) { if (left <= okLoss) break; const r = room("ships", s.m3); if (r) put(r, s); else repackage.push(s); }
-    for (const s of repackage) if (left > okLoss) left -= s.value;
-    const unplaced = [];
-    for (const i of top.filter(x => !(x.ship && x.assembled) && x.value > 0).sort((a, b) => b.value / Math.max(1, b.m3) - a.value / Math.max(1, a.m3))) { if (left <= okLoss) break; const r = room("cargo", i.m3); if (r) put(r, i); else unplaced.push(i); }
-    return { total, left: Math.max(0, left), repackage, unplaced };
+    let left = total, rigLost = 0;
+    const repackage = [], unplaced = [], room = (kind, m3) => rows.find(r => r.kind === kind && r.cap - r.loadM3 >= m3);
+    const put = (r, x, m3) => { r.load.push(x); r.loadM3 += m3; r.loadValue += x.value; left -= x.value; };
+    const ships = top.filter(x => x.ship && x.assembled).map(x => ({ x, rig: rigs.get(x.item_id) || 0 })).sort((a, b) => b.rig / b.x.m3 - a.rig / a.x.m3);
+    const cargo = [];
+    for (const { x, rig } of ships) {
+      const r = rig > 0 && room("ships", x.m3);
+      if (r) put(r, x, x.m3);
+      else { repackage.push({ ...x, rig }); rigLost += rig; cargo.push({ ...x, m3: x.packaged_m3 || x.m3 }); }
+    }
+    for (const r of rows) if (r.kind === "cargo") r.cap = Math.floor(r.cap / ENORMOUS) * ENORMOUS || r.cap;
+    for (const i of [...cargo, ...top.filter(x => !(x.ship && x.assembled) && x.value > 0)].sort((a, b) => b.value / Math.max(1, b.m3) - a.value / Math.max(1, a.m3))) {
+      if (left <= okLoss) break;
+      const r = room("cargo", i.m3);
+      if (r) put(r, i, i.m3); else unplaced.push(i);
+    }
+    const cargoM3 = cargo.concat(top.filter(x => !(x.ship && x.assembled))).reduce((a, x) => a + x.m3, 0);
+    return { total, left: Math.max(0, left), repackage, unplaced, rigLost, containers: Math.ceil(cargoM3 / ENORMOUS) };
   }
   // One login per character: sit in its best ship (it leaves with the pilot when the structure
   // dies), dump everything else it owns in Daisy into the division hangar for the coffins, and
@@ -346,7 +372,7 @@
       <ol class="steps acts">${list.map((x, i) => `<li class="${i < n ? "" : "off"}"><b>${esc(x.p.name)}</b> ${tag(x.p)} <span class="note">${acct(x.p)}</span> · <span class="enough">${isk(x.saves)}</span>
         <small>${[x.clone ? `1. clone: jump into ${cloneLabel(x.clone.clone)}` : "",
                   x.sit ? (x.grab ? `2. grab ${esc(x.sit.type)} from ${esc(x.grab.owner)}` : x.already ? `2. stay in ${esc(x.sit.type)}` : `2. board ${esc(x.sit.type)}`) : "",
-                  x.dump.length ? `3. dump ${x.dump.length} into division ${data.my_division ?? ""} (${isk(x.dumpValue)})` : ""].filter(Boolean).join(" · ")}</small></li>`).join("")}</ol>
+                  x.dump.length ? `3. dump ${x.dump.length} into division ${data.my_division ?? ""} (${isk(x.dumpValue)}, ≈ ${Math.max(1, Math.ceil(x.dump.reduce((a, d) => a + (d.ship && d.assembled ? (d.packaged_m3 || d.m3) : d.m3), 0) / ENORMOUS))} Enormous container${x.dump.length ? "s" : ""} packaged)` : ""].filter(Boolean).join(" · ")}</small></li>`).join("")}</ol>
       <div class="bar"><div class="top"><b>Coffins load the division hangar</b><span>${isk(f.total)} there after the logins · <span class="enough">${isk(f.total - f.left)} fits</span> · <span class="short">${isk(f.left)} doesn't</span></span></div>
         <div class="track"><div class="safe" style="width:${(100 * (f.total - f.left) / Math.max(1, f.total)).toFixed(1)}%"></div><div class="risk" style="width:${(100 * f.left / Math.max(1, f.total)).toFixed(1)}%"></div></div></div>`;
     const sl = $("loginSlider");
@@ -366,7 +392,7 @@
         <td>${r.load.length ? `<details><summary>${r.load.length} ${r.kind === "ships" ? "ships" : "stacks"} · ${isk(r.loadValue)} · ${Math.round(r.loadM3).toLocaleString()} / ${Math.round(r.cap).toLocaleString()} m³</summary><ul class="list">${r.load.slice(0, 60).map(item).join("")}</ul></details>` : '<span class="note">empty</span>'}</td></tr>`).join("")}</table>`);
     const needOmega = rows.filter(r => r.status === "needs Omega");
     if (needOmega.length) add("omega", `Weekend Omega for ${needOmega.length} character${needOmega.length === 1 ? "" : "s"}.`, "Without Omega only one Alpha can be online at a time.", `<ul class="list">${needOmega.map(r => `<li>${esc(r.pilot.name)} <small>→ ${esc(r.h.type)}</small></li>`).join("")}</ul>`);
-    if (f.repackage.length) add("repack", `No maintenance bay room: repackage ${f.repackage.length} ships (rigs are destroyed) into freighters.`, "Unrigged or cheap rigs first.", `<ul class="list">${f.repackage.slice(0, 30).map(item).join("")}</ul>`);
+    if (f.repackage.length) add("repack", `Repackage ${f.repackage.length} ships (rigs worth ${isk(f.rigLost)} are lost) and pack them in freight containers.`, "Cheapest rigs first; the ships whose rigs are worth the most per m³ go assembled into the Bowheads / carriers.", `<ul class="list">${f.repackage.sort((a, b) => a.rig - b.rig).slice(0, 30).map(x => `<li>${esc(x.type)} <small>${esc(x.owner)} · rigs ${isk(x.rig)} · ${Math.round(x.packaged_m3 || x.m3).toLocaleString()} m³ packaged</small></li>`).join("")}</ul>`);
     $("steps").innerHTML = out.map(s => `<li data-id="${s.id}" class="${done.has(s.id) ? "done" : ""}"><b>${s.title}</b><small>${s.why}</small>${s.list || ""}</li>`).join("");
     document.querySelectorAll("#steps > li").forEach(li => li.addEventListener("click", (e) => {
       if (e.target.closest("ul.list, table, details")) return;
@@ -405,20 +431,20 @@
     const rows = assign(), list = logins(rows);
     const division = (data.items || []).filter(x => x.home && x.division);
     const f = fill(rows, [...division, ...list.flatMap(x => x.dump)], 0);
-    const shipsM3 = f.repackage.reduce((a, x) => a + x.m3, 0), cargoM3 = f.unplaced.reduce((a, x) => a + x.m3, 0);
-    const moreBowheads = Math.ceil(shipsM3 / bowheadCap(NEW)), moreCharons = Math.ceil(cargoM3 / charonCap(NEW));
+    const cargoM3 = f.unplaced.reduce((a, x) => a + x.m3, 0);
+    const moreCharons = Math.ceil(cargoM3 / (4 * ENORMOUS));
     const haul = rows.filter(r => !r.combat), unpiloted = haul.filter(r => !r.pilot).length;
     const used = new Set(rows.filter(r => r.pilot).map(r => r.pilot.name));
     const spare = pilots().filter(p => p.home && ["coffin", "can"].includes(role(p)) && !used.has(p.name) && !p.in_big_hull).length;
-    const morePilots = Math.max(0, unpiloted + moreBowheads + moreCharons - spare);
-    const lines = [];
-    const ok = !moreBowheads && !moreCharons && !morePilots;
-    lines.push(`<b>${ok ? "✓ You can pack everything." : "To pack everything you have in Daisy:"}</b> ${isk(f.total)} to load · ${haul.length} haulers (${haul.filter(r => r.h.type === "Charon").length} Charons, ${haul.filter(r => r.h.type === "Bowhead").length} Bowheads, ${haul.filter(r => ["Carrier", "Supercarrier"].includes(r.h.group)).length} carriers)`);
-    if (moreBowheads) lines.push(`<span class="short">+${moreBowheads} Bowhead${moreBowheads === 1 ? "" : "s"}</span> for ${f.repackage.length} assembled ships (${Math.round(shipsM3).toLocaleString()} m³) that don't fit, or repackage them (rigs are lost)`);
-    if (moreCharons) lines.push(`<span class="short">+${moreCharons} Charon${moreCharons === 1 ? "" : "s"}</span> for ${Math.round(cargoM3).toLocaleString()} m³ of items that don't fit`);
-    if (unpiloted || moreBowheads || moreCharons) lines.push(morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} in Daisy</span> (${unpiloted} haulers have nobody who can fly them${moreBowheads + moreCharons ? `, ${moreBowheads + moreCharons} new ones` : ""}; ${spare} spare coffins can't fly them yet: Coffin plan + injectors)` : `<span class="enough">enough coffin characters</span> (${spare} spare)`);
-    const charonStep = Math.round(465000 * 0.05 * Math.pow(1.275, 3)), bowheadStep = Math.round(1600000 * 0.05);
-    lines.push(`<span class="note">Each Caldari Freighter level adds ${charonStep.toLocaleString()} m³ to a Charon (2 → 4: +${(2 * charonStep).toLocaleString()}), each ORE Freighter level ${bowheadStep.toLocaleString()} m³ to a Bowhead. At level 2 / 3 a new Charon holds ${Math.round(charonCap(NEW)).toLocaleString()} m³, a Bowhead ${Math.round(bowheadCap(NEW)).toLocaleString()} m³.${moreCharons + moreBowheads ? ` Training coffins to 4 would cut what's missing by about ${Math.round(100 * 0.1 / 1.1)}% (Charons) / ${Math.round(100 * 0.05 / 1.15)}% (Bowheads).` : ""}</span>`);
+    const morePilots = Math.max(0, unpiloted + moreCharons - spare);
+    // Enormous Freight Containers: in Daisy (yours + your division) and elsewhere.
+    const stock = (home) => (data.items || []).filter(x => x.type === "Enormous Freight Container" && x.mine !== false && !!x.home === home).reduce((a, x) => a + x.qty, 0);
+    const ok = !moreCharons && !morePilots;
+    const lines = [`<b>${ok ? "✓ You can pack everything." : "To pack everything you have in Daisy:"}</b> ${isk(f.total)} to load · ${haul.length} haulers (${haul.filter(r => r.h.type === "Charon").length} Charons, ${haul.filter(r => r.h.type === "Bowhead").length} Bowheads, ${haul.filter(r => ["Carrier", "Supercarrier"].includes(r.h.group)).length} carriers)`];
+    lines.push(`Repackage <b>${f.repackage.length} ships</b> (rigs worth ${isk(f.rigLost)} lost); the ${f.repackage.length ? "rest" : ""} rigged ships worth keeping go in the Bowheads / carriers.`);
+    lines.push(`<b>${f.containers} Enormous Freight Containers</b> of cargo (or the same m³ in smaller ones) · you have ${stock(true)} in Daisy, ${stock(false)} elsewhere${f.containers > stock(true) ? ` · <span class="short">bring ${f.containers - stock(true)} in</span>` : ""}`);
+    if (moreCharons) lines.push(`<span class="short">+${moreCharons} Charon${moreCharons === 1 ? "" : "s"}</span> for ${Math.round(cargoM3).toLocaleString()} m³ that don't fit`);
+    lines.push(unpiloted || moreCharons ? (morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} in Daisy</span> (${unpiloted} haulers have nobody who can fly them; ${spare} spare coffins can't fly them yet: Coffin plan + injectors)` : `<span class="enough">enough coffin characters</span> (${spare} spare)`) : `<span class="enough">every hauler has a coffin</span>`);
     $("needCard").hidden = false;
     $("needCard").innerHTML = lines.join("<br>");
   }
