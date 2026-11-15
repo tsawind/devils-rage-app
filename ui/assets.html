@@ -300,28 +300,36 @@
     for (const r of rows) Object.assign(r, holds(r.h, r.pilot));
     return rows;
   }
-  // Rig value of each assembled ship (rigs are lost when it's repackaged).
-  const rigValue = () => { const m = new Map(); for (const x of data.items || []) if (/^RigSlot/.test(x.flag)) m.set(x.holder, (m.get(x.holder) || 0) + x.value); return m; };
   const ENORMOUS = 250000;
   // Bowheads / carriers take the ships whose rigs are worth the most per m³; every other ship is
   // repackaged (packaged size, rigs lost) and goes in freight containers with the items. Cargo
   // holds count whole Enormous Freight Containers (4 in a cargo-fitted Charon).
   function fill(rows, list, okLoss) {
-    const rigs = rigValue();
     // What's in a freight container moves with it (its 250k already counts it).
-    const top = list.filter(x => !BIG.includes(x.group) && !/Freight Container/.test(x.in || "") && (!INSIDE.test(x.flag) || (x.ship && x.assembled)));
-    const total = top.reduce((a, x) => a + x.value, 0) + list.filter(x => /Freight Container/.test(x.in || "")).reduce((a, x) => a + x.value, 0);
-    let left = total, rigLost = 0;
-    const repackage = [], unplaced = [], room = (kind, m3) => rows.find(r => r.kind === kind && r.cap - r.loadM3 >= m3);
     const inBox = new Map();
     for (const x of list) if (/Freight Container/.test(x.in || "")) inBox.set(x.holder, (inBox.get(x.holder) || 0) + x.value);
-    const put = (r, x, m3) => { const v = x.value + (inBox.get(x.item_id) || 0); r.load.push(x); r.loadM3 += m3; r.loadValue += v; left -= v; };
-    const ships = top.filter(x => x.ship && x.assembled).map(x => ({ x, rig: rigs.get(x.item_id) || 0 })).sort((a, b) => b.rig / b.x.m3 - a.rig / a.x.m3);
+    // An empty freight container is packing material, not cargo (it's in the stock line).
+    const empty = (x) => /Freight Container$/.test(x.type) && !inBox.has(x.item_id);
+    const top = list.filter(x => !BIG.includes(x.group) && !empty(x) && !/Freight Container/.test(x.in || "") && (!INSIDE.test(x.flag) || (x.ship && x.assembled)));
+    // What's fitted to / carried in each ship (rigs apart): stays put in a Bowhead, comes out
+    // into the hangar with the ship when it's repackaged.
+    const kept = new Map(), rigs = new Map();
+    for (const x of data.items || []) if (INSIDE.test(x.flag)) { const m = /^RigSlot/.test(x.flag) ? rigs : kept; const k = m.get(x.holder) || { value: 0, m3: 0 }; k.value += x.value; k.m3 += x.m3; m.set(x.holder, k); }
+    const inside = (x) => (x.ship && x.assembled && kept.get(x.item_id)) || { value: 0, m3: 0 };
+    const total = top.reduce((a, x) => a + x.value + inside(x).value, 0) + list.filter(x => /Freight Container/.test(x.in || "")).reduce((a, x) => a + x.value, 0);
+    let left = total, rigLost = 0;
+    const repackage = [], unplaced = [], room = (kind, m3) => rows.find(r => r.kind === kind && r.cap - r.loadM3 >= m3);
+    const put = (r, x, m3) => { const v = x.value + (inBox.get(x.item_id) || 0) + (x.ship && x.assembled ? inside(x).value : 0); r.load.push(x); r.loadM3 += m3; r.loadValue += v; left -= v; };
+    const ships = top.filter(x => x.ship && x.assembled).map(x => ({ x, rig: (rigs.get(x.item_id) || {}).value || 0 })).sort((a, b) => b.rig / b.x.m3 - a.rig / a.x.m3);
     const cargo = [];
     for (const { x, rig } of ships) {
       const r = rig > 0 && room("ships", x.m3);
       if (r) put(r, x, x.m3);
-      else { repackage.push({ ...x, rig }); rigLost += rig; cargo.push({ ...x, m3: x.packaged_m3 || x.m3 }); }
+      else {
+        repackage.push({ ...x, rig }); rigLost += rig;
+        const k = inside(x);
+        cargo.push({ ...x, m3: (x.packaged_m3 || x.m3) + k.m3, value: x.value + k.value, assembled: false });
+      }
     }
     for (const r of rows) if (r.kind === "cargo") r.cap = Math.floor(r.cap / ENORMOUS) * ENORMOUS || r.cap;
     for (const i of [...cargo, ...top.filter(x => !(x.ship && x.assembled) && x.value > 0)].sort((a, b) => b.value / Math.max(1, b.m3) - a.value / Math.max(1, a.m3))) {
