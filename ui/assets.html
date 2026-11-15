@@ -90,34 +90,30 @@
   <button class="back" id="home">← Home</button>
 </header>
 <main>
+  <div class="card" id="corpBanner" hidden style="border-color:var(--red-hi);background:#2a0f12"></div>
+  <div class="modes">
+    <button class="mode" data-mode="vacation"><b>🏖 Vacation</b><span>Away for a while: save what's worth it</span></button>
+    <button class="mode" data-mode="war"><b>⚔ War</b><span>Fight on mains, pack the rest</span></button>
+    <button class="mode" data-mode="eviction"><b>☠ Being evicted</b><span>Everything into coffins</span></button>
+    <label class="tick" id="corpTickWrap" hidden title="Directors: War / Being evicted for every member (they get the stricter of theirs and the corp's)"><input type="checkbox" id="corpTick"> Entire corp / alliance</label>
+  </div>
+  <p class="note" id="modeMsg"></p>
   <h2>Overview <button class="btn" id="load">↻ Load from SeAT</button> <span class="note" id="loaded"></span></h2>
   <div class="card scope" id="scope" hidden></div>
   <div class="grid" id="overview"></div>
 
-  <details class="section" open><summary><h2>Coffins <span class="note">loaded when there's a threat (vacation, war, eviction): each person packs their own things and their division</span></h2></summary>
-  <div class="card" id="coffinCard"><span class="note">Load from SeAT first.</span></div></details>
 
   <details class="section" open><summary><h2>If nothing is done</h2></summary>
   <div class="card" id="nothing"><span class="note">Load from SeAT first.</span></div></details>
 
-  <details class="section" id="rolesSection" open><summary><h2>Who's who <span class="note">tick HD / Coffins / Can coffin on each character in Your accounts · one character per account can be online · click a character for assets, clones, skills</span></h2></summary>
-  <div class="card" id="roles"><span class="note">Load from SeAT first.</span></div></details>
 
 
-  <h2>Clones <span class="note">slide from doing nothing to saving everything</span></h2>
-  <div class="card" id="clones"><span class="note">Load from SeAT first.</span></div>
 
-  <h2>Plan</h2>
+  <h2>Plan <span class="note">what to do, in order · pick a mode at the top</span></h2>
   <div class="card" id="needCard" hidden></div>
-  <div class="card" id="corpBanner" hidden style="border-color:var(--red-hi);background:#2a0f12"></div>
-  <div class="modes">
-    <button class="mode" data-mode="vacation"><b>🏖 Vacation</b><span>Yours: away for a while</span></button>
-    <button class="mode" data-mode="war"><b>⚔ War</b><span>Whole corp: fight on mains, pack the rest</span></button>
-    <button class="mode" data-mode="eviction"><b>☠ Being evicted</b><span>Whole corp: everything into coffins</span></button>
-  </div>
-  <p class="note" id="modeMsg"></p>
   <div class="card" id="lossCard" hidden>
     <b>Logins, most ISK first</b> <span class="note">· each login: sit in the ship, dump the rest into the division hangar, jump clone · slide to how many logins you have time for</span>
+    <div id="vacCut" class="bar" hidden></div>
     <div id="bars"></div>
     <div class="skills"><span id="baysLine"></span>
     </div>
@@ -126,6 +122,15 @@
     <b>Steps</b> <span class="note">(click a step when it's done)</span>
     <ol class="steps" id="steps"></ol>
   </div>
+
+  <details class="section" open><summary><h2>Coffins <span class="note">loaded when there's a threat (vacation, war, eviction): each person packs their own things and their division</span></h2></summary>
+  <div class="card" id="coffinCard"><span class="note">Load from SeAT first.</span></div></details>
+
+  <details class="section" id="rolesSection" open><summary><h2>Who's who <span class="note">tick HD / Coffins / Can coffin on each character in Your accounts · one character per account can be online · click a character for assets, clones, skills</span></h2></summary>
+  <div class="card" id="roles"><span class="note">Load from SeAT first.</span></div></details>
+
+  <h2>Clones <span class="note">slide from doing nothing to saving everything</span></h2>
+  <div class="card" id="clones"><span class="note">Load from SeAT first.</span></div>
 
   <h2>Hulls <label class="tick"><input type="checkbox" id="showAll"> Show other divisions and directors</label></h2>
   <div class="card" id="hullsCard"><span class="note">Load from SeAT first.</span></div>
@@ -227,6 +232,24 @@
     $("scope").querySelectorAll("[data-div]").forEach(b => b.onchange = () => { const set = divs(); b.checked ? set.add(+b.dataset.div) : set.delete(+b.dataset.div); store.set(divKey(), [...set]); render(); });
     if ($("asPick")) $("asPick").onchange = (e) => { view.as = e.target.value ? +e.target.value : null; load(false); };
   }
+  // Who *can* do what: capitals, coffin ships and HD ships you have here, and who flies them.
+  const HD_TYPES = ["Vargur", "Bhaalgorn", "Nestor", "Leshak", "Vindicator", "Paladin", "Kronos", "Golem"];
+  function glance() {
+    const here = [...(data.hulls || []).filter(h => h.home && (h.division ? inDiv(h) : h.mine !== false)),
+      ...(data.items || []).filter(x => x.home && x.ship && x.assembled && HD_TYPES.includes(x.type) && (x.division ? inDiv(x) : x.mine !== false))];
+    const types = new Map(); for (const h of here) types.set(h.type, (types.get(h.type) || 0) + 1);
+    if (!types.size) return "";
+    const cat = (t) => { const g = hullGroup(t); return HAULER.includes(g) ? 0 : COMBAT.includes(g) ? 1 : 2; };
+    const names = ["Coffin ships", "Capitals", "HD ships"];
+    const rowsOf = [...types.entries()].sort((a, b) => cat(a[0]) - cat(b[0]) || b[1] - a[1]);
+    let last = -1;
+    return `<details open style="margin-top:8px"><summary class="note">Who can fly what: the ships you have in ${HOME()} and the characters who can sit in them</summary>
+      <table class="t"><tr><th>Ship</th><th>You have</th><th>Can fly now</th><th>Needs Omega</th></tr>${rowsOf.map(([t, n]) => {
+        const c = cat(t), head = c !== last ? `<tr><td colspan="4" class="sec">${names[c]}</td></tr>` : ""; last = c;
+        const now = pilots().filter(p => p.home && (p.can || []).includes(t) && !isAlpha(p)), om = pilots().filter(p => p.home && ((p.could || []).includes(t) || ((p.can || []).includes(t) && isAlpha(p))));
+        return head + `<tr><td><b>${esc(t)}</b></td><td>${n}</td><td>${now.length < n ? `<span class="short">${now.length}</span> · ` : `${now.length} · `}${now.map(jump).join(", ") || "—"}</td><td class="note">${om.map(jump).join(", ") || "—"}</td></tr>`;
+      }).join("")}</table></details>`;
+  }
   function nothing() {
     // Ships someone is sitting in (and what's in them) leave with their pilot; everything else here is lost.
     const sat = new Set(pilots().map(p => p.ship_item_id).filter(Boolean));
@@ -265,6 +288,7 @@
       </div>
       ${top.length ? `<details style="margin-top:6px"><summary class="note">The 15 most valuable drops: trash, self-destruct or split them before the end so they don't feed the enemy</summary>
         <table class="t">${top.map(({ x, v }) => `<tr><td>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}${x.ship && x.assembled ? ' <span class="note">assembled, with fit</span>' : ""}</td><td>${isk(v)}</td><td class="note">${esc(x.owner)}${x.in ? " · in " + esc(x.in) : ""}</td></tr>`).join("")}</table></details>` : ""}
+      ${glance()}
       <p class="note" style="margin:8px 0 2px">What everyone in ${HOME()} sits in now (ships with a pilot in them are saved) · click a name for their details:</p>
       <div class="kv">${["Dreads / FAX", "Haulers / carriers", "Subcaps", "No ship / pod", "elsewhere"].filter(k => by.has(k)).map(section).join("")}</div>`;
   }
@@ -509,7 +533,15 @@
     const picked = list.slice(0, n), saved = picked.reduce((a, x) => a + x.saves, 0), all = list.reduce((a, x) => a + x.saves, 0);
     // The coffins then load the division hangar: what was there plus what the logins dumped.
     const division = (data.items || []).filter(x => x.home && inDiv(x));
-    const f = fill(rows, [...division, ...picked.flatMap(x => x.dump)], 0, true);
+    const allIn = [...division, ...picked.flatMap(x => x.dump)], kept = keepVac(allIn);
+    const f = fill(rows, kept, 0, true);
+    $("vacCut").hidden = mode !== "vacation";
+    if (mode === "vacation") {
+      const left = allIn.filter(x => !kept.includes(x)), leftValue = left.reduce((a, x) => a + x.value, 0);
+      $("vacCut").innerHTML = `<div class="top"><b>Leave behind anything under ${isk(vacCut())}</b><span class="note">${left.length} things · ${isk(leftValue)}: acceptable losses for a vacation</span></div>
+        <input type="range" id="vacSlider" min="0" max="500" step="10" value="${Math.round(vacCut() / 1e6)}"><div class="sub"><span>0 (save everything)</span><span>500 m</span></div>`;
+      $("vacSlider").addEventListener("change", (e) => { store.set("vacCut", Number(e.target.value) * 1e6); draw(); });
+    }
     const haul = rows.filter(r => !r.combat);
     $("baysLine").textContent = `${haul.length} coffin hulls in ${HOME()}: ${Math.round(haul.filter(r => r.kind === "cargo").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ cargo · ${Math.round(haul.filter(r => r.kind === "ships").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ maintenance bays ·`;
     $("bars").innerHTML = `<div class="bar"><div class="top"><b>${n} of ${list.length} logins</b> <span class="note">in pedal order</span><span>≈ ${n * 5} min one at a time (less with launch groups) · <span class="enough">${isk(saved)} saved</span> · <span class="short">${isk(all - saved)} not logged in</span></span></div>
@@ -531,10 +563,21 @@
     const combat = rows.filter(r => r.combat), haul = rows.filter(r => !r.combat);
     if (mode !== "vacation") add("hd", "HD: log in the HD pilots (your HD launch group) in combat ships.", "If the subcap fight goes badly, the same accounts swap to the dread / FAX pilots (one character per account online).",
       combat.length ? `<table class="t"><tr><th>Dread / FAX</th><th>HD pilot</th></tr>${combat.map(r => `<tr><td><b>${esc(r.h.type)}</b> <span class="note">${esc(r.h.owner)}</span></td><td>${pilotCell(r)}</td></tr>`).join("")}</table>` : "");
-    add("logins", "Logins above, most ISK first: sit in the ship, dump the rest into the division hangar, jump clone, log out.", "Docked is fine: whoever sits in a ship is ejected in it if the structure dies.");
-    add("coffins", `Coffins: ${haul.length} haulers / carriers, each with a pilot (Coffins, then Can coffin) and a load from the division hangar.`, "Board, load, log out docked; they're ejected in the ship if the structure dies. Don't log them in while the threat lasts.",
-      `<table class="t"><tr><th>Hull</th><th>Coffin pilot</th><th>Load</th></tr>${haul.map(r => `<tr><td><b>${esc(r.h.type)}</b> <span class="note">${esc(r.h.owner)}</span></td><td>${pilotCell(r)}</td>
-        <td>${r.load.length ? `<details><summary>${r.load.length} ${r.kind === "ships" ? "ships" : "stacks"} · ${isk(r.loadValue)} · ${Math.round(r.loadM3).toLocaleString()} / ${Math.round(r.cap).toLocaleString()} m³</summary><ul class="list">${r.load.slice(0, 60).map(item).join("")}</ul></details>` : '<span class="note">empty</span>'}</td></tr>`).join("")}</table>`);
+    const label = (x) => `${x.name ? `<b>${esc(x.name)}</b> · ` : ""}${esc(x.type)}`;
+    const bays = haul.filter(r => r.kind === "ships"), cargo = haul.filter(r => r.kind !== "ships");
+    if (mode === "vacation") {
+      const caps = rows.filter(r => r.combat && r.pilot && !r.h.division);
+      add("caps", "Board your own capitals: each character sits in their dread / FAX / capital and logs out docked.", "A capital with its pilot in it is saved with everything in it.",
+        caps.length ? `<table class="t"><tr><th>Capital</th><th>Pilot</th></tr>${caps.map(r => `<tr><td>${label(r.h)}</td><td>${pilotCell(r)}</td></tr>`).join("")}</table>` : "");
+    }
+    add("logins", `Logins (the list above), most ISK first: sit in the ship, dump the rest into the division hangar${mode === "vacation" ? ` (skip anything under ${isk(vacCut())})` : ""}, jump clone, log out.`, "Docked is fine: whoever sits in a ship is ejected in it if the structure dies.");
+    // Ship maintenance bays first: they save rigged ships whole. Sort the hangar by name to find them.
+    if (bays.length) add("bays", `Bowheads${bays.some(r => r.h.group !== "Freighter") ? " and capital ship bays" : ""} first: ${bays.length} pilot${bays.length === 1 ? "" : "s"} board and load these ships from the division hangar.`, "Sort the hangar by name in-game; each ship below is listed by its in-game name and type. Carriers come last (they're rollers).",
+      bays.map(r => `<div style="margin:6px 0"><b>${esc(r.h.type)}</b>${r.h.name ? ` <b>“${esc(r.h.name)}”</b>` : ""} <span class="note">${esc(r.h.owner)}</span> · ${pilotCell(r)} · <span class="note">${r.load.length} ships · ${isk(r.loadValue)} · ${m3(r.loadM3)} of ${m3(r.cap)}</span>
+        ${r.load.length ? `<ul class="list">${[...r.load].sort((x, y) => (x.name || x.type).localeCompare(y.name || y.type)).map(x => `<li>${label(x)} <small>${esc(x.owner)} · ${isk(x.value)}${x.rigged ? " · rigged" : ""}</small></li>`).join("")}</ul>` : '<span class="note">nothing to load</span>'}</div>`).join(""));
+    if (cargo.length) add("cargo", `Charons / freighters: ${cargo.length} pilot${cargo.length === 1 ? "" : "s"} board and fill freight containers from the division hangar, most ISK first.`, "Board, load, log out docked; they're ejected in the ship if the structure dies. Don't log them in while the threat lasts.",
+      `<table class="t"><tr><th>Hull</th><th>Coffin pilot</th><th>Load</th></tr>${cargo.map(r => `<tr><td>${label(r.h)} <span class="note">${esc(r.h.owner)}</span></td><td>${pilotCell(r)}</td>
+        <td>${r.load.length ? `<details><summary>${r.load.length} stacks · ${isk(r.loadValue)} · ${m3(r.loadM3)} of ${m3(r.cap)}</summary><ul class="list">${r.load.slice(0, 60).map(item).join("")}</ul></details>` : '<span class="note">empty</span>'}</td></tr>`).join("")}</table>`);
     const needOmega = rows.filter(r => r.status === "needs Omega");
     if (needOmega.length) add("omega", `Weekend Omega for ${needOmega.length} character${needOmega.length === 1 ? "" : "s"}.`, "Without Omega only one Alpha can be online at a time.", `<ul class="list">${needOmega.map(r => `<li>${esc(r.pilot.name)} <small>→ ${esc(r.h.type)}</small></li>`).join("")}</ul>`);
     if (f.repackage.length) {
@@ -568,12 +611,19 @@
       return `<tr><td>${esc(p.main)}</td><td>${p.division}</td><td>${isk(p.division_in_home)}</td><td>${away ? `🏖 away${away.until ? " until " + new Date(away.until).toLocaleDateString() : ""}` : "here"}</td><td>${risk ? `<span class="short">grab from division ${p.division} / contact ${esc(p.main)}</span>` : ""}</td></tr>`;
     }).join("")}</table>`;
   }
+  // Vacation leaves cheap things behind (Ventures, Epithals…): slider 0–500 m, 150 m to start.
+  const vacCut = () => mode === "vacation" ? store.get("vacCut", 150e6) : 0;
+  const worth = (x) => x.value;
+  const keepVac = (l) => l.filter(x => worth(x) >= vacCut() || /Freight Container/.test(x.in || ""));
+  // The stricter of your own mode and the corp's applies: Being evicted > War > Vacation.
+  const RANK = { vacation: 1, war: 2, eviction: 3 };
+  const stricter = (a, b) => (RANK[a] || 0) >= (RANK[b] || 0) ? a || null : b || null;
   function corpBanner() {
-    const c = data.corp_mode;
+    const c = data.corp_mode, mine = data.my_mode ? data.my_mode.mode : null;
     $("corpBanner").hidden = !c;
-    if (c) { $("corpBanner").innerHTML = `<b>${c.mode === "war" ? "⚔ WAR" : "☠ BEING EVICTED"}</b> is on for the whole corp since ${new Date(c.since).toLocaleString()}.`; mode = c.mode; }
-    else if (data.my_mode && data.my_mode.mode === "vacation") mode = "vacation";
-    else if (mode === "war" || mode === "eviction") mode = null;
+    if (c) $("corpBanner").innerHTML = `<b>${c.mode === "war" ? "⚔ WAR" : "☠ BEING EVICTED"}</b> is on for the whole corp since ${new Date(c.since).toLocaleString()}.${mine && mine !== c.mode ? ` Yours: ${esc(mine)}; the stricter one applies.` : ""}`;
+    mode = stricter(c ? c.mode : null, mine);
+    $("corpTickWrap").hidden = !data.leader || !!data.viewing_as;
   }
   // ---------- what's missing to pack everything ----------
   // New coffins are trained to the coffin plans' levels: Caldari Freighter 2, ORE Freighter 3.
@@ -613,7 +663,7 @@
   function coffins() {
     const rows = assign(), list = logins(rows);
     const division = (data.items || []).filter(x => x.home && inDiv(x));
-    const f = fill(rows, [...division, ...list.flatMap(x => x.dump)], 0, true);
+    const f = fill(rows, keepVac([...division, ...list.flatMap(x => x.dump)]), 0, true);
     const haul = rows.filter(r => !r.combat);
     const ticked = pilots().filter(p => ["coffin", "can"].includes(role(p)));
     const coffinPlans = (data.plans || []).filter(pl => /coffin/i.test(pl.name));
@@ -657,17 +707,18 @@
   $("showAll").addEventListener("change", () => data && hulls());
   $("home").addEventListener("click", () => { location.href = "index.html"; });
   document.querySelectorAll(".mode[data-mode]").forEach(b => b.addEventListener("click", async () => {
-    if (data && data.viewing_as) { $("modeMsg").textContent = `Viewing as ${data.viewing_as}: read only.`; return; }
-    const want = mode === b.dataset.mode ? null : b.dataset.mode, msg = $("modeMsg"), corpMode = data && data.corp_mode ? data.corp_mode.mode : null;
-    if (b.dataset.mode === "vacation") {
-      mode = want; store.set("mode", mode); draw();
-      try { msg.textContent = await invoke("seat_asset_mode", { scope: "me", mode: want, threat: 2, days: 14 }); } catch (e) { msg.textContent = "Not saved on SeAT (" + e + ")."; }
-      return;
+    if (!data) return;
+    if (data.viewing_as) { $("modeMsg").textContent = `Viewing as ${data.viewing_as}: read only.`; return; }
+    const msg = $("modeMsg"), corp = $("corpTick").checked && data.leader, name = b.querySelector("b").textContent.trim();
+    const current = corp ? (data.corp_mode ? data.corp_mode.mode : null) : (data.my_mode ? data.my_mode.mode : null);
+    const want = current === b.dataset.mode ? null : b.dataset.mode;
+    if (corp) {
+      if (want === "vacation") { msg.textContent = "Vacation is personal; untick Entire corp."; return; }
+      if (!confirm(want ? `⚠ Turn ${name} ON for EVERY member of the corp?\n\nEveryone's Assets page switches to it (or stays on their own mode if that's stricter).` : `Turn ${current} OFF for the corp?`)) return;
     }
-    if (!data || !data.leader) { msg.textContent = "Only directors can turn War or Being evicted on for the corp."; return; }
-    if (!confirm(want ? `Turn ${b.querySelector("b").textContent.trim()} on for EVERYONE in the corp?` : `Turn ${corpMode} off for the corp?`)) return;
-    try { msg.textContent = await invoke("seat_asset_mode", { scope: "corp", mode: want, threat: 4, days: null }); } catch (e) { msg.textContent = String(e); }
-    mode = want; store.set("mode", mode); await load(false);
+    try { msg.textContent = await invoke("seat_asset_mode", { scope: corp ? "corp" : "me", mode: want, threat: want === "vacation" ? 2 : 4, days: want === "vacation" ? 14 : null }); }
+    catch (e) { msg.textContent = "Not saved on SeAT (" + e + ")."; return; }
+    await load(false);
   }));
   // A name anywhere on the page opens that character in Who's who.
   document.addEventListener("click", (e) => {
