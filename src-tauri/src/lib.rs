@@ -37,6 +37,12 @@ mod updates;
 pub const MAPPER_URL: &str = "https://devilsrage.duckdns.org";
 pub const SEAT_URL: &str = "https://seatdevilsrage.duckdns.org";
 
+/// Patch 126: every request names the app. SeAT records a User-Agent when it logs someone back
+/// in from the remembered cookie, and failed with a 500 when there was none.
+pub fn http_client() -> reqwest::Client {
+    reqwest::Client::builder().user_agent(concat!("DevilsRage-App/", env!("CARGO_PKG_VERSION"))).build().unwrap_or_default()
+}
+
 /// Sites that may open new windows inside the app (logins included).
 /// Anything else a page opens in a new window goes to the normal browser.
 const IN_APP_HOSTS: &[&str] = &[

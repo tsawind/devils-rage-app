@@ -171,7 +171,7 @@ pub async fn group_setup_create(app: AppHandle, setup: NewGroup) -> Result<serde
 async fn save_seat_group(app: &AppHandle, name: &str, ids: &[u64]) -> Result<u64, String> {
     let (cookies, xsrf) = crate::launch::seat_session(app)?;
     let xsrf = xsrf.ok_or("SeAT's session is missing: open Your accounts once, then try again")?;
-    let response = reqwest::Client::new()
+    let response = crate::http_client()
         .post(format!("{}/devilsrage/launch-groups/app", crate::SEAT_URL))
         .header("Accept", "application/json")
         .header("Cookie", cookies)
@@ -334,7 +334,7 @@ pub async fn group_setup_delete(app: AppHandle, profile: String) -> Result<Strin
     let marker: Marker = std::fs::read_to_string(dir.join(MARKER)).ok().and_then(|t| serde_json::from_str(&t).ok()).ok_or("Only groups made on this page can be removed here.")?;
     if let Some(id) = marker.group_id {
         let (cookies, xsrf) = crate::launch::seat_session(&app)?;
-        let _ = reqwest::Client::new()
+        let _ = crate::http_client()
             .post(format!("{}/devilsrage/launch-groups/{id}/app-delete", crate::SEAT_URL))
             .header("Accept", "application/json")
             .header("Cookie", cookies)

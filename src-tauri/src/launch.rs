@@ -333,7 +333,7 @@ pub async fn seat_assets(app: AppHandle, offline: bool) -> Result<serde_json::Va
     }
     let fresh: Result<serde_json::Value, String> = async {
         let (cookies, _) = seat_session(&app)?;
-        let response = reqwest::Client::new()
+        let response = crate::http_client()
             .get(format!("{}/devilsrage/assets.json", crate::SEAT_URL))
             .header("Accept", "application/json")
             .header("Cookie", cookies)
@@ -365,7 +365,7 @@ pub async fn seat_assets(app: AppHandle, offline: bool) -> Result<serde_json::Va
 pub async fn seat_asset_mode(app: AppHandle, scope: String, mode: Option<String>, threat: Option<u8>, days: Option<u32>) -> Result<String, String> {
     let (cookies, xsrf) = seat_session(&app)?;
     let xsrf = xsrf.ok_or("SeAT's session is missing: open SeAT in the app once, then try again")?;
-    let response = reqwest::Client::new()
+    let response = crate::http_client()
         .post(format!("{}/devilsrage/assets/mode", crate::SEAT_URL))
         .header("Accept", "application/json")
         .header("Cookie", cookies)
@@ -449,7 +449,7 @@ pub async fn group_accounts_from_launcher(app: AppHandle) -> Result<String, Stri
     }
     let (cookies, xsrf) = seat_session(&app)?;
     let xsrf = xsrf.ok_or("SeAT's session is missing: open SeAT in the app once, then try again")?;
-    let client = reqwest::Client::new();
+    let client = crate::http_client();
     let mine: serde_json::Value = client
         .get(format!("{}/devilsrage/accounts/mine.json", crate::SEAT_URL))
         .header("Accept", "application/json")
@@ -492,7 +492,7 @@ pub async fn group_accounts_from_launcher(app: AppHandle) -> Result<String, Stri
 
 pub(crate) async fn fetch_seat(app: &AppHandle) -> Result<SeatData, String> {
     let (cookies, _) = seat_session(app)?;
-    let response = reqwest::Client::new()
+    let response = crate::http_client()
         .get(format!("{}/devilsrage/launch-groups.json", crate::SEAT_URL))
         .header("Accept", "application/json")
         .header("Cookie", cookies)
@@ -523,7 +523,7 @@ pub async fn seat_import_local(app: AppHandle) -> Result<String, String> {
     }
     let (cookies, xsrf) = seat_session(&app)?;
     let xsrf = xsrf.ok_or("SeAT's session cookie is missing: open Your accounts once, then try again")?;
-    let response = reqwest::Client::new()
+    let response = crate::http_client()
         .post(format!("{}/devilsrage/launch-groups/import", crate::SEAT_URL))
         .header("Accept", "application/json")
         .header("Cookie", cookies)

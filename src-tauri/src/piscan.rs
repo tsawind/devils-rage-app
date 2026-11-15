@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 
 fn client() -> reqwest::Client {
-    reqwest::Client::new()
+    crate::http_client()
 }
 
 /// Encode one path segment (resource names have spaces).

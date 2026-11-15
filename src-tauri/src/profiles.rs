@@ -242,7 +242,7 @@ async fn esi_names(ids: &[u64]) -> HashMap<u64, String> {
         id: u64,
         name: String,
     }
-    let response = reqwest::Client::new()
+    let response = crate::http_client()
         .post("https://esi.evetech.net/latest/universe/names/?datasource=tranquility")
         .json(ids)
         .timeout(std::time::Duration::from_secs(15))

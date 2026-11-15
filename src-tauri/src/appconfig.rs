@@ -62,7 +62,7 @@ pub fn start(app: AppHandle) {
 
 async fn fetch() -> Result<AppConfig, String> {
     let url = format!("{}/desktop-app/config", crate::MAPPER_URL);
-    let response = reqwest::Client::new()
+    let response = crate::http_client()
         .get(url)
         .header("Accept", "application/json")
         .timeout(Duration::from_secs(15))
