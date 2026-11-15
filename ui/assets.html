@@ -53,6 +53,18 @@
   details { border-top: 1px solid #1f1f25; padding: 6px 0; }
   details summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
   details summary .grow { flex: 1; }
+  details.section { border: 0; padding: 0; }
+  details.section > summary { display: list-item; }
+  details.section > summary h2 { display: inline; }
+  .scope { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13px; }
+  .scope select { background: #121216; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+  .who > details { border-top: 1px solid #1f1f25; }
+  .who details details { margin-left: 18px; padding: 3px 0; border-top: 0; }
+  .who summary .sum { color: var(--muted); font-size: 12px; }
+  .who .body { padding: 4px 0 6px 18px; font-size: 13px; }
+  .who .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  a.jump { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--muted); cursor: pointer; }
+  .flash { outline: 1px solid var(--red-hi); border-radius: 6px; }
   table.t { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: 6px; }
   table.t td, table.t th { padding: 3px 6px; border-bottom: 1px solid #1d1d22; text-align: left; }
   table.t th { color: var(--muted); font-weight: 500; }
@@ -75,13 +87,14 @@
 </header>
 <main>
   <h2>Overview <button class="btn" id="load">↻ Load from SeAT</button> <span class="note" id="loaded"></span></h2>
+  <div class="card scope" id="scope" hidden></div>
   <div class="grid" id="overview"></div>
 
-  <h2>If nothing is done</h2>
-  <div class="card" id="nothing"><span class="note">Load from SeAT first.</span></div>
+  <details class="section" open><summary><h2>If nothing is done</h2></summary>
+  <div class="card" id="nothing"><span class="note">Load from SeAT first.</span></div></details>
 
-  <h2>Who's who <span class="note">tick HD / Coffins / Can coffin on each character in Your accounts · one character per account can be online</span></h2>
-  <div class="card" id="roles"><span class="note">Load from SeAT first.</span></div>
+  <details class="section" id="rolesSection" open><summary><h2>Who's who <span class="note">tick HD / Coffins / Can coffin on each character in Your accounts · one character per account can be online · click a character for assets, clones, skills</span></h2></summary>
+  <div class="card" id="roles"><span class="note">Load from SeAT first.</span></div></details>
 
   <h2>Clones <span class="note">slide from doing nothing to saving everything</span></h2>
   <div class="card" id="clones"><span class="note">Load from SeAT first.</span></div>
@@ -131,6 +144,17 @@
 
   // ---------- helpers ----------
   const pilots = () => data.pilots || [];
+  // The system the page plans for (Daisy unless another is picked), and who it's viewed as.
+  let view = { system: store.get("system", null), as: null };
+  const HOME = () => !data || !data.home_name || data.home_name === "J145735" ? "Daisy" : data.home_name;
+  // Divisions the plan counts: yours by default; tick any you can see (directors see them all).
+  const divKey = () => "divs." + (data.viewing_as || "me");
+  const divs = () => new Set((store.get(divKey(), null) ?? [data.my_division]).filter(d => (data.divisions || []).includes(d)));
+  const inDiv = (x) => !!x.division && divs().has(x.division);
+  const divName = (d) => d === 1 ? "corp" : ((data.people || []).find(p => p.division === d) || {}).main || (d === data.my_division ? "yours" : "");
+  const pk = (x) => x.packaged_m3 ?? x.m3;
+  const m3 = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M m³" : Math.round(n).toLocaleString() + " m³";
+  const jump = (p) => `<a class="jump" data-who="${p.id}" title="${esc(p.ship)} · ${p.home ? HOME() : esc(p.system)}">${esc(p.name)}</a>`;
   const tag = (p) => p.alpha ? '<span class="tag alpha">Alpha</span>' : p.alpha === false ? '<span class="tag omega">Omega</span>' : "";
   const acct = (p) => p.account ? `#${p.account.number} ${esc(p.account.name)}` : "";
   const canCap = (p) => (p.can || []).filter(t => hullGroup(t) && COMBAT.includes(hullGroup(t)));
@@ -166,44 +190,115 @@
     const card = (b, t) => `<div class="card stat"><b>${b}</b><span>${t}</span></div>`;
     $("overview").innerHTML = card(pilots().length, `Characters · ${pilots().length - alphas} Omega · ${alphas} Alpha · ${new Set(pilots().map(p => p.account && p.account.id).filter(Boolean)).size} accounts`)
       + card(isk(sum(items)) + " ISK", "Everything (yours + division)")
-      + card(isk(sum(items.filter(x => x.home))) + " ISK", "In Daisy (J145735)")
-      + card(isk(sum(items.filter(x => x.division))) + " ISK", `Division ${data.my_division ?? "?"} hangar`);
+      + card(isk(sum(items.filter(x => x.home))) + " ISK", `In ${HOME()}${HOME() === "Daisy" ? " (J145735)" : ""}`)
+      + card(isk(sum((data.items || []).filter(inDiv))) + " ISK", `Division ${[...divs()].sort((a, b) => a - b).join(", ") || "—"} hangar${divs().size === 1 ? "" : "s"}`);
+  }
+  function scope() {
+    const sys = data.systems || [], names = [...new Set([data.home_name || "J145735", ...sys.map(x => x.name)])], picked = divs();
+    const val = (n) => (sys.find(x => x.name === n) || {}).value;
+    let h = `<label>Plan for <select id="sysPick">${names.map(n => `<option value="${esc(n)}"${n === data.home_name ? " selected" : ""}>${n === "J145735" ? "Daisy (J145735)" : esc(n)}${val(n) ? " · " + isk(val(n)) : ""}</option>`).join("")}</select></label>`;
+    h += `<span>Divisions counted: ${[...(data.divisions || [])].sort((a, b) => a - b).map(d => `<label class="tick"><input type="checkbox" data-div="${d}"${picked.has(d) ? " checked" : ""}> ${d}${divName(d) ? " " + esc(divName(d)) : ""}</label>`).join(" ")}</span>`;
+    if (data.admin) h += `<label>View as <select id="asPick"><option value="">yourself</option>${(data.members || []).map(m => `<option value="${m.id}"${view.as === m.id ? " selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>`;
+    if (data.viewing_as) h += `<span class="tag hi">viewing as ${esc(data.viewing_as)} · read only</span>`;
+    $("scope").hidden = false; $("scope").innerHTML = h;
+    $("sysPick").onchange = (e) => { view.system = e.target.value === "J145735" ? null : e.target.value; store.set("system", view.system); load(false); };
+    $("scope").querySelectorAll("[data-div]").forEach(b => b.onchange = () => { const set = divs(); b.checked ? set.add(+b.dataset.div) : set.delete(+b.dataset.div); store.set(divKey(), [...set]); render(); });
+    if ($("asPick")) $("asPick").onchange = (e) => { view.as = e.target.value ? +e.target.value : null; load(false); };
   }
   function nothing() {
-    // Ships someone is sitting in (and what's in them) leave with their pilot; everything else in Daisy is lost.
+    // Ships someone is sitting in (and what's in them) leave with their pilot; everything else here is lost.
     const sat = new Set(pilots().map(p => p.ship_item_id).filter(Boolean));
-    const home = (data.items || []).filter(x => x.home && x.mine !== false);
+    const home = (data.items || []).filter(x => x.home && (x.division ? inDiv(x) : x.mine !== false));
     const inSat = (x) => sat.has(x.item_id) || sat.has(x.holder);
     const lostOf = (l) => l.filter(x => !inSat(x)).reduce((a, x) => a + x.value, 0);
     const personal = lostOf(home.filter(x => !x.division)), division = lostOf(home.filter(x => x.division));
     const clones = (data.clones || []).filter(c => c.home).reduce((a, c) => a + c.value, 0);
     const by = new Map();
     for (const p of pilots()) {
-      const k = !p.ship ? "No ship / pod" : COMBAT.includes(p.ship_group) ? "Dreads / FAX" : HAULER.includes(p.ship_group) ? "Haulers / carriers" : p.ship_group === "Capsule" ? "No ship / pod" : "Subcaps";
+      const k = !p.ship || p.ship_group === "Capsule" ? "No ship / pod" : COMBAT.includes(p.ship_group) ? "Dreads / FAX" : HAULER.includes(p.ship_group) ? "Haulers / carriers" : "Subcaps";
       if (!by.has(k)) by.set(k, []); by.get(k).push(p);
     }
+    // Capitals and haulers: one line per hull type (Naglfar, Phoenix Navy Issue, Charon…).
+    const byType = (l) => { const m = new Map(); for (const p of l) { if (!m.has(p.ship)) m.set(p.ship, []); m.get(p.ship).push(p); } return [...m.entries()].sort((a, b) => b[1].length - a[1].length); };
+    const section = (k) => {
+      const l = by.get(k);
+      if (k === "Dreads / FAX" || k === "Haulers / carriers") return `<b class="sec" style="grid-column:1/-1">${k} · ${l.length}</b>${byType(l).map(([t, ps]) => `<b>${esc(t)} (${ps.length})</b><span>${ps.map(jump).join(", ")}</span>`).join("")}`;
+      return `<b>${k} (${l.length})</b><span>${l.map(jump).join(", ")}</span>`;
+    };
     $("nothing").innerHTML = `<div class="kv">
         <b>Lost: personal</b><span class="short">${isk(personal)}</span>
-        <b>Lost: division ${data.my_division ?? ""}</b><span class="short">${isk(division)}</span>
+        <b>Lost: division ${[...divs()].sort((a, b) => a - b).join(", ")}</b><span class="short">${isk(division)}</span>
         <b>Lost: jump clones</b><span class="short">${isk(clones)}</span>
         <b>Total</b><span class="short">${isk(personal + division + clones)}</span>
       </div>
-      <p class="note" style="margin:8px 0 2px">What everyone sits in now (ships with a pilot in them are saved):</p>
-      <div class="kv">${["Dreads / FAX", "Haulers / carriers", "Subcaps", "No ship / pod"].filter(k => by.has(k)).map(k => `<b>${k} (${by.get(k).length})</b><span>${by.get(k).map(p => `<span title="${esc(p.ship)} · ${p.home ? "Daisy" : esc(p.system)}">${esc(p.name)}</span>`).join(", ")}</span>`).join("")}</div>`;
+      <p class="note" style="margin:8px 0 2px">What everyone sits in now (ships with a pilot in them are saved) · click a name for their details:</p>
+      <div class="kv">${["Dreads / FAX", "Haulers / carriers", "Subcaps", "No ship / pod"].filter(k => by.has(k)).map(section).join("")}</div>`;
   }
+  // Who's who: one row per character; open it for their assets, clones and skills.
   function roles() {
     const groups = { hd: [], coffin: [], can: [], other: [] };
     for (const p of pilots()) groups[role(p)].push(p);
-    // Skill plans (SeAT → Skill plans): a count of finished ones; open the row for the list.
     const plans = data.plans || [];
-    const planChips = (p) => plans.map(pl => { const r = (p.plans || {})[pl.id]; if (!r) return ""; return r.pct >= 100 ? `<span class="tag omega">${esc(pl.name)} ✓</span>` : r.pct >= 60 ? `<span class="tag" title="${r.days} days to train">${esc(pl.name)} ${r.pct}%</span>` : ""; }).join(" ");
     const doneCount = (p) => plans.filter(pl => ((p.plans || {})[pl.id] || {}).pct >= 100).length;
-    const list = (arr) => arr.length ? `<span title="${esc(arr.join(", "))}">${arr.length}</span>` : '<span class="note">—</span>';
-    const row = (p) => `<tr><td><details><summary>${esc(p.name)} ${tag(p)}</summary><div style="padding:4px 0 6px">${planChips(p) || '<span class="note">no skill plans close</span>'}</div></details></td>
-      <td class="note">${acct(p)}</td><td>${esc(p.ship || "—")} <span class="note">${p.home ? "" : esc(p.system)}</span></td><td class="note">${esc(hdName(p))}</td>
-      <td>${list(canCap(p))}</td><td>${list(canHaul(p))}</td><td>${plans.length ? `${doneCount(p)} ✓` : ""}</td></tr>`;
-    $("roles").innerHTML = `<table class="t roles"><tr><th>Character <span class="note">(click for skill plans)</span></th><th>Account</th><th>Sits in</th><th>Launch groups</th><th>Dreads / FAX</th><th>Haulers</th><th>Plans done</th></tr>
-      ${Object.entries(groups).filter(([, l]) => l.length).map(([k, l]) => `<tr><td colspan="7" class="sec">${ROLE_NAME[k]} · ${l.length}</td></tr>${l.map(row).join("")}`).join("")}</table>`;
+    const own = new Map();
+    for (const x of data.items || []) if (!x.division) { if (!own.has(x.owner)) own.set(x.owner, []); own.get(x.owner).push(x); }
+    const row = (p) => {
+      const a = assetsOf(own.get(p.name) || []), cl = (data.clones || []).filter(c => c.character === p.name);
+      return `<details id="who-${p.id}"><summary><b>${esc(p.name)}</b>${tag(p)}<span class="sum">${acct(p)} · ${esc(p.ship || "no ship")}${p.home ? "" : " in " + esc(p.system || "?")}${hdName(p) ? " · " + esc(hdName(p)) : ""} · ${isk(a.total)}${plans.length ? ` · ${doneCount(p)} plans ✓` : ""}</span></summary>
+        <div class="body">
+          <details><summary>Personal assets · ${isk(a.total)} · ${isk(a.homeValue)} in ${HOME()}</summary>${a.html}</details>
+          <details><summary>Clones · ${cl.length} jump clone${cl.length === 1 ? "" : "s"} · body: ${p.implants} implants (${isk(p.implants_value)})</summary>${clonesOf(p, cl)}</details>
+          <details><summary>Skills · ${p.sp ? (p.sp / 1e6).toFixed(1) + "m SP" : "SP unknown"}${p.alpha ? " · Alpha" : p.alpha === false ? " · Omega" : ""}</summary>${skillsOf(p)}</details>
+        </div></details>`;
+    };
+    $("roles").innerHTML = `<div class="who">${Object.entries(groups).filter(([, l]) => l.length).map(([k, l]) => `<div class="sec">${ROLE_NAME[k]} · ${l.length}</div>${l.map(row).join("")}`).join("")}</div>`;
+  }
+  // A character's own things: totals, the most valuable, how much room they take, and which
+  // rigged ships to keep assembled in a capital's maintenance bay (rigs die when repackaged).
+  function assetsOf(list) {
+    const total = list.reduce((a, x) => a + x.value, 0);
+    const here = list.filter(x => x.home), homeValue = here.reduce((a, x) => a + x.value, 0);
+    if (!list.length) return { total, homeValue, html: '<div class="body note">Nothing.</div>' };
+    const ids = new Set(here.map(x => x.item_id)), topLevel = here.filter(x => !ids.has(x.holder));
+    const inside = new Map(), rigs = new Map();
+    for (const x of here) if (INSIDE.test(x.flag)) { const m = /^RigSlot/.test(x.flag) ? rigs : inside; m.set(x.holder, (m.get(x.holder) || 0) + x.value); }
+    const packing = (x) => /Container/.test(x.group) || /Container$/.test(x.type);
+    const nowM3 = topLevel.reduce((a, x) => a + x.m3, 0);
+    const packedM3 = here.filter(x => !/^RigSlot/.test(x.flag) && !packing(x)).reduce((a, x) => a + pk(x), 0);
+    const itemsM3 = here.filter(x => !x.ship && !/^RigSlot/.test(x.flag) && !packing(x)).reduce((a, x) => a + pk(x), 0);
+    // Fittings and rigs count with their ship.
+    const withFit = (x) => x.value + (inside.get(x.item_id) || 0) + (rigs.get(x.item_id) || 0);
+    const best = list.filter(x => !INSIDE.test(x.flag) || (x.ship && x.assembled)).sort((a, b) => withFit(b) - withFit(a)).slice(0, 12);
+    // Maintenance bay: most rig ISK per m³ first, into 1M (dread) then 2M (Bowhead / carrier).
+    const rigged = here.filter(x => x.ship && x.assembled && rigs.get(x.item_id)).sort((a, b) => rigs.get(b.item_id) / b.m3 - rigs.get(a.item_id) / a.m3);
+    const bay = (cap) => { let used = 0, saved = 0; const l = []; for (const x of rigged) if (used + x.m3 <= cap) { used += x.m3; saved += rigs.get(x.item_id); l.push(x); } return { l, used, saved }; };
+    const b1 = bay(1e6), b2 = bay(2e6), shown = (b, skip = []) => b.l.filter(x => !skip.includes(x)).map(x => esc(x.type)).join(", ") || "—";
+    return { total, homeValue, html: `<div class="body">
+      <div class="kv"><b>Total</b><span>${isk(total)} · ${isk(homeValue)} in ${HOME()}</span>
+        <b>Room in ${HOME()}</b><span>${m3(nowM3)} as it sits · <b>${m3(packedM3)}</b> fully repackaged · ${m3(itemsM3)} just items (no ships)</span>
+        <b>Keep rigged: 1M bay (dread)</b><span>${shown(b1)} <span class="note">· ${m3(b1.used)} · rigs ${isk(b1.saved)}</span></span>
+        <b>Keep rigged: 2M bay (Bowhead / carrier)</b><span>${b2.l.length > b1.l.length ? (b1.l.length ? "the 1M ships + " : "") + shown(b2, b1.l) : b2.l.length ? "the same ships (nothing else rigged)" : "—"} <span class="note">· ${m3(b2.used)} · rigs ${isk(b2.saved)}${rigged.length > b2.l.length ? ` · ${rigged.length - b2.l.length} more rigged ships get repackaged` : ""}</span></span></div>
+      <table class="t"><tr><th>Most valuable</th><th>ISK</th><th>Where</th></tr>${best.map(x => `<tr><td>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}${x.ship && x.assembled ? ' <span class="note">assembled</span>' : ""}</td><td>${isk(withFit(x))}${withFit(x) > x.value ? ' <span class="note">with fit</span>' : ""}</td><td class="note">${x.home ? HOME() : esc(x.place)}${x.in ? " · in " + esc(x.in) : ""}</td></tr>`).join("")}</table></div>` };
+  }
+  function clonesOf(p, cl) {
+    if (!cl.length) return '<div class="body note">No jump clones.</div>';
+    return `<div class="body"><table class="t">${cl.sort((a, b) => b.value - a.value).map(c => `<tr><td><b>${esc(setName(c))}</b> <span class="note" title="${esc((c.implant_names || []).join(", "))}">${c.implants} implants</span></td><td>${isk(c.value)}</td><td class="note">${c.home ? `${HOME()} · <span class="short">dies with the structure</span>` : esc(c.place)}</td></tr>`).join("")}</table></div>`;
+  }
+  function skillsOf(p) {
+    const plans = data.plans || [];
+    const chip = (t, cls = "", title = "") => `<span class="tag ${cls}"${title ? ` title="${esc(title)}"` : ""}>${t}</span>`;
+    const omegaUntil = p.account && p.account.omega_until ? ` · Omega until ${new Date(p.account.omega_until).toLocaleDateString()}` : "";
+    const lines = [`<b>Clone state</b><span>${p.alpha ? '<span class="short">Alpha</span>' : p.alpha === false ? "Omega" : "unknown"}${omegaUntil}</span>`];
+    lines.push(`<b>Skill points</b><span>${p.sp ? (p.sp / 1e6).toFixed(2) + "m" : "—"}${p.sp_free ? ` · ${(p.sp_free / 1e6).toFixed(2)}m unallocated` : ""} · ${p.queue ? `${p.queue} in queue, ends ${new Date(p.queue_ends).toLocaleString()}` : '<span class="short">queue empty</span>'}</span>`);
+    const can = p.can || [], could = p.could || [];
+    lines.push(`<b>Flies now${p.alpha ? " (as Alpha)" : ""}</b><span class="chips">${can.map(t => chip(esc(t), BIG.includes(hullGroup(t)) ? "omega" : "")).join("") || '<span class="note">none of the ships here</span>'}</span>`);
+    if (could.length) lines.push(`<b>${p.alpha ? '<span class="short">Needs Omega</span>' : "Needs Omega"}</b><span class="chips">${could.map(t => chip(esc(t), "alpha", "trained, but an Alpha clone can't use the skills")).join("")}</span>`);
+    if ((p.near || []).length) lines.push(`<b>Nearly</b><span class="chips">${p.near.map(n => chip(`${esc(n.type)} −${n.missing}`, "", n.missing + " skill levels short")).join("")}</span>`);
+    const ks = p.skills || [];
+    if (ks.length) lines.push(`<b>Key skills</b><span class="chips">${ks.map(k => chip(`${esc(k.name)} ${k.active < k.trained ? `${k.active}→${k.trained}` : k.trained}`, k.active < k.trained ? "alpha" : "", k.active < k.trained ? "trained " + k.trained + ", usable " + k.active + " as Alpha" : "")).join("")}</span>`);
+    const pl = plans.map(x => ({ x, r: (p.plans || {})[x.id] })).filter(o => o.r && o.r.pct > 0).sort((a, b) => b.r.pct - a.r.pct);
+    if (pl.length) lines.push(`<b>Skill plans</b><span class="chips">${pl.map(({ x, r }) => chip(`${esc(x.name)} ${r.pct >= 100 ? "✓" : r.pct + "%"}`, r.pct >= 100 ? "omega" : "", r.pct >= 100 ? "" : r.days + " days to train")).join("")}</span>`);
+    return `<div class="body"><div class="kv">${lines.join("")}</div></div>`;
   }
 
   // ---------- clones: from doing nothing to saving everything ----------
@@ -249,11 +344,11 @@
     const acts = cloneActions(), total = (data.clones || []).filter(c => c.home).reduce((a, c) => a + c.value, 0);
     cloneSteps = Math.min(cloneSteps, acts.length);
     const saved = acts.slice(0, cloneSteps).reduce((a, x) => a + x.gain, 0);
-    $("clones").innerHTML = acts.length ? `<div class="bar"><div class="top"><b>${cloneSteps} of ${acts.length} characters</b><span>${isk(total)} in Daisy jump clones · <span class="enough">${isk(saved)} saved</span> · <span class="short">${isk(total - saved)} lost</span></span></div>
+    $("clones").innerHTML = acts.length ? `<div class="bar"><div class="top"><b>${cloneSteps} of ${acts.length} characters</b><span>${isk(total)} in ${HOME()} jump clones · <span class="enough">${isk(saved)} saved</span> · <span class="short">${isk(total - saved)} lost</span></span></div>
         <input type="range" id="cloneSlider" min="0" max="${acts.length}" value="${cloneSteps}"><div class="sub"><span>do nothing</span><span>save everything that can be</span></div></div>
         <ol class="steps acts">${acts.map((a, i) => `<li class="${i < cloneSteps ? "" : "off"}">${esc(a.p.name)} ${tag(a.p)}${a.hd ? ' <span class="tag hi">HD clone</span>' : ""} · <span class="enough">+${isk(a.gain)}</span>
           <small>jump into ${cloneLabel(a.clone)}${a.p.implants ? ` · current body's ${a.p.implants} implants stay behind` : ""}</small></li>`).join("")}</ol>`
-      : `<span class="note">Nothing to gain: no character in Daisy has a better jump clone there than the body it's in.</span>`;
+      : `<span class="note">Nothing to gain: no character in ${HOME()} has a better jump clone there than the body it's in.</span>`;
     const sl = $("cloneSlider");
     if (sl) sl.addEventListener("input", () => { cloneSteps = Number(sl.value); store.set("cloneSteps", cloneSteps); clones(); });
   }
@@ -376,10 +471,10 @@
     let n = Math.min(store.get("logins", list.length), list.length);
     const picked = list.slice(0, n), saved = picked.reduce((a, x) => a + x.saves, 0), all = list.reduce((a, x) => a + x.saves, 0);
     // The coffins then load the division hangar: what was there plus what the logins dumped.
-    const division = (data.items || []).filter(x => x.home && x.division);
+    const division = (data.items || []).filter(x => x.home && inDiv(x));
     const f = fill(rows, [...division, ...picked.flatMap(x => x.dump)], 0);
     const haul = rows.filter(r => !r.combat);
-    $("baysLine").textContent = `${haul.length} coffin hulls in Daisy: ${Math.round(haul.filter(r => r.kind === "cargo").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ cargo · ${Math.round(haul.filter(r => r.kind === "ships").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ maintenance bays ·`;
+    $("baysLine").textContent = `${haul.length} coffin hulls in ${HOME()}: ${Math.round(haul.filter(r => r.kind === "cargo").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ cargo · ${Math.round(haul.filter(r => r.kind === "ships").reduce((a, r) => a + r.cap, 0)).toLocaleString()} m³ maintenance bays ·`;
     $("bars").innerHTML = `<div class="bar"><div class="top"><b>${n} of ${list.length} logins</b> <span class="note">in pedal order</span><span>≈ ${n * 5} min one at a time (less with launch groups) · <span class="enough">${isk(saved)} saved</span> · <span class="short">${isk(all - saved)} not logged in</span></span></div>
         <input type="range" id="loginSlider" min="0" max="${list.length}" value="${n}"><div class="sub"><span>no logins</span><span>everyone</span></div></div>
       <ol class="steps acts">${list.map((x, i) => `<li class="${i < n ? "" : "off"}"><b>${esc(x.p.name)}</b> ${tag(x.p)} <span class="note">${acct(x.p)}</span> · <span class="enough">${isk(x.saves)}</span>
@@ -420,12 +515,13 @@
     const key = ([owner, hs]) => hs[0].division ? `0${String(hs[0].division).padStart(2, "0")}` : `1${owner.toLowerCase()}`;
     $("hullsCard").innerHTML = [...groups.entries()].sort((a, b) => key(a).localeCompare(key(b))).map(([owner, hs]) => {
       const count = new Map(); for (const h of hs) count.set(h.type, (count.get(h.type) || 0) + 1);
-      return `<details><summary><b>${esc(owner)}</b><span class="note grow">${[...count.entries()].map(([t, n]) => (n > 1 ? n + " × " : "") + esc(t)).join(", ")}</span><span class="note">${hs.some(h => h.home) ? "Daisy" : esc(hs[0].place)}</span></summary>
+      return `<details><summary><b>${esc(owner)}</b><span class="note grow">${[...count.entries()].map(([t, n]) => (n > 1 ? n + " × " : "") + esc(t)).join(", ")}</span><span class="note">${hs.some(h => h.home) ? HOME() : esc(hs[0].place)}</span></summary>
         <table class="t">${hs.map(h => { const s = sitterOf(h); return `<tr><td>${esc(h.type)} <span class="note">${esc(h.group)}</span></td><td>${esc(h.place)}</td><td>${s ? "🧑 " + esc(s.name) : '<span class="note">empty</span>'}</td></tr>`; }).join("")}</table></details>`;
-    }).join("") || '<span class="note">No freighters, Bowheads or capitals.</span>';
+    }).join("") + [...(data.divisions || [])].filter(d => (all || d === 1 || d === data.my_division) && !list.some(h => h.division === d)).sort((a, b) => a - b)
+      .map(d => `<details><summary><b>Division ${d}${divName(d) ? ` (${esc(divName(d))})` : ""}</b><span class="note grow">no freighters, Bowheads or capitals</span></summary></details>`).join("") || '<span class="note">No freighters, Bowheads or capitals.</span>';
     const people = data.people || [];
     $("peopleCard").hidden = !(all && data.leader && people.length);
-    if (!$("peopleCard").hidden) $("peopleCard").innerHTML = `<b>Directors' divisions</b><table class="t"><tr><th>Who</th><th>Division</th><th>In Daisy</th><th>Status</th><th></th></tr>${people.map(p => {
+    if (!$("peopleCard").hidden) $("peopleCard").innerHTML = `<b>Directors' divisions</b><table class="t"><tr><th>Who</th><th>Division</th><th>In ${HOME()}</th><th>Status</th><th></th></tr>${people.map(p => {
       const away = p.vacation, risk = (away || data.corp_mode) && p.division_in_home > 0;
       return `<tr><td>${esc(p.main)}</td><td>${p.division}</td><td>${isk(p.division_in_home)}</td><td>${away ? `🏖 away${away.until ? " until " + new Date(away.until).toLocaleDateString() : ""}` : "here"}</td><td>${risk ? `<span class="short">grab from division ${p.division} / contact ${esc(p.main)}</span>` : ""}</td></tr>`;
     }).join("")}</table>`;
@@ -442,7 +538,7 @@
   const NEW = { freighter: { "Caldari Freighter": 2, "ORE Freighter": 3 } };
   function needs() {
     const rows = assign(), list = logins(rows);
-    const division = (data.items || []).filter(x => x.home && x.division);
+    const division = (data.items || []).filter(x => x.home && inDiv(x));
     const f = fill(rows, [...division, ...list.flatMap(x => x.dump)], 0);
     const cargoM3 = f.unplaced.reduce((a, x) => a + x.m3, 0);
     const moreCharons = Math.ceil(cargoM3 / (4 * ENORMOUS));
@@ -451,32 +547,33 @@
     const spare = pilots().filter(p => p.home && ["coffin", "can"].includes(role(p)) && !used.has(p.name) && !p.in_big_hull).length;
     const morePilots = Math.max(0, unpiloted + moreCharons - spare);
     // Enormous Freight Containers: in Daisy (yours + your division) and elsewhere.
-    const stock = (home) => (data.items || []).filter(x => x.type === "Enormous Freight Container" && x.mine !== false && !!x.home === home).reduce((a, x) => a + x.qty, 0);
+    const stock = (home) => (data.items || []).filter(x => x.type === "Enormous Freight Container" && (x.division ? inDiv(x) : x.mine !== false) && !!x.home === home).reduce((a, x) => a + x.qty, 0);
     const ok = !moreCharons && !morePilots;
-    const lines = [`<b>${ok ? "✓ You can pack everything." : "To pack everything you have in Daisy:"}</b> ${isk(f.total)} to load · ${haul.length} haulers (${haul.filter(r => r.h.type === "Charon").length} Charons, ${haul.filter(r => r.h.type === "Bowhead").length} Bowheads, ${haul.filter(r => ["Carrier", "Supercarrier"].includes(r.h.group)).length} carriers)`];
+    const lines = [`<b>${ok ? "✓ You can pack everything." : `To pack everything you have in ${HOME()}:`}</b> ${isk(f.total)} to load · ${haul.length} haulers (${haul.filter(r => r.h.type === "Charon").length} Charons, ${haul.filter(r => r.h.type === "Bowhead").length} Bowheads, ${haul.filter(r => ["Carrier", "Supercarrier"].includes(r.h.group)).length} carriers)`];
     lines.push(`Repackage <b>${f.repackage.length} ships</b> (rigs worth ${isk(f.rigLost)} lost); the ${f.repackage.length ? "rest" : ""} rigged ships worth keeping go in the Bowheads / carriers.`);
-    lines.push(`<b>${f.containers} Enormous Freight Containers</b> of cargo (or the same m³ in smaller ones) · you have ${stock(true)} in Daisy, ${stock(false)} elsewhere${f.containers > stock(true) ? ` · <span class="short">bring ${f.containers - stock(true)} in</span>` : ""}`);
+    lines.push(`<b>${f.containers} Enormous Freight Containers</b> of cargo (or the same m³ in smaller ones) · you have ${stock(true)} in ${HOME()}, ${stock(false)} elsewhere${f.containers > stock(true) ? ` · <span class="short">bring ${f.containers - stock(true)} in</span>` : ""}`);
     // Every size in stock, one line: sorting into smaller containers is fine, the m³ is what counts.
     const SIZES = [["Enormous", 250000], ["Giant", 120000], ["Huge", 50000], ["Large", 10000], ["Medium", 5000], ["Small", 1000]];
-    const have = (size, home) => (data.items || []).filter(x => x.type === size + " Freight Container" && x.mine !== false && !!x.home === home).reduce((a, x) => a + x.qty, 0);
-    lines.push(`<span class="note">Containers in Daisy: ${SIZES.map(([n, m3]) => `${have(n, true)} ${n} (${m3 / 1000}k)`).join(" · ")} — elsewhere: ${SIZES.map(([n]) => `${have(n, false)} ${n}`).join(" · ")}. Any mix works; one Enormous = 2 Giant + a bit = 5 Huge.</span>`);
+    const have = (size, home) => (data.items || []).filter(x => x.type === size + " Freight Container" && (x.division ? inDiv(x) : x.mine !== false) && !!x.home === home).reduce((a, x) => a + x.qty, 0);
+    lines.push(`<span class="note">Containers in ${HOME()}: ${SIZES.map(([n, m3]) => `${have(n, true)} ${n} (${m3 / 1000}k)`).join(" · ")} — elsewhere: ${SIZES.map(([n]) => `${have(n, false)} ${n}`).join(" · ")}. Any mix works; one Enormous = 2 Giant + a bit = 5 Huge.</span>`);
     if (moreCharons) lines.push(`<span class="short">+${moreCharons} Charon${moreCharons === 1 ? "" : "s"}</span> for ${Math.round(cargoM3).toLocaleString()} m³ that don't fit`);
-    lines.push(unpiloted || moreCharons ? (morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} in Daisy</span> (${unpiloted} haulers have nobody who can fly them; ${spare} spare coffins can't fly them yet: Coffin plan + injectors)` : `<span class="enough">enough coffin characters</span> (${spare} spare)`) : `<span class="enough">every hauler has a coffin</span>`);
+    lines.push(unpiloted || moreCharons ? (morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} in ${HOME()}</span> (${unpiloted} haulers have nobody who can fly them; ${spare} spare coffins can't fly them yet: Coffin plan + injectors)` : `<span class="enough">enough coffin characters</span> (${spare} spare)`) : `<span class="enough">every hauler has a coffin</span>`);
     $("needCard").hidden = false;
     $("needCard").innerHTML = lines.join("<br>");
   }
-  function render() { overview(); corpBanner(); nothing(); roles(); clones(); hulls(); needs(); draw(); }
+  function render() { scope(); overview(); corpBanner(); nothing(); roles(); clones(); hulls(); needs(); draw(); }
 
   // ---------- actions ----------
   async function load(offline) {
     $("loaded").textContent = offline ? "" : "Loading from SeAT…";
-    try { [data] = await Promise.all([invoke("seat_assets", { offline }), loadHd()]); render(); }
+    try { [data] = await Promise.all([invoke("seat_assets", { offline, system: view.system, asUser: view.as }), loadHd()]); render(); }
     catch (e) { $("loaded").textContent = String(e); }
   }
   $("load").addEventListener("click", () => load(false));
   $("showAll").addEventListener("change", () => data && hulls());
   $("home").addEventListener("click", () => { location.href = "index.html"; });
   document.querySelectorAll(".mode[data-mode]").forEach(b => b.addEventListener("click", async () => {
+    if (data && data.viewing_as) { $("modeMsg").textContent = `Viewing as ${data.viewing_as}: read only.`; return; }
     const want = mode === b.dataset.mode ? null : b.dataset.mode, msg = $("modeMsg"), corpMode = data && data.corp_mode ? data.corp_mode.mode : null;
     if (b.dataset.mode === "vacation") {
       mode = want; store.set("mode", mode); draw();
@@ -488,6 +585,14 @@
     try { msg.textContent = await invoke("seat_asset_mode", { scope: "corp", mode: want, threat: 4, days: null }); } catch (e) { msg.textContent = String(e); }
     mode = want; store.set("mode", mode); await load(false);
   }));
+  // A name anywhere on the page opens that character in Who's who.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a.jump"); if (!a) return;
+    const d = $("who-" + a.dataset.who); if (!d) return;
+    $("rolesSection").open = true; d.open = true;
+    d.scrollIntoView({ behavior: "smooth", block: "center" });
+    d.classList.add("flash"); setTimeout(() => d.classList.remove("flash"), 1600);
+  });
   load(true);
 </script>
 </body>

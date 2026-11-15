@@ -325,8 +325,13 @@ fn percent_decode(text: &str) -> String {
 /// Patch 123: your characters' assets and your division hangar from SeAT, saved on this PC
 /// (assets-snapshot.json); with `offline` (or SeAT unreachable), the last saved copy.
 #[tauri::command]
-pub async fn seat_assets(app: AppHandle, offline: bool) -> Result<serde_json::Value, String> {
-    let path = config_file(&app, "assets-snapshot.json").ok_or("no config folder")?;
+pub async fn seat_assets(app: AppHandle, offline: bool, system: Option<String>, as_user: Option<i64>) -> Result<serde_json::Value, String> {
+    // Viewing as another member (SeAT admins) or another system keeps its own saved copy.
+    let file = match (&system, as_user) {
+        (None, None) => "assets-snapshot.json".to_string(),
+        _ => format!("assets-snapshot-{}-{}.json", system.as_deref().unwrap_or("home").replace(|c: char| !c.is_ascii_alphanumeric(), "_"), as_user.unwrap_or(0)),
+    };
+    let path = config_file(&app, &file).ok_or("no config folder")?;
     let saved = || std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
     if offline {
         return saved().ok_or_else(|| "Nothing saved on this PC yet: load from SeAT once.".to_string());
@@ -335,6 +340,7 @@ pub async fn seat_assets(app: AppHandle, offline: bool) -> Result<serde_json::Va
         let (cookies, _) = seat_session(&app)?;
         let response = crate::http_client()
             .get(format!("{}/devilsrage/assets.json", crate::SEAT_URL))
+            .query(&[("system", system.clone().unwrap_or_default()), ("as", as_user.map(|u| u.to_string()).unwrap_or_default())])
             .header("Accept", "application/json")
             .header("Cookie", cookies)
             .timeout(std::time::Duration::from_secs(90))
