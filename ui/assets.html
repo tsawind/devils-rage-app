@@ -148,10 +148,12 @@
   let view = { system: store.get("system", null), as: null };
   const HOME = () => !data || !data.home_name || data.home_name === "J145735" ? "Daisy" : data.home_name;
   // Divisions the plan counts: yours by default; tick any you can see (directors see them all).
-  const divKey = () => "divs." + (data.viewing_as || "me");
-  const divs = () => new Set((store.get(divKey(), null) ?? [data.my_division]).filter(d => (data.divisions || []).includes(d)));
+  // 0 is your personal things (every character's own hangars).
+  const divKey = () => "divs2." + (data.viewing_as || "me");
+  const divs = () => new Set((store.get(divKey(), null) ?? [0, data.my_division]).filter(d => d === 0 || (data.divisions || []).includes(d)));
+  const personalOn = () => divs().has(0);
   const inDiv = (x) => !!x.division && divs().has(x.division);
-  const divName = (d) => d === 1 ? "corp" : ((data.people || []).find(p => p.division === d) || {}).main || (d === data.my_division ? "yours" : "");
+  const divName = (d) => d === 0 ? "personal" : d === 1 ? "corp" : ((data.people || []).find(p => p.division === d) || {}).main || (d === data.my_division ? "yours" : "");
   const pk = (x) => x.packaged_m3 ?? x.m3;
   const m3 = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M m³" : Math.round(n).toLocaleString() + " m³";
   const jump = (p) => `<a class="jump" data-who="${p.id}" title="${esc(p.ship)} · ${p.home ? HOME() : esc(p.system)}">${esc(p.name)}</a>`;
@@ -191,13 +193,13 @@
     $("overview").innerHTML = card(pilots().length, `Characters · ${pilots().length - alphas} Omega · ${alphas} Alpha · ${new Set(pilots().map(p => p.account && p.account.id).filter(Boolean)).size} accounts`)
       + card(isk(sum(items)) + " ISK", "Everything (yours + division)")
       + card(isk(sum(items.filter(x => x.home))) + " ISK", `In ${HOME()}${HOME() === "Daisy" ? " (J145735)" : ""}`)
-      + card(isk(sum((data.items || []).filter(inDiv))) + " ISK", `Division ${[...divs()].sort((a, b) => a - b).join(", ") || "—"} hangar${divs().size === 1 ? "" : "s"}`);
+      + card(isk(sum((data.items || []).filter(inDiv))) + " ISK", `Division ${[...divs()].filter(Boolean).sort((a, b) => a - b).join(", ") || "—"} hangar${[...divs()].filter(Boolean).length === 1 ? "" : "s"}`);
   }
   function scope() {
     const sys = data.systems || [], names = [...new Set([data.home_name || "J145735", ...sys.map(x => x.name)])], picked = divs();
     const val = (n) => (sys.find(x => x.name === n) || {}).value;
     let h = `<label>Plan for <select id="sysPick">${names.map(n => `<option value="${esc(n)}"${n === data.home_name ? " selected" : ""}>${n === "J145735" ? "Daisy (J145735)" : esc(n)}${val(n) ? " · " + isk(val(n)) : ""}</option>`).join("")}</select></label>`;
-    h += `<span>Divisions counted: ${[...(data.divisions || [])].sort((a, b) => a - b).map(d => `<label class="tick"><input type="checkbox" data-div="${d}"${picked.has(d) ? " checked" : ""}> ${d}${divName(d) ? " " + esc(divName(d)) : ""}</label>`).join(" ")}</span>`;
+    h += `<span>Divisions counted: ${[0, ...(data.divisions || [])].sort((a, b) => a - b).map(d => `<label class="tick"><input type="checkbox" data-div="${d}"${picked.has(d) ? " checked" : ""}> ${d}${divName(d) ? " " + esc(divName(d)) : ""}</label>`).join(" ")}</span>`;
     if (data.admin) h += `<label>View as <select id="asPick"><option value="">yourself</option>${(data.members || []).map(m => `<option value="${m.id}"${view.as === m.id ? " selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>`;
     if (data.viewing_as) h += `<span class="tag hi">viewing as ${esc(data.viewing_as)} · read only</span>`;
     $("scope").hidden = false; $("scope").innerHTML = h;
@@ -211,11 +213,11 @@
     const home = (data.items || []).filter(x => x.home && (x.division ? inDiv(x) : x.mine !== false));
     const inSat = (x) => sat.has(x.item_id) || sat.has(x.holder);
     const lostOf = (l) => l.filter(x => !inSat(x)).reduce((a, x) => a + x.value, 0);
-    const personal = lostOf(home.filter(x => !x.division)), division = lostOf(home.filter(x => x.division));
+    const personal = personalOn() ? lostOf(home.filter(x => !x.division)) : 0, division = lostOf(home.filter(x => x.division));
     const clones = (data.clones || []).filter(c => c.home).reduce((a, c) => a + c.value, 0);
     const by = new Map();
     for (const p of pilots()) {
-      const k = !p.ship || p.ship_group === "Capsule" ? "No ship / pod" : COMBAT.includes(p.ship_group) ? "Dreads / FAX" : HAULER.includes(p.ship_group) ? "Haulers / carriers" : "Subcaps";
+      const k = !p.home ? "elsewhere" : !p.ship || p.ship_group === "Capsule" ? "No ship / pod" : COMBAT.includes(p.ship_group) ? "Dreads / FAX" : HAULER.includes(p.ship_group) ? "Haulers / carriers" : "Subcaps";
       if (!by.has(k)) by.set(k, []); by.get(k).push(p);
     }
     // Capitals and haulers: one line per hull type (Naglfar, Phoenix Navy Issue, Charon…).
@@ -223,28 +225,33 @@
     const section = (k) => {
       const l = by.get(k);
       if (k === "Dreads / FAX" || k === "Haulers / carriers") return `<b class="sec" style="grid-column:1/-1">${k} · ${l.length}</b>${byType(l).map(([t, ps]) => `<b>${esc(t)} (${ps.length})</b><span>${ps.map(jump).join(", ")}</span>`).join("")}`;
+      if (k === "elsewhere") {
+        // Not in the system: they can't save anything here (grouped by where they are).
+        const at = new Map(); for (const p of l) { const w = p.system || "unknown"; if (!at.has(w)) at.set(w, []); at.get(w).push(p); }
+        return `<b class="sec" style="grid-column:1/-1">Not in ${HOME()} · ${l.length}</b>${[...at.entries()].sort((a, b) => b[1].length - a[1].length).map(([w, ps]) => `<b>${esc(w)} (${ps.length})</b><span>${ps.map(p => jump(p) + (p.ship ? ` <span class="note">${esc(p.ship)}</span>` : "")).join(", ")}</span>`).join("")}`;
+      }
       return `<b>${k} (${l.length})</b><span>${l.map(jump).join(", ")}</span>`;
     };
     $("nothing").innerHTML = `<div class="kv">
-        <b>Lost: personal</b><span class="short">${isk(personal)}</span>
-        <b>Lost: division ${[...divs()].sort((a, b) => a - b).join(", ")}</b><span class="short">${isk(division)}</span>
+        <b>Lost: personal</b><span class="short">${personalOn() ? isk(personal) : '<span class="note">not counted (tick 0 personal)</span>'}</span>
+        <b>Lost: division ${[...divs()].filter(Boolean).sort((a, b) => a - b).join(", ") || "—"}</b><span class="short">${isk(division)}</span>
         <b>Lost: jump clones</b><span class="short">${isk(clones)}</span>
         <b>Total</b><span class="short">${isk(personal + division + clones)}</span>
       </div>
-      <p class="note" style="margin:8px 0 2px">What everyone sits in now (ships with a pilot in them are saved) · click a name for their details:</p>
-      <div class="kv">${["Dreads / FAX", "Haulers / carriers", "Subcaps", "No ship / pod"].filter(k => by.has(k)).map(section).join("")}</div>`;
+      <p class="note" style="margin:8px 0 2px">What everyone in ${HOME()} sits in now (ships with a pilot in them are saved) · click a name for their details:</p>
+      <div class="kv">${["Dreads / FAX", "Haulers / carriers", "Subcaps", "No ship / pod", "elsewhere"].filter(k => by.has(k)).map(section).join("")}</div>`;
   }
   // Who's who: one row per character; open it for their assets, clones and skills.
   function roles() {
     const groups = { hd: [], coffin: [], can: [], other: [] };
-    for (const p of pilots()) groups[role(p)].push(p);
+    for (const p of [...pilots()].sort((a, b) => (b.home ? 1 : 0) - (a.home ? 1 : 0))) groups[role(p)].push(p);
     const plans = data.plans || [];
     const doneCount = (p) => plans.filter(pl => ((p.plans || {})[pl.id] || {}).pct >= 100).length;
     const own = new Map();
     for (const x of data.items || []) if (!x.division) { if (!own.has(x.owner)) own.set(x.owner, []); own.get(x.owner).push(x); }
     const row = (p) => {
       const a = assetsOf(own.get(p.name) || []), cl = (data.clones || []).filter(c => c.character === p.name);
-      return `<details id="who-${p.id}"><summary><b>${esc(p.name)}</b>${tag(p)}<span class="sum">${acct(p)} · ${esc(p.ship || "no ship")}${p.home ? "" : " in " + esc(p.system || "?")}${hdName(p) ? " · " + esc(hdName(p)) : ""} · ${isk(a.total)}${plans.length ? ` · ${doneCount(p)} plans ✓` : ""}</span></summary>
+      return `<details id="who-${p.id}"><summary><b>${esc(p.name)}</b>${tag(p)}<span class="sum">${acct(p)} · ${esc(p.ship || "no ship")}${p.home ? "" : ` · <span class="short">not in ${HOME()}: ${esc(p.system || "?")}</span>`}${hdName(p) ? " · " + esc(hdName(p)) : ""} · ${isk(a.total)}${plans.length ? ` · ${doneCount(p)} plans ✓` : ""}</span></summary>
         <div class="body">
           <details><summary>Personal assets · ${isk(a.total)} · ${isk(a.homeValue)} in ${HOME()}</summary>${a.html}</details>
           <details><summary>Clones · ${cl.length} jump clone${cl.length === 1 ? "" : "s"} · body: ${p.implants} implants (${isk(p.implants_value)})</summary>${clonesOf(p, cl)}</details>
@@ -455,7 +462,7 @@
       if (assigned && (!sit || sit.item_id !== assigned.h.item_id)) { sit = { ...assigned.h }; already = false; grab = assigned.h; }
       if (!sit) sit = own.filter(x => x.ship && x.assembled && (!BIG.includes(x.group) || (p.can || []).includes(x.type))).sort((a, b) => (b.value + inShip(b)) - (a.value + inShip(a)))[0] || null;
       const sitValue = sit ? sit.value + (sit.item_id ? inShip(sit) : 0) : 0;
-      const dump = own.filter(x => top(x) && (!sit || (x.item_id !== sit.item_id && x.holder !== sit.item_id)) && x.value > 0);
+      const dump = !personalOn() ? [] : own.filter(x => top(x) && (!sit || (x.item_id !== sit.item_id && x.holder !== sit.item_id)) && x.value > 0);
       const c = clone.get(p.name);
       const saves = (already ? 0 : sitValue) + dump.reduce((a, x) => a + x.value, 0) + (c ? c.gain : 0);
       if (saves > 0) out.push({ p, sit, grab, already, sitValue, dump, dumpValue: dump.reduce((a, x) => a + x.value, 0), dumpM3: dump.reduce((a, x) => a + x.m3, 0), clone: c, saves });
