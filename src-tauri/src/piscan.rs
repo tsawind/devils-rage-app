@@ -60,8 +60,7 @@ pub async fn piscan_cells(app: AppHandle, planet_id: u64, resource: String) -> R
 /// Hand a scan to SeAT (it merges into what the corp has).
 #[tauri::command]
 pub async fn piscan_save(app: AppHandle, planet_id: u64, resource: String, character_id: Option<u64>, cells: String) -> Result<String, String> {
-    let (cookies, xsrf) = crate::launch::seat_session(&app)?;
-    let xsrf = xsrf.ok_or("SeAT's session is missing: open the PI tab once, then try again")?;
+    let (cookies, xsrf) = crate::launch::seat_write_session(&app).await?;
     let response = client()
         .post(format!("{}/devilsrage/pi/scans", crate::SEAT_URL))
         .header("Accept", "application/json")
@@ -106,8 +105,7 @@ fn frame_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
 /// Delete the corp's scan of one planet and resource (yours, or any for a leader).
 #[tauri::command]
 pub async fn piscan_delete(app: AppHandle, planet_id: u64, resource: String) -> Result<(), String> {
-    let (cookies, xsrf) = crate::launch::seat_session(&app)?;
-    let xsrf = xsrf.ok_or("SeAT's session is missing: open the PI tab once, then try again")?;
+    let (cookies, xsrf) = crate::launch::seat_write_session(&app).await?;
     let response = client()
         .post(format!("{}/devilsrage/pi/scans/{planet_id}/{}/delete", crate::SEAT_URL, segment(&resource)))
         .header("Accept", "application/json")

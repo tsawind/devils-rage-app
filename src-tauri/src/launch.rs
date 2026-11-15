@@ -304,6 +304,32 @@ pub(crate) fn seat_session(app: &AppHandle) -> Result<(String, Option<String>), 
     Ok((header, xsrf))
 }
 
+/// Patch 149: a session that can save. The page view's XSRF cookie expires with the SeAT session,
+/// so ask SeAT for a fresh one first (the remembered login signs us back in) and use the cookies
+/// it hands back; fall back to what the page view has.
+pub(crate) async fn seat_write_session(app: &AppHandle) -> Result<(String, String), String> {
+    let (cookies, xsrf) = seat_session(app)?;
+    let mut jar: Vec<(String, String)> = cookies.split("; ").filter_map(|c| c.split_once('=').map(|(k, v)| (k.to_string(), v.to_string()))).collect();
+    if let Ok(response) = crate::http_client()
+        .get(format!("{}/devilsrage/accounts/mine.json", crate::SEAT_URL))
+        .header("Accept", "application/json")
+        .header("Cookie", &cookies)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+    {
+        for value in response.headers().get_all(reqwest::header::SET_COOKIE) {
+            let Ok(text) = value.to_str() else { continue };
+            let Some((name, rest)) = text.split(';').next().and_then(|c| c.split_once('=')) else { continue };
+            jar.retain(|(k, _)| k != name);
+            jar.push((name.to_string(), rest.to_string()));
+        }
+    }
+    let fresh = jar.iter().find(|(k, _)| k == "XSRF-TOKEN").map(|(_, v)| percent_decode(v)).or(xsrf);
+    let header = jar.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("; ");
+    Ok((header, fresh.ok_or("SeAT's session is missing: open SeAT in the app once, then try again")?))
+}
+
 fn percent_decode(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -369,8 +395,7 @@ pub async fn seat_assets(app: AppHandle, offline: bool, system: Option<String>, 
 /// "me" (Vacation, the others' directors see it).
 #[tauri::command]
 pub async fn seat_asset_mode(app: AppHandle, scope: String, mode: Option<String>, threat: Option<u8>, days: Option<u32>) -> Result<String, String> {
-    let (cookies, xsrf) = seat_session(&app)?;
-    let xsrf = xsrf.ok_or("SeAT's session is missing: open SeAT in the app once, then try again")?;
+    let (cookies, xsrf) = crate::launch::seat_write_session(&app).await?;
     let response = crate::http_client()
         .post(format!("{}/devilsrage/assets/mode", crate::SEAT_URL))
         .header("Accept", "application/json")
@@ -453,8 +478,7 @@ pub async fn group_accounts_from_launcher(app: AppHandle) -> Result<String, Stri
     if found.is_empty() {
         return Err("No accounts in the EVE launcher's logs on this PC (open the launcher once).".into());
     }
-    let (cookies, xsrf) = seat_session(&app)?;
-    let xsrf = xsrf.ok_or("SeAT's session is missing: open SeAT in the app once, then try again")?;
+    let (cookies, xsrf) = crate::launch::seat_write_session(&app).await?;
     let client = crate::http_client();
     let mine: serde_json::Value = client
         .get(format!("{}/devilsrage/accounts/mine.json", crate::SEAT_URL))
@@ -527,8 +551,7 @@ pub async fn seat_import_local(app: AppHandle) -> Result<String, String> {
     if groups.is_empty() {
         return Err("No groups on this PC to bring in.".into());
     }
-    let (cookies, xsrf) = seat_session(&app)?;
-    let xsrf = xsrf.ok_or("SeAT's session cookie is missing: open Your accounts once, then try again")?;
+    let (cookies, xsrf) = crate::launch::seat_write_session(&app).await?;
     let response = crate::http_client()
         .post(format!("{}/devilsrage/launch-groups/import", crate::SEAT_URL))
         .header("Accept", "application/json")
