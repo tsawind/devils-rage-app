@@ -308,11 +308,14 @@
   // holds count whole Enormous Freight Containers (4 in a cargo-fitted Charon).
   function fill(rows, list, okLoss) {
     const rigs = rigValue();
-    const top = list.filter(x => !BIG.includes(x.group) && (!INSIDE.test(x.flag) || (x.ship && x.assembled)));
-    const total = top.reduce((a, x) => a + x.value, 0);
+    // What's in a freight container moves with it (its 250k already counts it).
+    const top = list.filter(x => !BIG.includes(x.group) && !/Freight Container/.test(x.in || "") && (!INSIDE.test(x.flag) || (x.ship && x.assembled)));
+    const total = top.reduce((a, x) => a + x.value, 0) + list.filter(x => /Freight Container/.test(x.in || "")).reduce((a, x) => a + x.value, 0);
     let left = total, rigLost = 0;
     const repackage = [], unplaced = [], room = (kind, m3) => rows.find(r => r.kind === kind && r.cap - r.loadM3 >= m3);
-    const put = (r, x, m3) => { r.load.push(x); r.loadM3 += m3; r.loadValue += x.value; left -= x.value; };
+    const inBox = new Map();
+    for (const x of list) if (/Freight Container/.test(x.in || "")) inBox.set(x.holder, (inBox.get(x.holder) || 0) + x.value);
+    const put = (r, x, m3) => { const v = x.value + (inBox.get(x.item_id) || 0); r.load.push(x); r.loadM3 += m3; r.loadValue += v; left -= v; };
     const ships = top.filter(x => x.ship && x.assembled).map(x => ({ x, rig: rigs.get(x.item_id) || 0 })).sort((a, b) => b.rig / b.x.m3 - a.rig / a.x.m3);
     const cargo = [];
     for (const { x, rig } of ships) {
@@ -334,7 +337,7 @@
   // jump into its best clone. Ordered by what that login saves.
   function logins(rows) {
     const items = (data.items || []).filter(x => x.home && x.mine !== false && !x.division);
-    const top = (x) => !INSIDE.test(x.flag) || (x.ship && x.assembled);
+    const top = (x) => (!INSIDE.test(x.flag) || (x.ship && x.assembled)) && !/Freight Container/.test(x.in || "");
     const clone = new Map(cloneActions().map(a => [a.p.name, a]));
     const out = [];
     for (const p of pilots().filter(p => p.home)) {
