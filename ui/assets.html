@@ -96,6 +96,9 @@
   <details class="section" id="rolesSection" open><summary><h2>Who's who <span class="note">tick HD / Coffins / Can coffin on each character in Your accounts · one character per account can be online · click a character for assets, clones, skills</span></h2></summary>
   <div class="card" id="roles"><span class="note">Load from SeAT first.</span></div></details>
 
+  <details class="section" open><summary><h2>Coffins <span class="note">loaded when there's a threat (vacation, war, eviction): each person packs their own things and their division</span></h2></summary>
+  <div class="card" id="coffinCard"><span class="note">Load from SeAT first.</span></div></details>
+
   <h2>Clones <span class="note">slide from doing nothing to saving everything</span></h2>
   <div class="card" id="clones"><span class="note">Load from SeAT first.</span></div>
 
@@ -162,7 +165,7 @@
   const canCap = (p) => (p.can || []).filter(t => hullGroup(t) && COMBAT.includes(hullGroup(t)));
   const canHaul = (p) => (p.can || []).filter(t => hullGroup(t) && HAULER.includes(hullGroup(t)));
   const hullGroup = (type) => ((data.hulls || []).find(h => h.type === type) || {}).group;
-  const myHulls = () => (data.hulls || []).filter(h => h.mine !== false && h.home);
+  const myHulls = () => (data.hulls || []).filter(h => h.home && (h.division ? inDiv(h) : h.mine !== false));
   const sitterOf = (h) => pilots().find(p => p.ship_item_id && p.ship_item_id === h.item_id);
   // Roles are what you ticked on Your accounts (HD, Coffins, Can coffin; Main / Second / Third count as HD).
   const isHd = (p) => (p.roles || []).includes("hd") || hd.has(p.name);
@@ -507,7 +510,12 @@
         <td>${r.load.length ? `<details><summary>${r.load.length} ${r.kind === "ships" ? "ships" : "stacks"} · ${isk(r.loadValue)} · ${Math.round(r.loadM3).toLocaleString()} / ${Math.round(r.cap).toLocaleString()} m³</summary><ul class="list">${r.load.slice(0, 60).map(item).join("")}</ul></details>` : '<span class="note">empty</span>'}</td></tr>`).join("")}</table>`);
     const needOmega = rows.filter(r => r.status === "needs Omega");
     if (needOmega.length) add("omega", `Weekend Omega for ${needOmega.length} character${needOmega.length === 1 ? "" : "s"}.`, "Without Omega only one Alpha can be online at a time.", `<ul class="list">${needOmega.map(r => `<li>${esc(r.pilot.name)} <small>→ ${esc(r.h.type)}</small></li>`).join("")}</ul>`);
-    if (f.repackage.length) add("repack", `Repackage ${f.repackage.length} ships (rigs worth ${isk(f.rigLost)} are lost) and pack them in freight containers.`, "Cheapest rigs first; the ships whose rigs are worth the most per m³ go assembled into the Bowheads / carriers.", `<ul class="list">${f.repackage.sort((a, b) => a.rig - b.rig).slice(0, 30).map(x => `<li>${esc(x.type)} <small>${esc(x.owner)} · rigs ${isk(x.rig)} · ${Math.round(x.packaged_m3 || x.m3).toLocaleString()} m³ packaged</small></li>`).join("")}</ul>`);
+    if (f.repackage.length) {
+      const kinds = new Map(); for (const x of f.repackage) kinds.set(x.type, (kinds.get(x.type) || 0) + 1);
+      const most = [...kinds.entries()].sort((a, b) => b[1] - a[1]);
+      add("repack", `Repackage ${f.repackage.length} ships (rigs worth ${isk(f.rigLost)} are lost) and pack them in freight containers.`, `Mostly ${most.slice(0, 3).map(([t, n]) => n + " × " + esc(t)).join(", ")}. The ships whose rigs are worth the most per m³ go assembled into the Bowheads / carriers.`,
+        `<details><summary class="note">Show all ${f.repackage.length}</summary><ul class="list">${most.map(([t, n]) => { const l = f.repackage.filter(x => x.type === t); return `<li>${n} × ${esc(t)} <small>rigs ${isk(l.reduce((a, x) => a + x.rig, 0))} · ${[...new Set(l.map(x => x.owner))].map(esc).join(", ")}</small></li>`; }).join("")}</ul></details>`);
+    }
     $("steps").innerHTML = out.map(s => `<li data-id="${s.id}" class="${done.has(s.id) ? "done" : ""}"><b>${s.title}</b><small>${s.why}</small>${s.list || ""}</li>`).join("");
     document.querySelectorAll("#steps > li").forEach(li => li.addEventListener("click", (e) => {
       if (e.target.closest("ul.list, table, details")) return;
@@ -568,7 +576,43 @@
     $("needCard").hidden = false;
     $("needCard").innerHTML = lines.join("<br>");
   }
-  function render() { scope(); overview(); corpBanner(); nothing(); roles(); clones(); hulls(); needs(); draw(); }
+  // ---------- coffins ----------
+  // Never pre-loaded: when a threat comes, each coffin boards its hull, takes its owner's things
+  // and division from the hangar, and logs out docked. Ticked Coffins / Can coffin, plus anyone
+  // already sitting in a hauler here who isn't ticked yet.
+  function coffins() {
+    const rows = assign(), list = logins(rows);
+    const division = (data.items || []).filter(x => x.home && inDiv(x));
+    const f = fill(rows, [...division, ...list.flatMap(x => x.dump)], 0);
+    const haul = rows.filter(r => !r.combat);
+    const ticked = pilots().filter(p => ["coffin", "can"].includes(role(p)));
+    const looks = pilots().filter(p => p.home && role(p) === "other" && HAULER.includes(p.ship_group));
+    const mates = (p) => pilots().filter(q => q !== p && p.account && q.account && q.account.id === p.account.id);
+    let ready = 0;
+    const line = (p) => {
+      const r = haul.find(r => r.pilot && r.pilot.name === p.name), bad = [], notes = [];
+      if (role(p) === "other") bad.push("not ticked: tick Coffins on Your accounts");
+      if (!p.home) bad.push(`not in ${HOME()} (${esc(p.system || "?")})`);
+      else if (!r) bad.push(role(p) === "can" ? "spare (no hull left for it)" : "no hull for it");
+      else if (r.status === "needs Omega") bad.push("needs Omega to fly it");
+      if (p.alpha) notes.push("Alpha: one online at a time");
+      const hd = mates(p).filter(q => role(q) === "hd");
+      if (hd.length) notes.push(`shares the account with HD ${hd.map(q => esc(q.name)).join(", ")}: load it before they're needed`);
+      if (!bad.length) ready++;
+      const hull = r ? `<b>${esc(r.h.type)}</b> ${r.status === "sits in it" ? '<span class="enough">sits in it</span>' : `<span class="note">board it · ${esc(r.h.owner)}</span>`}` : '<span class="note">—</span>';
+      return `<tr><td>${jump(p)}${tag(p)} <span class="note">${acct(p)}</span></td><td>${hull}</td><td>${r && r.cap ? `${m3(r.cap)} ${r.kind === "ships" ? "bay" : "cargo"}` : ""}</td>
+        <td>${r && r.load.length ? `${isk(r.loadValue)} <span class="note">· ${Math.round(100 * r.loadM3 / Math.max(1, r.cap))}% full</span>` : ""}</td>
+        <td>${bad.map(b => `<span class="short">${b}</span>`).join(" · ") || '<span class="enough">ready</span>'}${notes.length ? ` <span class="note">· ${notes.join(" · ")}</span>` : ""}</td></tr>`;
+    };
+    const body = [...ticked, ...looks].sort((a, b) => (role(a) === "coffin" ? 0 : role(a) === "can" ? 1 : 2) - (role(b) === "coffin" ? 0 : role(b) === "can" ? 1 : 2)).map(line).join("");
+    const empty = haul.filter(r => !r.pilot), counted = [personalOn() ? "your things" : "", ...[...divs()].filter(Boolean).sort((a, b) => a - b).map(d => "division " + d)].filter(Boolean).join(" + ");
+    const cargo = haul.filter(r => r.kind === "cargo" && r.pilot).reduce((a, r) => a + r.cap, 0), bays = haul.filter(r => r.kind === "ships" && r.pilot).reduce((a, r) => a + r.cap, 0);
+    $("coffinCard").innerHTML = `<div><b>${ready} of ${ticked.length + looks.length} coffins ready</b> · ${m3(cargo)} cargo + ${m3(bays)} ship bays with a pilot ·
+        <b>${isk(f.total - f.left)} of ${isk(f.total)}</b> (${counted || "nothing ticked"}) fits${f.left > 0 ? ` · <span class="short">${isk(f.left)} doesn't</span>: others grab what they can, the rest drops or dies` : ' · <span class="enough">everything fits</span>'}</div>
+      ${empty.length ? `<div class="note" style="margin-top:4px">Hulls here with no coffin: <span class="short">${empty.map(r => esc(r.h.type) + " (" + esc(r.h.owner) + ")").join(", ")}</span></div>` : ""}
+      ${body ? `<table class="t"><tr><th>Coffin</th><th>Hull</th><th>Holds</th><th>Would carry</th><th>Status</th></tr>${body}</table>` : `<p class="note">No coffins yet: tick Coffins (or Can coffin) on the characters in Your accounts.</p>`}`;
+  }
+  function render() { scope(); overview(); corpBanner(); nothing(); roles(); coffins(); clones(); hulls(); needs(); draw(); }
 
   // ---------- actions ----------
   async function load(offline) {
