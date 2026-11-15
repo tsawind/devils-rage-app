@@ -443,6 +443,10 @@
     const lines = [`<b>${ok ? "✓ You can pack everything." : "To pack everything you have in Daisy:"}</b> ${isk(f.total)} to load · ${haul.length} haulers (${haul.filter(r => r.h.type === "Charon").length} Charons, ${haul.filter(r => r.h.type === "Bowhead").length} Bowheads, ${haul.filter(r => ["Carrier", "Supercarrier"].includes(r.h.group)).length} carriers)`];
     lines.push(`Repackage <b>${f.repackage.length} ships</b> (rigs worth ${isk(f.rigLost)} lost); the ${f.repackage.length ? "rest" : ""} rigged ships worth keeping go in the Bowheads / carriers.`);
     lines.push(`<b>${f.containers} Enormous Freight Containers</b> of cargo (or the same m³ in smaller ones) · you have ${stock(true)} in Daisy, ${stock(false)} elsewhere${f.containers > stock(true) ? ` · <span class="short">bring ${f.containers - stock(true)} in</span>` : ""}`);
+    // Every size in stock, one line: sorting into smaller containers is fine, the m³ is what counts.
+    const SIZES = [["Enormous", 250000], ["Giant", 120000], ["Huge", 50000], ["Large", 10000], ["Medium", 5000], ["Small", 1000]];
+    const have = (size, home) => (data.items || []).filter(x => x.type === size + " Freight Container" && x.mine !== false && !!x.home === home).reduce((a, x) => a + x.qty, 0);
+    lines.push(`<span class="note">Containers in Daisy: ${SIZES.map(([n, m3]) => `${have(n, true)} ${n} (${m3 / 1000}k)`).join(" · ")} — elsewhere: ${SIZES.map(([n]) => `${have(n, false)} ${n}`).join(" · ")}. Any mix works; one Enormous = 2 Giant + a bit = 5 Huge.</span>`);
     if (moreCharons) lines.push(`<span class="short">+${moreCharons} Charon${moreCharons === 1 ? "" : "s"}</span> for ${Math.round(cargoM3).toLocaleString()} m³ that don't fit`);
     lines.push(unpiloted || moreCharons ? (morePilots ? `<span class="short">+${morePilots} coffin character${morePilots === 1 ? "" : "s"} in Daisy</span> (${unpiloted} haulers have nobody who can fly them; ${spare} spare coffins can't fly them yet: Coffin plan + injectors)` : `<span class="enough">enough coffin characters</span> (${spare} spare)`) : `<span class="enough">every hauler has a coffin</span>`);
     $("needCard").hidden = false;
