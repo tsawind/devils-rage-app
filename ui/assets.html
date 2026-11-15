@@ -51,10 +51,14 @@
   .tag.alpha { border-color: #b88a2a; color: #f0c040; }
   .tag.omega { border-color: #2a7fb8; color: #7cc4ff; }
   details { border-top: 1px solid #1f1f25; padding: 6px 0; }
-  details summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  details summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; list-style: none; }
+  details summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "▸"; color: var(--muted); font-size: 11px; width: 10px; flex: none; }
+  details[open] > summary::before { content: "▾"; }
+  a.jump::after { content: " ↗"; font-size: 10px; color: var(--muted); }
   details summary .grow { flex: 1; }
   details.section { border: 0; padding: 0; }
-  details.section > summary { display: list-item; }
+  details.section > summary { display: flex; }
   details.section > summary h2 { display: inline; }
   .scope { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13px; }
   .scope select { background: #121216; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
@@ -164,13 +168,16 @@
   // Alpha is certain when a trained skill runs below its level. Otherwise SeAT can't tell (ESI
   // never says), so it's the Omega date set on Your accounts, or a guess shown with a "?".
   const cloneState = (p) => {
+    // Alpha unless shown otherwise: a held-back skill proves Alpha; an Omega date set on Your
+    // accounts decides; training at full speed hints Omega (fill in the date to be sure).
     if (p.alpha) return { k: "Alpha", sure: true, why: "trained skills run below their level: Alpha" };
     const until = p.account && p.account.omega_until ? new Date(p.account.omega_until) : null;
-    if (until) return until > new Date() ? { k: "Omega", sure: true, why: "Omega until " + until.toLocaleDateString() + " (Your accounts)" } : { k: "Alpha", sure: false, why: "Omega ran out " + until.toLocaleDateString() + " (Your accounts)" };
-    if (p.alpha === false) return { k: "Omega", sure: false, why: "no skill held back, so probably Omega; set the Omega date on Your accounts to be sure (an Alpha with only Alpha-level skills looks the same)" };
-    return null;
+    if (until && until > new Date()) return { k: "Omega", sure: true, why: "Omega until " + until.toLocaleDateString() + " (Your accounts)" };
+    if (p.sp_rate >= 1500) return { k: "Omega", sure: false, why: `trains at full speed (${p.sp_rate.toLocaleString()} SP/h): fill in the Omega date on Your accounts` };
+    return { k: "Alpha", sure: !until, why: until ? "Omega ran out " + until.toLocaleDateString() + " (Your accounts)" : "assumed Alpha: no Omega date on Your accounts" };
   };
-  const tag = (p) => { const c = cloneState(p); return c ? `<span class="tag ${c.k === "Alpha" ? "alpha" : "omega"}" title="${esc(c.why)}">${c.k}${c.sure ? "" : "?"}</span>` : ""; };
+  const isAlpha = (p) => cloneState(p).k === "Alpha";
+  const tag = (p) => { const c = cloneState(p); return c ? `<span class="tag ${c.k === "Alpha" ? "alpha" : "omega"}" title="${esc(c.why)}">${c.k}${c.sure ? "" : "? fill in Omega date"}</span>` : ""; };
   const acct = (p) => p.account ? `${p.account.number ? "#" + p.account.number + " " : ""}${esc(p.account.name)}` : "";
   const canCap = (p) => (p.can || []).filter(t => hullGroup(t) && COMBAT.includes(hullGroup(t)));
   const canHaul = (p) => (p.can || []).filter(t => hullGroup(t) && HAULER.includes(hullGroup(t)));
@@ -200,7 +207,7 @@
   // ---------- top: overview, if nothing is done, who's who ----------
   function overview() {
     const items = (data.items || []).filter(x => x.mine !== false), sum = (l) => l.reduce((a, x) => a + (x.value || 0), 0);
-    const alphas = pilots().filter(p => p.alpha === true).length;
+    const alphas = pilots().filter(isAlpha).length;
     $("loaded").textContent = (data.offlineBecause ? "Saved copy (SeAT: " + data.offlineBecause + ") · " : "") + "from " + new Date(data.generated).toLocaleString();
     const card = (b, t) => `<div class="card stat"><b>${b}</b><span>${t}</span></div>`;
     $("overview").innerHTML = card(pilots().length, `Characters · ${pilots().length - alphas} Omega · ${alphas} Alpha · ${new Set(pilots().map(p => p.account && p.account.id).filter(Boolean)).size} accounts`)
@@ -519,7 +526,7 @@
   }
   function steps(rows, f) {
     const out = [], add = (id, title, why, list) => out.push({ id, title, why, list });
-    const item = (x) => `<li>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}${x.rigged ? ' <span class="tag hi">rigged</span>' : ""} <small>${esc(x.owner)} · ${isk(x.value)} · ${Math.round(x.m3).toLocaleString()} m³</small></li>`;
+    const item = (x) => `<li>${x.qty > 1 ? x.qty + " × " : ""}${x.name ? `<b>${esc(x.name)}</b> ` : ""}${esc(x.type)}${x.rigged ? ' <span class="tag hi">rigged</span>' : ""} <small>${esc(x.owner)} · ${isk(x.value)} · ${Math.round(x.m3).toLocaleString()} m³</small></li>`;
     const pilotCell = (r) => `${r.pilot ? esc(r.pilot.name) + " " + tag(r.pilot) + ` <span class="note">${acct(r.pilot)}</span>` : "—"} <span class="${/nobody/.test(r.status) ? "short" : r.status === "needs Omega" ? "note" : "enough"}">${r.status}</span>${r.closest ? ` <span class="note">· closest: ${esc(r.closest.p.name)} ${r.closest.pct}% on the Coffin plan</span>` : ""}`;
     const combat = rows.filter(r => r.combat), haul = rows.filter(r => !r.combat);
     if (mode !== "vacation") add("hd", "HD: log in the HD pilots (your HD launch group) in combat ships.", "If the subcap fight goes badly, the same accounts swap to the dread / FAX pilots (one character per account online).",
@@ -620,7 +627,7 @@
       else if (!r && free.length) bad.push(`can't fly the free ${[...new Set(free)].join(" / ")} yet${coffinPlans.length ? ` · Coffin plan ${pct}%` : ""}`);
       else if (!r) bad.push(role(p) === "can" ? "spare: every hull has a pilot" : "no hull left for it");
       else if (r.status === "needs Omega") bad.push("needs Omega to fly it");
-      if (p.alpha) notes.push("Alpha: one online at a time");
+      if (isAlpha(p)) notes.push("Alpha: one online at a time");
       const hd = mates(p).filter(q => role(q) === "hd");
       if (hd.length) notes.push(`shares the account with HD ${hd.map(q => esc(q.name)).join(", ")}: load it before they're needed`);
       if (!bad.length) ready++;
