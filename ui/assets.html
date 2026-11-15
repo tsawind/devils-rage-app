@@ -160,8 +160,17 @@
   const pk = (x) => x.packaged_m3 ?? x.m3;
   const m3 = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M m³" : Math.round(n).toLocaleString() + " m³";
   const jump = (p) => `<a class="jump" data-who="${p.id}" title="${esc(p.ship)} · ${p.home ? HOME() : esc(p.system)}">${esc(p.name)}</a>`;
-  const tag = (p) => p.alpha ? '<span class="tag alpha">Alpha</span>' : p.alpha === false ? '<span class="tag omega">Omega</span>' : "";
-  const acct = (p) => p.account ? `#${p.account.number} ${esc(p.account.name)}` : "";
+  // Alpha is certain when a trained skill runs below its level. Otherwise SeAT can't tell (ESI
+  // never says), so it's the Omega date set on Your accounts, or a guess shown with a "?".
+  const cloneState = (p) => {
+    if (p.alpha) return { k: "Alpha", sure: true, why: "trained skills run below their level: Alpha" };
+    const until = p.account && p.account.omega_until ? new Date(p.account.omega_until) : null;
+    if (until) return until > new Date() ? { k: "Omega", sure: true, why: "Omega until " + until.toLocaleDateString() + " (Your accounts)" } : { k: "Alpha", sure: false, why: "Omega ran out " + until.toLocaleDateString() + " (Your accounts)" };
+    if (p.alpha === false) return { k: "Omega", sure: false, why: "no skill held back, so probably Omega; set the Omega date on Your accounts to be sure (an Alpha with only Alpha-level skills looks the same)" };
+    return null;
+  };
+  const tag = (p) => { const c = cloneState(p); return c ? `<span class="tag ${c.k === "Alpha" ? "alpha" : "omega"}" title="${esc(c.why)}">${c.k}${c.sure ? "" : "?"}</span>` : ""; };
+  const acct = (p) => p.account ? `${p.account.number ? "#" + p.account.number + " " : ""}${esc(p.account.name)}` : "";
   const canCap = (p) => (p.can || []).filter(t => hullGroup(t) && COMBAT.includes(hullGroup(t)));
   const canHaul = (p) => (p.can || []).filter(t => hullGroup(t) && HAULER.includes(hullGroup(t)));
   const hullGroup = (type) => ((data.hulls || []).find(h => h.type === type) || {}).group;
@@ -235,12 +244,19 @@
       }
       return `<b>${k} (${l.length})</b><span>${l.map(jump).join(", ")}</span>`;
     };
+    // Wormhole structures have no asset safety: hangars (ships included) drop in containers for
+    // whoever kills it; jump clones and their implants are destroyed. The structure's own core
+    // always drops and its fitting is 50/50 (that's the corp's, not counted here).
+    const drops = home.filter(x => !inSat(x) && (x.division || personalOn()));
+    const top = drops.filter(x => !INSIDE.test(x.flag) || (x.ship && x.assembled)).map(x => ({ x, v: x.value + drops.filter(y => y.holder === x.item_id && INSIDE.test(y.flag)).reduce((a, y) => a + y.value, 0) }))
+      .sort((a, b) => b.v - a.v).slice(0, 15);
     $("nothing").innerHTML = `<div class="kv">
-        <b>Lost: personal</b><span class="short">${personalOn() ? isk(personal) : '<span class="note">not counted (tick 0 personal)</span>'}</span>
-        <b>Lost: division ${[...divs()].filter(Boolean).sort((a, b) => a - b).join(", ") || "—"}</b><span class="short">${isk(division)}</span>
-        <b>Lost: jump clones</b><span class="short">${isk(clones)}</span>
-        <b>Total</b><span class="short">${isk(personal + division + clones)}</span>
+        <b>Drops for the enemy</b><span><span class="short">${isk(personal + division)}</span> <span class="note">· personal ${personalOn() ? isk(personal) : "not counted (tick 0 personal)"} · division ${[...divs()].filter(Boolean).sort((a, b) => a - b).join(", ") || "—"} ${isk(division)} · hangars spill into containers anyone can loot</span></span>
+        <b>Destroyed</b><span><span class="short">${isk(clones)}</span> <span class="note">· jump clones and their implants in ${HOME()}</span></span>
+        <b>Total lost</b><span class="short">${isk(personal + division + clones)}</span>
       </div>
+      ${top.length ? `<details style="margin-top:6px"><summary class="note">The 15 most valuable drops: trash, self-destruct or split them before the end so they don't feed the enemy</summary>
+        <table class="t">${top.map(({ x, v }) => `<tr><td>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}${x.ship && x.assembled ? ' <span class="note">assembled, with fit</span>' : ""}</td><td>${isk(v)}</td><td class="note">${esc(x.owner)}${x.in ? " · in " + esc(x.in) : ""}</td></tr>`).join("")}</table></details>` : ""}
       <p class="note" style="margin:8px 0 2px">What everyone in ${HOME()} sits in now (ships with a pilot in them are saved) · click a name for their details:</p>
       <div class="kv">${["Dreads / FAX", "Haulers / carriers", "Subcaps", "No ship / pod", "elsewhere"].filter(k => by.has(k)).map(section).join("")}</div>`;
   }
@@ -258,7 +274,7 @@
         <div class="body">
           <details><summary>Personal assets · ${isk(a.total)} · ${isk(a.homeValue)} in ${HOME()}</summary>${a.html}</details>
           <details><summary>Clones · ${cl.length} jump clone${cl.length === 1 ? "" : "s"} · body: ${p.implants} implants (${isk(p.implants_value)})</summary>${clonesOf(p, cl)}</details>
-          <details><summary>Skills · ${p.sp ? (p.sp / 1e6).toFixed(1) + "m SP" : "SP unknown"}${p.alpha ? " · Alpha" : p.alpha === false ? " · Omega" : ""}</summary>${skillsOf(p)}</details>
+          <details><summary>Skills · ${p.sp ? (p.sp / 1e6).toFixed(1) + "m SP" : "SP unknown"}${cloneState(p) ? " · " + cloneState(p).k + (cloneState(p).sure ? "" : "?") : ""}</summary>${skillsOf(p)}</details>
         </div></details>`;
     };
     $("roles").innerHTML = `<div class="who">${Object.entries(groups).filter(([, l]) => l.length).map(([k, l]) => `<div class="sec">${ROLE_NAME[k]} · ${l.length}</div>${l.map(row).join("")}`).join("")}</div>`;
@@ -298,7 +314,7 @@
     const plans = data.plans || [];
     const chip = (t, cls = "", title = "") => `<span class="tag ${cls}"${title ? ` title="${esc(title)}"` : ""}>${t}</span>`;
     const omegaUntil = p.account && p.account.omega_until ? ` · Omega until ${new Date(p.account.omega_until).toLocaleDateString()}` : "";
-    const lines = [`<b>Clone state</b><span>${p.alpha ? '<span class="short">Alpha</span>' : p.alpha === false ? "Omega" : "unknown"}${omegaUntil}</span>`];
+    const lines = [`<b>Clone state</b><span>${cloneState(p) ? `${cloneState(p).k === "Alpha" ? '<span class="short">Alpha</span>' : "Omega"}${cloneState(p).sure ? "" : "?"} <span class="note">· ${esc(cloneState(p).why)}</span>` : "unknown"}</span>`];
     lines.push(`<b>Skill points</b><span>${p.sp ? (p.sp / 1e6).toFixed(2) + "m" : "—"}${p.sp_free ? ` · ${(p.sp_free / 1e6).toFixed(2)}m unallocated` : ""} · ${p.queue ? `${p.queue} in queue, ends ${new Date(p.queue_ends).toLocaleString()}` : '<span class="short">queue empty</span>'}</span>`);
     const can = p.can || [], could = p.could || [];
     lines.push(`<b>Flies now${p.alpha ? " (as Alpha)" : ""}</b><span class="chips">${can.map(t => chip(esc(t), BIG.includes(hullGroup(t)) ? "omega" : "")).join("") || '<span class="note">none of the ships here</span>'}</span>`);
