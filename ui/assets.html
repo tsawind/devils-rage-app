@@ -716,9 +716,14 @@
       if (want === "vacation") { msg.textContent = "Vacation is personal; untick Entire corp."; return; }
       if (!confirm(want ? `⚠ Turn ${name} ON for EVERY member of the corp?\n\nEveryone's Assets page switches to it (or stays on their own mode if that's stricter).` : `Turn ${current} OFF for the corp?`)) return;
     }
+    // Switch the page right away; SeAT saves in the background (no full reload).
+    const before = { my: data.my_mode, corp: data.corp_mode };
+    if (corp) data.corp_mode = want ? { mode: want, since: new Date().toISOString() } : null;
+    else data.my_mode = want ? { mode: want } : null;
+    corpBanner(); needs(); draw();
+    msg.textContent = "Saving…";
     try { msg.textContent = await invoke("seat_asset_mode", { scope: corp ? "corp" : "me", mode: want, threat: want === "vacation" ? 2 : 4, days: want === "vacation" ? 14 : null }); }
-    catch (e) { msg.textContent = "Not saved on SeAT (" + e + ")."; return; }
-    await load(false);
+    catch (e) { data.my_mode = before.my; data.corp_mode = before.corp; corpBanner(); draw(); msg.textContent = "Not saved on SeAT (" + e + ")."; }
   }));
   // A name anywhere on the page opens that character in Who's who.
   document.addEventListener("click", (e) => {
