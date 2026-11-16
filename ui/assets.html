@@ -40,6 +40,9 @@
   .bar .wait { background: #c9922a; }
   .amber { color: #f0c040; font-weight: 600; }
   .prio { font-size: 13px; margin-bottom: 6px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .todo-list li.did { opacity: .55; text-decoration: line-through; }
+  .todo-list li.did ul, .todo-list li.did details { text-decoration: none; }
+  details.mine { margin: 4px 0 6px 18px; }
   li.batch { list-style: none; margin: 10px 0 2px -18px; border-bottom: 1px solid var(--line); }
   .bar input[type=range] { width: 100%; margin: 0; accent-color: var(--warn); }
   .bar .sub { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
@@ -466,16 +469,16 @@
   const tierOf = (h) => h.type === "Bowhead" || h.type === "Charon" || ["Freighter", "Jump Freighter"].includes(h.group) ? 0 : isCarrier(h) ? 1 : 2;
   const flies = (p, type) => (p.can || []).includes(type) ? "can" : (p.could || []).includes(type) ? "could" : null;
   const byPedal = (a, b) => pedal(a) - pedal(b);
-  // Who can be a coffin, in order: Coffins, Can coffin, unticked characters, scanner alts, then
-  // Third and Second if it comes to that. Never Main; in a war never HD (they fight).
+  // Who can be a coffin, in order: Coffins, Can coffin, unticked characters, then Third and
+  // Second if it comes to that. Never Main; in a war never HD (they fight); never a "Scanner
+  // only" character unless it's ticked Coffins / Can coffin.
   function coffinTiers() {
-    const free = pilots().filter(p => p.home && batchOf(p) !== 0 && !(mode === "war" && (isHd(p) || isHdCap(p))));
+    const free = pilots().filter(p => p.home && batchOf(p) !== 0 && !(mode === "war" && (isHd(p) || isHdCap(p))) && !(isScanner(p) && !["coffin", "can"].includes(role(p))));
     const plain = (p) => !["coffin", "can"].includes(role(p));
     return [
       free.filter(p => role(p) === "coffin"),
       free.filter(p => role(p) === "can"),
       free.filter(p => role(p) === "other" && batchOf(p) === 3 && !isScanner(p)),
-      free.filter(p => plain(p) && batchOf(p) === 3 && isScanner(p)),
       free.filter(p => plain(p) && batchOf(p) === 3 && role(p) !== "other" && !isScanner(p)),
       free.filter(p => plain(p) && batchOf(p) === 2),
       free.filter(p => plain(p) && batchOf(p) === 1),
@@ -635,10 +638,12 @@
         if (best && worthOf(best.x) >= SIT_MIN) { sit = best.x; already = sit.item_id === p.ship_item_id; }
       }
       const sitValue = sit ? worthOf(sit) : 0;
-      const dump = !personalOn() ? [] : own.filter(x => top(x) && (!sit || (x.item_id !== sit.item_id && x.holder !== sit.item_id)) && x.value > 0);
+      // Ships unticked under "Your ships" stay where they are.
+      const dump = !personalOn() ? [] : own.filter(x => top(x) && (!sit || (x.item_id !== sit.item_id && x.holder !== sit.item_id)) && x.value > 0 && !(x.ship && x.assembled && store.get("leave." + x.item_id, false)));
+      const ships = own.filter(x => x.ship && x.assembled && top(x) && (!sit || x.item_id !== sit.item_id));
       const c = clone.get(p.name);
       const saves = (already ? 0 : sitValue) + dump.reduce((a, x) => a + x.value, 0) + (c ? c.gain : 0);
-      if (saves > 0 || hull) out.push({ p, sit, hull, already, was, sitValue, dump, dumpValue: dump.reduce((a, x) => a + x.value, 0), clone: c, saves, batch: isAlpha(p) ? 4 : batchOf(p) });
+      if (saves > 0 || hull) out.push({ p, sit, hull, already, was, sitValue, dump, ships, dumpValue: dump.reduce((a, x) => a + x.value, 0), clone: c, saves, batch: isAlpha(p) ? 4 : batchOf(p) });
     }
     // Main, Second, Third (your corp launch groups, in their order), the rest, then the Alphas
     // (one online at a time); inside a group, what the login saves.
@@ -661,11 +666,16 @@
     const cls = r.status === "needs a pilot" ? "short" : r.status === "needs Omega" ? "note" : "enough";
     return `${r.pilot ? jump(r.pilot) + " " + tag(r.pilot) + ` <span class="note">${acct(r.pilot)}</span>` : "—"} <span class="${cls}">${r.status}</span>`;
   }
-  const othersLine = (r) => r.others && r.others.length ? `<span class="note">could also fly it: ${r.others.slice(0, 8).map(jump).join(", ")}${r.others.length > 8 ? ` +${r.others.length - 8}` : ""}</span>` : "";
+  const othersLine = (r) => {
+    if (!r.others || !r.others.length) return "";
+    const scan = r.others.filter(p => isScanner(p) && !["coffin", "can"].includes(role(p))), rest = r.others.filter(p => !scan.includes(p));
+    return `<span class="note">${rest.length ? `could also fly it: ${rest.slice(0, 8).map(jump).join(", ")}${rest.length > 8 ? ` +${rest.length - 8}` : ""}` : ""}${scan.length ? `${rest.length ? " · " : ""}scanner only (tick Coffins / Can coffin on Your accounts to use them): ${scan.map(jump).join(", ")}` : ""}</span>`;
+  };
   const injectLine = (r) => {
     const c = r.inject; if (!c) return r.pilot ? "" : '<span class="note">nobody here is on a plan for it: ask someone for a spare toon</span>';
     return `<span class="note">cheapest pilot: ${jump(c.p)} ${tag(c.p)} · ${esc(c.plan.name)}: ${(c.sp / 1e6).toFixed(1)}m SP = ${c.injectors} injector${c.injectors === 1 ? "" : "s"}${c.omega ? " + Omega" : ""}${c.isk ? ` ≈ <b>${isk(c.isk)}</b>` : ""}${c.days ? ` · or ~${Math.ceil(c.days)} days training (Omega)` : ""}</span>`;
   };
+  const openLogins = new Set(), openMine = new Set();
   function draw() {
     document.querySelectorAll(".mode[data-mode]").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
     $("stepsCard").hidden = !mode || !data;
@@ -708,10 +718,21 @@
       const toHangar = [...otherBay.map(d => `${label(d)} <small>→ ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}</small>`), ...(mine.length ? [`your ${mine.length} container${mine.length === 1 ? "" : "s"}`] : [])];
       if (toHangar.length) acts.push(`Put in the division hangar:<ul class="list">${toHangar.map(t => `<li>${t}</li>`).join("")}</ul>`);
       if (stay.length) acts.push(`<span class="short">No room for ${stay.map(label).join(", ")}</span>`);
-      if (cheap.length && mode === "vacation") acts.push(`<span class="note">Leave ${cheap.length} cheap thing${cheap.length === 1 ? "" : "s"} (${isk(cheap.reduce((a, d) => a + d.value, 0))})</span>`);
+      if (cheap.length && mode === "vacation") acts.push(`<span class="note">Leave ${cheap.length} cheap thing${cheap.length === 1 ? "" : "s"} (${isk(cheap.reduce((a, d) => a + d.value, 0))}): listed under “cheap things left” below</span>`);
       acts.push("Stay docked, log out.");
-      return `<li class="${i < n ? "" : "off"}"><details><summary><b>${esc(p.name)}</b> ${tag(p)} <span class="note">${acct(p)}</span> · <span class="enough">${isk(x.saves)}</span>
-        <span class="note">${h ? "→ " + esc(h.h.type) + (h.own ? " (own)" : " (coffin)") : x.sit ? (x.already ? "in " : "→ ") + esc(x.sit.type) : "pod"}${mine.length ? ` · ${mine.length} container${mine.length === 1 ? "" : "s"}` : ""}${x.clone ? " · clone" : ""}</span></summary><ol class="list">${acts.map(a => `<li>${a}</li>`).join("")}</ol></details></li>`;
+      // A to-do list: tick each step as you do it (saved on this PC).
+      const todo = acts.map((a, k) => { const key = `todo.${p.name}.${k}`, on = store.get(key, false); return `<li class="${on ? "did" : ""}"><label class="tick"><input type="checkbox" class="todo" data-k="${esc(key)}"${on ? " checked" : ""}></label> ${a}</li>`; });
+      // Your choices: which clone to keep, which ships to move, and what's left behind.
+      const cl = (data.clones || []).filter(c => c.character === p.name).sort((a, b) => (b.home ? 1 : 0) - (a.home ? 1 : 0) || b.value - a.value), want = clonePick(p);
+      const copt = (val, on, text) => `<label class="tick"><input type="radio" class="clonepick" name="lc-${p.id}" data-who="${esc(p.name)}" value="${esc(val)}"${on ? " checked" : ""}> ${text}</label>`;
+      const choose = `<details class="mine"><summary class="note">Your clones (${cl.length}) · your ships (${x.ships.length})${cheap.length ? ` · cheap things left (${cheap.length})` : ""}: change the plan</summary><div class="body">
+          <b>Clone to keep</b> <span class="note">(a training clone, an HD clone…)</span><br>${copt("", !want, "suggested")} ${copt("body", want === "body", `stay in this body (${p.implants || 0} implants · ${isk(p.implants_value || 0)})`)}
+          <table class="t">${cl.map(c => `<tr><td>${c.home ? copt(cloneKey(c), want === cloneKey(c), cloneLabel(c)) : cloneLabel(c)}</td><td class="note">${c.home ? HOME() : esc(c.place) + " · safe"}</td></tr>`).join("")}</table>
+          ${x.ships.length ? `<b>Ships</b> <span class="note">(untick to leave one where it is)</span><table class="t">${x.ships.sort((a, b) => b.value - a.value).map(d => `<tr><td><label class="tick"><input type="checkbox" class="shipmove" data-item="${d.item_id}"${store.get("leave." + d.item_id, false) ? "" : " checked"}> ${label(d)}</label></td><td>${isk(d.value)}</td><td class="note">${bayOf.has(d.item_id) ? "→ " + esc(bayOf.get(d.item_id).h.type) : repacked.has(d.item_id) ? "→ repackage" : store.get("leave." + d.item_id, false) ? "you leave it" : !keptIds.has(d.item_id) ? "leave (cheap)" : "no room"}</td></tr>`).join("")}</table>` : ""}
+          ${cheap.length ? `<b>Cheap things left behind</b> <span class="note">(under ${isk(vacCut())})</span><ul class="list">${cheap.sort((a, b) => b.value - a.value).map(d => `<li>${d.qty > 1 ? d.qty + " × " : ""}${label(d)} <small>${isk(d.value)}</small></li>`).join("")}</ul>` : ""}
+        </div></details>`;
+      return `<li class="${i < n ? "" : "off"}"><details class="login" data-login="${esc(p.name)}"${openLogins.has(p.name) ? " open" : ""}><summary><b>${esc(p.name)}</b> ${tag(p)} <span class="note">${acct(p)}</span> · <span class="enough">${isk(x.saves)}</span>
+        <span class="note">${h ? "→ " + esc(h.h.type) + (h.own ? " (own)" : " (coffin)") : x.sit ? (x.already ? "in " : "→ ") + esc(x.sit.type) : "pod"}${mine.length ? ` · ${mine.length} container${mine.length === 1 ? "" : "s"}` : ""}${x.clone ? " · clone" : ""}${acts.length && acts.every((a, k) => store.get(`todo.${p.name}.${k}`, false)) ? ' · <span class="enough">✓ done</span>' : ""}</span></summary><ol class="list todo-list">${todo.join("")}</ol>${choose}</details></li>`;
     };
     let html = "", idx = 0;
     for (let b = 0; b <= 4; b++) {
@@ -725,6 +746,11 @@
         <input type="range" id="loginSlider" min="0" max="${list.length}" value="${n}"><div class="sub"><span>no logins</span><span>everyone</span></div></div>
       <ol class="steps acts">${html}</ol>`;
     steps(rows, f, loginHtml);
+    document.querySelectorAll("#steps details.login").forEach(d => d.addEventListener("toggle", () => { d.open ? openLogins.add(d.dataset.login) : openLogins.delete(d.dataset.login); }));
+    document.querySelectorAll("#steps details.mine").forEach(d => { if (openMine.has(d.closest("details.login").dataset.login)) d.open = true; d.addEventListener("toggle", () => { const n = d.closest("details.login").dataset.login; d.open ? openMine.add(n) : openMine.delete(n); }); });
+    document.querySelectorAll("#steps input.todo").forEach(b => b.addEventListener("change", () => { store.set(b.dataset.k, b.checked); b.closest("li").classList.toggle("did", b.checked); }));
+    document.querySelectorAll("#steps input.clonepick").forEach(b => b.addEventListener("change", () => { store.set("clonePick." + b.dataset.who, b.value || null); render(); }));
+    document.querySelectorAll("#steps input.shipmove").forEach(b => b.addEventListener("change", () => { store.set("leave." + b.dataset.item, !b.checked); render(); }));
     const sl = $("loginSlider");
     if (sl) sl.addEventListener("change", () => { store.set("logins", Number(sl.value)); render(); });
   }

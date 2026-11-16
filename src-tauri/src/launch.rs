@@ -38,10 +38,6 @@ pub struct Group {
     /// on its preview. Shown again from the Launch groups page.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden: Vec<String>,
-    /// Patch 153: this PC's cycle order for a SeAT group (dragged on the Launch groups page);
-    /// characters not listed keep Your accounts' order after the listed ones.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub order: Vec<String>,
 }
 
 /// Members in this PC's dragged order: listed ones first, in that order, then the rest as they were.
@@ -197,6 +193,10 @@ pub struct GroupPrefs {
     /// on its preview. Shown again from the Launch groups page.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden: Vec<String>,
+    /// Patch 153: this PC's cycle order for a SeAT group (dragged on the Launch groups page);
+    /// characters not listed keep Your accounts' order after the listed ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
