@@ -8,6 +8,7 @@
   :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
           --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --warn:#f0c040; --bad:#f08a8a; --sky:#7fb4ff; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; margin: 0; overflow: hidden; }
   body { background: var(--bg); color: var(--text); font: 13px/1.45 "Segoe UI", system-ui, sans-serif; display: grid; grid-template-rows: 40px 1fr; user-select: none; }
   header { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
@@ -84,6 +85,8 @@
   .now .say { font-size: 15.5px; line-height: 1.4; }
   .now .say.ok { color: var(--ok); }
   .now ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+  .btn.go { border-color: #4e7f12; background: #18260a; color: var(--ok); font-size: 14px; padding: 6px 14px; font-weight: 600; }
+  .btn.go:hover { border-color: var(--ok); }
   #log { flex: 1; overflow-y: auto; min-height: 60px; font-size: 12px; }
   #log div { padding: 2px 0; border-top: 1px solid #202026; }
   #log div:first-child { border-top: 0; }
@@ -158,7 +161,9 @@
       <div class="zoomsaid" id="mapZoom"></div>
     </div>
     <div id="panel">
-      <div class="card now"><h2>Do now</h2><div class="say" id="say">Starting…</div><ul id="also"></ul></div>
+      <div class="card now"><h2>Do now</h2><div class="say" id="say">Starting…</div>
+        <div class="row" id="ask" hidden><button class="btn go" id="zoomYes">Yes, zoomed all the way out</button></div>
+        <ul id="also"></ul></div>
       <div class="card small muted" id="mapNote">Wheel: zoom (on the picture and the map). Drag: move. Double-click: all of it.</div>
       <div class="card" style="flex: 1; display: flex; flex-direction: column; min-height: 0"><div class="small muted" style="margin-bottom: 4px">What happened</div><div id="log"></div></div>
     </div>
@@ -478,6 +483,8 @@
   }
   for (const h of document.querySelectorAll(".step.fold h3")) h.addEventListener("click", () => h.closest(".step").classList.toggle("open"));
   let firstStatus = true, lastEvent = 0, lookingSince = null;
+  // Asked once each time a planet is picked: is EVE zoomed all the way out on it?
+  let zoomedOutOn = null;
   function onEvents(s) {
     if (firstStatus) { firstStatus = false; for (const ev of s.events || []) lastEvent = Math.max(lastEvent, ev.id); }
     for (const ev of s.events || []) {
@@ -541,8 +548,9 @@
     setState(5, s.autosave ? "autosave on" : "autosave off", s.autosave ? "ok" : "warn");
     // Do now.
     if (!pose && (own || (bor && bor.loaded))) lookingSince = lookingSince || Date.now(); else lookingSince = null;
-    const [say, also, ok] = tips(s);
+    const [say, also, ok, ask] = tips(s);
     $("say").textContent = say; $("say").className = "say" + (ok ? " ok" : "");
+    $("ask").hidden = !ask;
     $("also").innerHTML = also.map((t) => `<li>${esc(t)}</li>`).join("");
     const badge = $("badge");
     badge.textContent = pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
@@ -556,6 +564,7 @@
     if (cap.trouble) also.push(cap.trouble);
     if (cap.fps && cap.fps < 40) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second. If that's NVIDIA's Background Application Max Frame Rate, set it Off for exefile.exe while scanning (NVIDIA Control Panel → Manage 3D settings → Program settings).`);
     if (!planet) return ["Pick the planet you have open in EVE (1).", also];
+    if (zoomedOutOn !== planet.planet_id) return [`Open ${planet.name} in EVE. Is it zoomed all the way out (mouse wheel back as far as it goes)?`, also, false, true];
     if (!s.edge) {
       const seek = s.edge_seek;
       if (seek && seek.missing_ms > 1500) return [`Zoom all the way out in EVE (mouse wheel, as far as it goes): ${planet.name} looks bigger than a zoomed-out planet.`, also];
@@ -592,6 +601,17 @@
   }
 
   // ---------- commands ----------
+  $("zoomYes").addEventListener("click", () => {
+    if (!planet) return;
+    zoomedOutOn = planet.planet_id;
+    $("ask").hidden = true;
+    // Take the edge from this picture straight away (it's also found by itself).
+    if (status && !status.edge) {
+      invoke("planetscan_edge", { find: true })
+        .then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok"))
+        .catch((e) => log(String(e), "warn"));
+    }
+  });
   $("clickEdge").addEventListener("click", () => setClick(clickMode === "edge" ? null : "edge", "Click once anywhere on the planet's edge"));
   $("findEdge").addEventListener("click", () => invoke("planetscan_edge", { find: true }).then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok")).catch((e) => log(String(e), "bad")));
   $("pointList").addEventListener("click", () => { listClicks = []; setClick(clickMode === "list" ? null : "list", "Click 'No filter' in EVE's resource list (on the picture)"); });
