@@ -362,13 +362,13 @@ impl Session {
 
         // The edge: found once (zoomed all the way out) and then kept; Auto-zoom follows it.
         if self.edge_r.is_none() && self.edge_auto && self.frames % 15 == 1 {
-            if let Some(r) = sky::rim_radius(&pic, None) {
+            if let Some(r) = sky::rim_radius(&pic, None, self.lens(), self.ui.as_ref()) {
                 self.edge_r = Some(r);
                 self.mask = None;
             }
         } else if self.auto_zoom && self.frames % 15 == 0 {
             if let Some(r0) = self.edge_r {
-                if let Some(r) = sky::rim_radius(&pic, Some(r0)) {
+                if let Some(r) = sky::rim_radius(&pic, Some(r0), self.lens(), self.ui.as_ref()) {
                     if (r - r0).abs() > r0 * 0.015 {
                         self.edge_r = Some(r);
                         self.mask = None;
@@ -1109,7 +1109,7 @@ pub fn planetscan_edge(engine: tauri::State<'_, Engine>, r: Option<f64>, find: O
     s.mask = None;
     if find == Some(true) {
         let f = frame.ok_or("no picture yet")?;
-        let found = sky::rim_radius(&Pic { w: f.w, h: f.h, bgra: &f.bgra }, None).ok_or("couldn't find the planet's edge: zoom all the way out, or click the edge")?;
+        let found = sky::rim_radius(&Pic { w: f.w, h: f.h, bgra: &f.bgra }, None, lens_for(f.w), s.ui.as_ref()).ok_or("couldn't find the planet's edge: zoom all the way out in EVE, or click the edge")?;
         s.edge_r = Some(found);
         s.edge_auto = true;
         return Ok(Some(found));

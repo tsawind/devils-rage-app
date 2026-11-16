@@ -127,7 +127,7 @@
       <div class="row"><select id="client" style="flex: 1"></select><button class="btn" id="reload" title="Look for clients and planets again">↻</button></div>
       <div class="small muted" style="margin-top: 4px">Open the planet in EVE and pick it here. This page only watches the picture; it never clicks or types in EVE.</div>
       <div id="planets"></div>
-      <div class="legend" title="The corp's scans of each resource; hover a square for who and when"><span><i class="sq fresh"></i>under 7 d</span><span><i class="sq old"></i>older</span><span><i class="sq stale"></i>none / 14 d+</span><span><i class="sq part"></i>part</span><span><i class="sq me"></i>yours</span></div>
+      <div class="legend" title="The corp's scans of each resource; hover a square for who and when"><span><i class="sq fresh"></i>&lt; 7 d</span><span><i class="sq old"></i>older</span><span><i class="sq stale"></i>14 d+ / none</span><span><i class="sq part"></i>part</span><span><i class="sq me"></i>yours</span></div>
       <label class="tog" title="Once a planet's own colours are mapped, the app can tell which planet EVE shows and switch to it"><input type="checkbox" id="autoPlanet"> Switch planet by itself (mapped planets)</label>
     </div></div>
 
@@ -146,8 +146,7 @@
       <div class="small muted">The stars and nebula behind the planet never move, so the sky tells which way the camera faces. Each planet records its own sky as you turn it (until then it borrows another planet's).</div>
       <div class="kv" id="skyFacts"></div>
       <div class="row"><button class="btn" id="findSky" title="Drop the lock and find the facing from the sky alone">Find by the sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button><label class="tog" style="margin: 0"><input type="checkbox" id="showSky"> Show the sky map</label></div>
-      <div class="row" id="importRow" hidden><button class="btn" id="importSky">Use the old scanner's sky for this planet</button></div>
-      <details id="pointOut"><summary>No sky in this system yet? Point out buildings</summary>
+      <details id="pointOut"><summary>Point out buildings (first lock in a system)</summary>
         <div class="small muted">Click one of your buildings in EVE so its network shows. Pick a building below, click it on the picture; three spread out lock on, then turn the planet slowly to record its sky.</div>
         <div class="pins" id="pins"></div>
         <div class="row"><button class="btn" id="lockPins" disabled>Lock on</button><button class="btn" id="clearPins">Clear</button></div>
@@ -218,6 +217,13 @@
   const ago = (at) => { if (!at) return ""; const d = (Date.now() / 1000 - at) / 86400; return d < 1 ? `${Math.max(1, Math.round(d * 24))} h ago` : `${Math.round(d)} d ago`; };
   const systemName = (p) => (p ? String(p.name).replace(/\s+[IVXLCDM]+$/i, "") : "");
   const resourcesOf = (p) => RESOURCES[p ? p.type : ""] || [];
+  const numeral = (p) => {
+    const m = /\s([IVXLC]+)$/.exec(p.name || ""), v = { I: 1, V: 5, X: 10, L: 50, C: 100 };
+    if (!m) return 999;
+    let n = 0;
+    for (let i = 0; i < m[1].length; i++) { const a = v[m[1][i]], b = v[m[1][i + 1]] || 0; n += a < b ? -a : a; }
+    return n;
+  };
 
   function log(text, cls) {
     const div = document.createElement("div");
@@ -256,7 +262,7 @@
   }
   async function loadPlanets() {
     const data = await invoke("piscan_planets").catch((e) => { log("SeAT: " + e, "bad"); return null; });
-    planets = (data && data.planets) || [];
+    planets = ((data && data.planets) || []).sort((a, b) => systemName(a).localeCompare(systemName(b)) || numeral(a) - numeral(b));
     renderPlanets();
     if (!planet) {
       const wanted = planets.find((p) => p.planet_id === settings.planet) || planets.find((p) => (p.characters || []).some((c) => c.name === me)) || planets[0];
@@ -324,36 +330,12 @@
     };
     if (changed && !quiet) log(`Planet: ${p.name}`);
     await invoke("planetscan_planet", { planet: info(p), system: systemOf(p).map(info) }).catch((e) => log("Couldn't load the planet's maps: " + e, "bad"));
-    checkOldSky();
   }
   function renderResources() {
     const sel = $("resource"); sel.innerHTML = "";
     sel.append(new Option("Bare planet (No filter)", ""));
     resourcesOf(planet).forEach((r) => sel.append(new Option(r, r)));
   }
-
-  // The old scanner kept its sky in this page's own storage (IndexedDB "piscan", key sky-<system>).
-  let oldSky = null;
-  function checkOldSky() {
-    oldSky = null; $("importRow").hidden = true;
-    if (!planet || systemOf(planet).some((p) => mapInfo(p, "sky"))) return;
-    try {
-      const req = indexedDB.open("piscan", 1);
-      req.onupgradeneeded = () => req.result.createObjectStore("kv");
-      req.onsuccess = () => {
-        try {
-          const get = req.result.transaction("kv").objectStore("kv").get("sky-" + systemName(planet));
-          get.onsuccess = () => { if (get.result) { oldSky = new Uint8Array(get.result); $("importRow").hidden = false; } };
-        } catch {}
-      };
-    } catch {}
-  }
-  $("importSky").addEventListener("click", async () => {
-    if (!oldSky || !planet) return;
-    let bin = ""; for (let i = 0; i < oldSky.length; i += 8192) bin += String.fromCharCode.apply(null, oldSky.subarray(i, i + 8192));
-    const said = await invoke("planetscan_import_sky", { planetId: planet.planet_id, data: btoa(bin) }).catch((e) => "Couldn't: " + e);
-    log(`${planet.name}: ${said}`, "ok"); $("importRow").hidden = true;
-  });
 
   // ---------- the picture ----------
   const shot = $("shot"), sctx = shot.getContext("2d");
@@ -662,6 +644,7 @@
     badge.textContent = pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.edge ? "Looking on the sky…" : "Edge not set";
     badge.className = "badge " + (pose && pose.placed ? "ok" : "warn");
   }
+  let pointOutFor = null;
   function tips(s) {
     const also = [];
     const cap = s.capture || {};
@@ -674,7 +657,7 @@
     const pose = s.pose, run = s.run;
     if (!pose) {
       const any = (s.sky && (s.sky.own || (s.sky.borrowed && s.sky.borrowed.loaded)));
-      if (!any) return ["No sky recorded in this system yet: point out three of your buildings (3), then turn the planet slowly.", also];
+      if (!any) { if (pointOutFor !== planet.planet_id) { pointOutFor = planet.planet_id; $("pointOut").open = true; } return ["No sky recorded in this system yet: point out three of your buildings (3), then turn the planet slowly all the way round.", also]; }
       if (s.find && !s.find.sure) also.push(`Best guess not sure yet (nebula ${pct(s.find.coarse)}, stars ${pct(s.find.stars)}).`);
       return ["Looking for the planet on the sky… turn the planet a little.", also];
     }
@@ -690,7 +673,7 @@
     }
     const next = nextToScan(planet);
     if (!next) return [`${planet.name} is up to date for the corp. Open the next planet in EVE.`, also, true];
-    if (next.row === 0) return ["Once per planet: set EVE to No filter, then Scan: the app maps this planet's own colours.", also];
+    if (next.row === 0) return [`Once per planet: check EVE shows ${planet.name}, set EVE to No filter, then Scan: the app maps this planet's own colours.`, also];
     return [`Click ${next.resource} in EVE's Scan panel, then Scan${$("autoNext").checked ? " (or it starts when EVE switches)" : ""}.`, also];
   }
 

@@ -933,52 +933,98 @@ pub fn follow(view: &View, sky: &mut Sky, around: (f64, f64), rings: Option<(Rin
 // ---------------------------------------------------------------------------------------------
 // The planet's edge.
 
-/// EVE always puts the planet in the middle of the window, so only the radius is unknown: along
-/// rays from the middle, where the picture drops from planet to space and stays dark. Median
-/// over the rays. With `near`, only within ±20 % of that radius.
-pub fn rim_radius(pic: &Pic, near: Option<f64>) -> Option<f64> {
+/// Fully zoomed out, every planet fills the same angle on screen: its edge sits about 0.26 lens
+/// lengths from the middle (196 px at 1280 wide, 289 px at 1914, on barren, lava, oceanic and gas).
+pub const ZOOMED_OUT_RIM: f64 = 0.26;
+
+/// EVE always puts the planet in the middle of the window, so only the radius is unknown. Along
+/// 360 rays from the middle, every place where the picture steps down (brighter inside than
+/// outside) votes for its radius; the radius most rays agree on is the planet's edge. A window's
+/// straight edge or a nebula's patch crosses the rays at all different radii, so it can't win.
+/// Searched around where a zoomed-out planet's edge is (or within ±15 % of `near`), skipping
+/// EVE's windows when they're known.
+pub fn rim_radius(pic: &Pic, near: Option<f64>, lens: f64, ui: Option<&UiMask>) -> Option<f64> {
     let (cx, cy) = (pic.w as f64 / 2.0, pic.h as f64 / 2.0);
-    let max_r = ((pic.w * pic.w + pic.h * pic.h) as f64).sqrt() / 2.0;
-    let (from, to) = near.map(|n| (n * 0.8, n * 1.2)).unwrap_or((30.0, max_r));
-    let step = (pic.w as f64 / 640.0).max(2.0);
-    let mut found = Vec::new();
-    for i in 0..120 {
-        let a = i as f64 / 120.0 * 2.0 * PI;
+    let r0 = near.unwrap_or(ZOOMED_OUT_RIM * lens);
+    let (lo, hi) = match near {
+        Some(n) => (n * 0.85, n * 1.15),
+        None => (r0 * 0.6, r0 * 1.5),
+    };
+    let step = (r0 / 200.0).max(1.0);
+    let bin = r0 * 0.005;
+    let bins = ((hi - lo) / bin).ceil() as usize + 1;
+    let mut votes = vec![0.0f64; bins];
+    let ui = ui.filter(|u| u.w == pic.w && u.h == pic.h && u.ready());
+    const SIDE: usize = 4;
+    const RAYS: usize = 360;
+    let mut rays_used = 0usize;
+    let mut prof: Vec<f64> = Vec::new();
+    for i in 0..RAYS {
+        let a = i as f64 / RAYS as f64 * 2.0 * PI;
         let (dx, dy) = (a.cos(), a.sin());
-        let mut prof: Vec<(f64, f64)> = Vec::new();
-        let mut r = from - 4.0 * step;
-        while r < to + 6.0 * step {
+        prof.clear();
+        let first = lo - (SIDE as f64 + 1.0) * step;
+        let mut r = first;
+        while r <= hi + (SIDE as f64 + 1.0) * step {
             let (x, y) = (cx + dx * r, cy + dy * r);
-            if x < 0.0 || y < 0.0 || x >= pic.w as f64 || y >= pic.h as f64 {
-                break;
-            }
-            prof.push((r, pic.lum(x as usize, y as usize) as f64));
+            let v = if x < 0.0 || y < 0.0 || x >= pic.w as f64 || y >= pic.h as f64 || ui.is_some_and(|u| u.blocked(x as usize, y as usize)) {
+                f64::NAN
+            } else {
+                pic.lum(x as usize, y as usize) as f64
+            };
+            prof.push(v);
             r += step;
         }
-        if prof.len() < 12 {
+        if prof.len() < 2 * SIDE + 3 {
             continue;
         }
-        let tail = prof[prof.len() - 6..].iter().map(|p| p.1).sum::<f64>() / 6.0;
-        let mut k = prof.len() as i64 - 12;
-        while k >= 4 {
-            let ku = k as usize;
-            if prof[ku].0 >= from && prof[ku].0 <= to {
-                let inside = (prof[ku - 4].1 + prof[ku - 3].1 + prof[ku - 2].1) / 3.0;
-                let outside = prof[ku + 2..(ku + 12).min(prof.len())].iter().map(|p| p.1).fold(0.0, f64::max);
-                if inside - outside > 12.0 && outside < tail + 25.0 {
-                    found.push(prof[ku].0);
-                    break;
-                }
+        // Inside minus outside, over SIDE samples each side.
+        let mut g = vec![f64::NAN; prof.len()];
+        for k in SIDE..prof.len() - SIDE {
+            let inside: f64 = prof[k - SIDE..k].iter().sum();
+            let outside: f64 = prof[k + 1..=k + SIDE].iter().sum();
+            g[k] = (inside - outside) / SIDE as f64;
+        }
+        let mut peaks: Vec<(f64, f64)> = Vec::new();
+        for k in SIDE + 1..prof.len() - SIDE - 1 {
+            let v = g[k];
+            if v.is_nan() || v < 10.0 || !(v >= g[k - 1]) || !(v > g[k + 1]) {
+                continue;
             }
-            k -= 1;
+            let rr = first + k as f64 * step;
+            if rr < lo || rr > hi {
+                continue;
+            }
+            peaks.push((v, rr));
+        }
+        if g.iter().any(|v| !v.is_nan()) {
+            rays_used += 1;
+        }
+        peaks.sort_by(|a, b| b.0.total_cmp(&a.0));
+        for &(v, rr) in peaks.iter().take(3) {
+            let b = ((rr - lo) / bin).round() as usize;
+            if b < bins {
+                votes[b] += (v / 40.0).min(1.0);
+            }
         }
     }
-    if found.len() < 15 {
+    if rays_used < RAYS / 4 {
         return None;
     }
-    found.sort_by(f64::total_cmp);
-    // The outer edge of EVE's atmosphere / lava glow sits about 3 % outside the surface.
-    Some(found[found.len() / 2] * 0.97)
+    // Smooth over ±2 bins (±1 % of the radius) and take the best.
+    let smooth: Vec<f64> = (0..bins).map(|b| (b.saturating_sub(2)..(b + 3).min(bins)).map(|k| votes[k]).sum()).collect();
+    let (best, &score) = smooth.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1))?;
+    if score < rays_used as f64 * 0.15 {
+        return None;
+    }
+    // Centre of the votes around the best bin.
+    let (mut sw, mut sr) = (0.0, 0.0);
+    for k in best.saturating_sub(2)..(best + 3).min(bins) {
+        sw += votes[k];
+        sr += votes[k] * (lo + k as f64 * bin);
+    }
+    // The visible edge, glow and all: the size the old scanner lined buildings up with.
+    Some(sr / sw)
 }
 
 /// Is the edge still where the disc says (not zoomed past it)? The strongest brightness step
@@ -1069,5 +1115,42 @@ mod tests {
         // Looking down past the planet at pitch 20°: the plane, about 2 radii out.
         let l = (0.0f32 * 0.0 + 0.28 * 0.28 + 1.0).sqrt();
         assert!(RINGS.hit(&[0.0, -0.28 / l, -1.0 / l], &axis, 4.0));
+    }
+
+    /// A lit disc of the zoomed-out size, half of it in shadow, with a bright window over one
+    /// side and a bright patch of nebula: the edge is found within 1 %. Zoomed in: nothing.
+    fn planet_picture(w: usize, h: usize, r: f64) -> Vec<u8> {
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let (dx, dy) = (x as f64 - w as f64 / 2.0, y as f64 - h as f64 / 2.0);
+                let mut v = ((x * 7 + y * 13) % 11) as u8; // speckle
+                if (dx * dx + dy * dy).sqrt() < r {
+                    v = if dx > -0.3 * r { 150 } else { 12 };
+                }
+                if x > w * 3 / 4 && y < h / 3 {
+                    v = 200; // a window
+                }
+                if (x as f64 - 0.2 * w as f64).hypot(y as f64 - 0.8 * h as f64) < 60.0 {
+                    v = v.max(90); // nebula
+                }
+                px[(y * w + x) * 4..(y * w + x) * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        px
+    }
+
+    #[test]
+    fn rim_found_at_the_zoomed_out_size() {
+        let (w, h) = (1280, 683);
+        let lens = 750.0;
+        let r = ZOOMED_OUT_RIM * lens;
+        let px = planet_picture(w, h, r);
+        let got = rim_radius(&Pic { w, h, bgra: &px }, None, lens, None).expect("found");
+        assert!((got - r).abs() < r * 0.01, "got {got}, want {r}");
+        let near = rim_radius(&Pic { w, h, bgra: &px }, Some(got), lens, None).expect("found near");
+        assert!((near - r).abs() < r * 0.01);
+        let zoomed = planet_picture(w, h, r * 2.2);
+        assert!(rim_radius(&Pic { w, h, bgra: &zoomed }, None, lens, None).is_none());
     }
 }
