@@ -28,6 +28,13 @@
   .step .n.done { background: #3b5f0f; }
   .step h3 { margin: 0 0 3px; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
   .step h3 .state { margin-left: auto; font-weight: 400; font-size: 11.5px; }
+  /* A finished step folds to its title line (click the title to open it again), so Scan stays on screen. */
+  .step.fold h3 { cursor: pointer; }
+  .step.fold.done h3::after { content: "▸"; color: var(--muted); font-size: 11px; }
+  .step.fold.done.open h3::after { content: "▾"; }
+  .step.fold.done:not(.open) .more { display: none; }
+  .legend { display: flex; gap: 7px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .legend .sq { display: inline-block; vertical-align: -3px; margin-right: 3px; }
   .muted { color: var(--muted); } .small { font-size: 12px; } .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
   select { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 4px 7px; font: inherit; max-width: 100%; }
   .btn { border: 1px solid var(--line); border-radius: 7px; background: #121216; color: var(--text); padding: 4px 10px; }
@@ -89,13 +96,14 @@
   #log div { padding: 2px 0; border-top: 1px solid #202026; }
   #log div:first-child { border-top: 0; }
   #log .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
-  .mapbox { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; min-width: 0; }
-  #flat { display: block; width: 720px; height: 360px; image-rendering: pixelated; background: #0a0a0d; border: 1px solid var(--line); border-radius: 7px; }
+  .mapbox { display: grid; grid-template-columns: minmax(0, 720px) minmax(170px, 1fr); gap: 10px; align-items: start; min-width: 0; }
+  #flat { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; image-rendering: pixelated; background: #0a0a0d; border: 1px solid var(--line); border-radius: 7px; }
   .maptext { font-size: 12px; min-width: 0; }
   .maptext h4 { margin: 0 0 2px; font-size: 14px; }
   .bigpct { font-size: 34px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
   .scale { height: 10px; border-radius: 3px; background: linear-gradient(90deg, #14102a, #152a50, #12452f, #2c6f0a, #8a7d05, #a85a08, #b0180c, #c7c0bf); margin: 4px 0 2px; }
   /* the done pop-up */
+  @media (max-width: 1700px) { #right { grid-template-columns: 1fr 300px; } .now .say { font-size: 14.5px; } }
   #pop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
   #pop .box { width: 480px; border: 2px solid #4e7f12; background: #10180a; border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 40px #000; }
   #pop.err .box { border-color: var(--red); background: #1c0d0e; }
@@ -119,18 +127,22 @@
       <div class="row"><select id="client" style="flex: 1"></select><button class="btn" id="reload" title="Look for clients and planets again">↻</button></div>
       <div class="small muted" style="margin-top: 4px">Open the planet in EVE and pick it here. This page only watches the picture; it never clicks or types in EVE.</div>
       <div id="planets"></div>
+      <div class="legend" title="The corp's scans of each resource; hover a square for who and when"><span><i class="sq fresh"></i>under 7 d</span><span><i class="sq old"></i>older</span><span><i class="sq stale"></i>none / 14 d+</span><span><i class="sq part"></i>part</span><span><i class="sq me"></i>yours</span></div>
       <label class="tog" title="Once a planet's own colours are mapped, the app can tell which planet EVE shows and switch to it"><input type="checkbox" id="autoPlanet"> Switch planet by itself (mapped planets)</label>
     </div></div>
 
-    <div class="step"><div class="n" id="n2">2</div><div>
+    <div class="step fold"><div class="n" id="n2">2</div><div>
       <h3>The planet's edge <span class="state" id="s2"></span></h3>
+      <div class="more">
       <div class="small muted">Zoomed all the way out in EVE (every planet is then about the same size). Found by itself; set once, it stays.</div>
       <div class="row"><button class="btn" id="findEdge">Find edge</button><button class="btn" id="clickEdge">Click the edge</button></div>
       <label class="tog" title="Follow the edge when you zoom in EVE (off: the size stays where it was set)"><input type="checkbox" id="autoZoom"> Follow zoom</label>
+      </div>
     </div></div>
 
-    <div class="step"><div class="n" id="n3">3</div><div>
+    <div class="step fold"><div class="n" id="n3">3</div><div>
       <h3>Sky lock <span class="state" id="s3"></span></h3>
+      <div class="more">
       <div class="small muted">The stars and nebula behind the planet never move, so the sky tells which way the camera faces. Each planet records its own sky as you turn it (until then it borrows another planet's).</div>
       <div class="kv" id="skyFacts"></div>
       <div class="row"><button class="btn" id="findSky" title="Drop the lock and find the facing from the sky alone">Find by the sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button><label class="tog" style="margin: 0"><input type="checkbox" id="showSky"> Show the sky map</label></div>
@@ -140,21 +152,21 @@
         <div class="pins" id="pins"></div>
         <div class="row"><button class="btn" id="lockPins" disabled>Lock on</button><button class="btn" id="clearPins">Clear</button></div>
       </details>
+      </div>
     </div></div>
 
     <div class="step"><div class="n" id="n4">4</div><div>
       <h3>Scan <span class="state" id="s4"></span></h3>
-      <div class="small muted">Zoomed all the way out. In EVE's Scan panel, drag both ends of the colour band right out (once). Pick a resource in EVE, press Scan, spin the planet (over the poles too) until 99 %.</div>
       <div class="row"><button class="btn go big" id="scan">Scan</button></div>
       <div class="row"><button class="btn" id="stop" disabled>Stop</button><button class="btn" id="saveNow" disabled title="Save what's scanned so far (under 99 %)">Save now</button><select id="resource" title="Used when the app can't see EVE's list"></select></div>
       <label class="tog"><input type="checkbox" id="autoNext" checked> Start the next scan when EVE switches resource</label>
       <div class="small muted" style="margin-top: 4px">EVE's resource list: <span id="listSaid"></span> <button class="btn" id="pointList" style="padding: 1px 7px">Point it out</button></div>
+      <div class="small muted" style="margin-top: 4px">Zoomed all the way out. In EVE's Scan panel, drag both ends of the colour band right out (once). Pick a resource in EVE, press Scan, spin the planet (over the poles too) until 99 %.</div>
     </div></div>
 
     <div class="step"><div class="n" id="n5">5</div><div>
       <h3>Save for the corp <span class="state" id="s5"></span></h3>
       <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (and each planet's own colours and sky)</label>
-      <div class="small muted" style="margin-top: 4px">The squares in 1 are the corp's scans: <span class="ok">green</span> under 7 days old, <span class="warn">amber</span> older, <span class="bad">red</span> over 14 days or none, white ring = yours. Hover for who and when.</div>
     </div></div>
   </div>
 
@@ -266,7 +278,7 @@
     box.innerHTML = "";
     if (!planets.length) { box.innerHTML = '<div class="small muted" style="padding: 6px">No planets yet (SeAT signed in? ↻)</div>'; return; }
     const head = document.createElement("div"); head.className = "plhead";
-    head.innerHTML = "<span style='text-align: left'>Planet</span><span title='Its own sky recorded'>sky</span><span title='Its own colours mapped'>own</span><span style='grid-column: span 5'>resources (EVE's order)</span>";
+    head.innerHTML = "<span style='text-align: left'>Planet</span><span title='Its own sky recorded'>sky</span><span title='Its own colours mapped'>own</span><span style='grid-column: span 5' title='In the order EVE lists them'>resources</span>";
     box.append(head);
     const shown = planet ? systemOf(planet) : planets;
     for (const p of shown) {
@@ -566,7 +578,9 @@
   function setState(n, text, cls, done) {
     $("s" + n).textContent = text || ""; $("s" + n).className = "state " + (cls || "muted");
     $("n" + n).classList.toggle("done", !!done);
+    $("n" + n).closest(".step").classList.toggle("done", !!done);
   }
+  for (const h of document.querySelectorAll(".step.fold h3")) h.addEventListener("click", () => h.closest(".step").classList.toggle("open"));
   function popup(title, text, next, err) {
     $("popTitle").textContent = title; $("popText").textContent = text; $("popNext").textContent = next || "";
     $("pop").classList.toggle("err", !!err); $("pop").style.display = "flex";
@@ -641,7 +655,8 @@
     const [say, also, ok] = tips(s);
     $("say").textContent = say; $("say").className = "say" + (ok ? " ok" : "");
     $("also").innerHTML = also.map((t) => `<li>${esc(t)}</li>`).join("");
-    $("missing").textContent = run && !run.done && run.missing ? "Not seen yet: " + run.missing : "";
+    const [where, how] = run && !run.done && run.missing ? run.missing.split(": ") : [];
+    $("missing").textContent = where ? `Not seen yet: ${where}.` + (how ? ` ${how[0].toUpperCase()}${how.slice(1)}.` : "") : "";
     // Badge on the picture.
     const badge = $("badge");
     badge.textContent = pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.edge ? "Looking on the sky…" : "Edge not set";
@@ -671,7 +686,7 @@
       if (run.paused === "EVE shows another resource") return [`EVE shows another resource: click ${run.resource || "No filter"} in EVE, or Stop.`, also];
       if (run.resource && !s.bare) also.push("This planet's own colours aren't mapped yet: readings are rougher. Do a No filter pass once.");
       if (run.resource) also.push("EVE's colour band: both ends dragged right out.");
-      return [`Spin the planet: ${pct(run.coverage)} of ${run.resource || "its own colours"}${run.missing ? ", still missing " + run.missing.split(":")[0] : ""}.`, also];
+      return [`Spin the planet: ${pct(run.coverage)} of ${run.resource || "its own colours"}${run.missing ? "; the rest is " + run.missing.split(":")[0] : ""}.`, also];
     }
     const next = nextToScan(planet);
     if (!next) return [`${planet.name} is up to date for the corp. Open the next planet in EVE.`, also, true];
