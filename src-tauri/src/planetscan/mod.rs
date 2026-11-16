@@ -493,6 +493,7 @@ impl Session {
         }
 
         // ---- the facing ----
+        let mut locked_said: Option<String> = None;
         let tries = self.skies_to_try();
         if let Some(pose) = self.pose.as_mut() {
             pose.placed = false;
@@ -560,7 +561,7 @@ impl Session {
                 }
                 if was_none {
                     let whose = if Some(id) == self.planet_id() { "this planet's own sky".to_string() } else { format!("{}'s sky", self.planet_name(id)) };
-                    self.event(json!({ "kind": "locked", "text": format!("Locked on by {whose}.") }));
+                    locked_said = Some(format!("Locked on by {whose}."));
                 }
             }
         }
@@ -763,7 +764,7 @@ impl Session {
                 self.base_dirty = (false, self.base_dirty.1, self.base_dirty.2, Instant::now());
             }
         }
-        if let Some(text) = boot_said {
+        if let Some(text) = boot_said.or(locked_said) {
             self.event(json!({ "kind": "locked", "text": text }));
         }
 
