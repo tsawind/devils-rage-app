@@ -483,7 +483,7 @@
     for (const ev of s.events || []) {
       if (ev.id <= lastEvent) continue;
       lastEvent = ev.id;
-      const cls = ev.kind === "error" ? "bad" : ["base-done", "map-saved", "locked", "saved"].includes(ev.kind) ? "ok" : "";
+      const cls = ev.kind === "error" ? "bad" : ev.kind === "warn" ? "warn" : ["base-done", "map-saved", "locked", "saved"].includes(ev.kind) ? "ok" : "";
       log(ev.text, cls);
       if (ev.kind === "map-saved") {
         const p = planets.find((q) => q.planet_id === ev.planet_id);
@@ -554,7 +554,7 @@
     const cap = s.capture || {}, base = s.base_map || {};
     if (!s.client) return ["Open EVE and log in a character, then pick it at the top left.", also];
     if (cap.trouble) also.push(cap.trouble);
-    if (cap.fps && cap.fps < 40) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second: for 60, keep EVE in front and lift any frame-rate limit in EVE's settings.`);
+    if (cap.fps && cap.fps < 40) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second. If that's NVIDIA's Background Application Max Frame Rate, set it Off for exefile.exe while scanning (NVIDIA Control Panel → Manage 3D settings → Program settings).`);
     if (!planet) return ["Pick the planet you have open in EVE (1).", also];
     if (!s.edge) {
       const seek = s.edge_seek;

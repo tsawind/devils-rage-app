@@ -111,6 +111,9 @@ impl BootRun {
 /// Pictures a start from nothing watches before it works it out (plus the first).
 const BOOT_PICTURES: usize = 12;
 
+/// Looks at EVE's windows before a sky is started (so they aren't recorded as sky).
+const BOOT_WINDOW_LOOKS: u32 = 8;
+
 #[derive(Default)]
 struct Rate {
     count: u32,
@@ -595,10 +598,11 @@ impl Session {
 
         // ---- no sky in the system yet (or a fresh one asked for): start one from nothing ----
         let mut boot_said: Option<String> = None;
+        let mut base_restarted = false;
         let want_boot = self.planet.is_some() && self.pose.is_none() && (tries.is_empty() || self.new_sky);
         if !want_boot {
             self.boot = None;
-        } else if self.ui.as_ref().is_some_and(|u| u.ready()) && self.rim_ok.0 {
+        } else if self.ui.as_ref().is_some_and(|u| u.views >= BOOT_WINDOW_LOOKS) && self.rim_ok.0 {
             let pid = self.planet.as_ref().map(|p| p.id).unwrap_or(0);
             let b = self.boot.get_or_insert_with(BootRun::new);
             if b.job.as_ref().is_some_and(|j| j.is_finished()) {
@@ -636,6 +640,15 @@ impl Session {
                         }
                         let cov = fresh.coverage();
                         self.skies.insert(pid, fresh);
+                        // A fresh sky puts longitude 0 somewhere new: a map made on an older sky no longer fits.
+                        if self.base.as_ref().is_some_and(|b| b.version > 0) {
+                            self.base = None;
+                            self.base_last = None;
+                            self.base_cov = (0.0, None);
+                            self.base_done = false;
+                            self.base_dirty = (false, false, 0.0, Instant::now());
+                            base_restarted = true;
+                        }
                         self.pose = Some(Pose { yaw: at.0, pitch: at.1, mirrored: false, sky_of: Some(pid), placed: false, coarse: r.coarse, stars: 0.0, level: sky::MEDIUM, before: None });
                         self.lost_since = None;
                         self.last_paint = Some((at.0, at.1, Instant::now()));
@@ -648,7 +661,7 @@ impl Session {
                     other => {
                         self.boot = None;
                         self.boot_note = Some(match other {
-                            Some(r) if r.turned < 12.0 * DEG => "It hardly turned while I watched: turn the planet sideways (left or right), slowly and steadily.".to_string(),
+                            Some(r) if r.turned < 20.0 * DEG => "It didn't turn far enough while I watched (it needs about 20° in 3 s): keep turning the planet sideways, slowly and steadily.".to_string(),
                             Some(r) if r.fitted() < 3 => "Too fast to follow: turn the planet sideways a bit slower.".to_string(),
                             Some(_) => "Couldn't tell which way is up yet: turn sideways (left or right), not up and down.".to_string(),
                             None => "That didn't work out: turn the planet sideways, slowly.".to_string(),
@@ -783,19 +796,21 @@ impl Session {
             if let (Some(path), Some(base)) = (self.map_path(pid, "bare"), self.base.as_ref()) {
                 jobs.push(Job::WriteFile { path, bytes: base.to_bytes() });
             }
-            let cov = self.base_cov.0;
-            let send = self.autosave && self.base_dirty.1 && cov - self.base_dirty.2 > 0.1 && self.base_dirty.3.elapsed() > Duration::from_secs(120);
-            if send {
-                self.save_base(jobs, true);
-            } else {
-                self.base_dirty = (false, self.base_dirty.1, self.base_dirty.2, Instant::now());
-            }
+            // To the corp at 99 %, on Save now, or when switching planets: not every few minutes (6 MB).
+            self.base_dirty = (false, self.base_dirty.1, self.base_dirty.2, Instant::now());
         }
         if let Some(text) = boot_said.or(locked_said) {
             self.event(json!({ "kind": "locked", "text": text }));
         }
+        if base_restarted {
+            if let Some(path) = self.planet_id().and_then(|pid| self.map_path(pid, "bare")) {
+                let _ = std::fs::remove_file(&path);
+            }
+            self.event(json!({ "kind": "warn", "text": "This planet's map starts over: it was made on an older sky, and a fresh sky moves where longitude 0 is." }));
+        }
 
-        // Keep this planet's own sky on the PC every 20 s, and with the corp every 2 minutes.
+        // Keep this planet's own sky on the PC every 20 s; to the corp once it's 90 % recorded (so
+        // the system's other planets can find themselves on it), and with the planet map.
         if let Some(pid) = self.planet_id() {
             if let (Some(d), Some(sky)) = (self.sky_dirty.get(&pid).copied(), self.skies.get(&pid)) {
                 if d.0 && d.3.elapsed() > Duration::from_secs(20) {
@@ -803,7 +818,7 @@ impl Session {
                         jobs.push(Job::WriteFile { path, bytes: sky.to_bytes() });
                     }
                     let cov = sky.coverage();
-                    let send = d.1 && (cov - d.2 > 0.05) && d.3.elapsed() > Duration::from_secs(120);
+                    let send = self.autosave && d.1 && d.2 < 0.9 && cov >= 0.9;
                     if send {
                         jobs.push(Job::SaveMap { planet: pid, kind: "sky", bytes: sky.to_bytes(), coverage: cov, meta: sky_meta(sky), character_id: self.character_id });
                     }
@@ -907,6 +922,7 @@ impl Session {
     fn status(&self, engine: &Inner) -> serde_json::Value {
         let boot = if self.pose.is_none() && (self.boot.is_some() || self.boot_note.is_some()) {
             json!({
+                "window_looks": self.ui.as_ref().map(|u| u.views).unwrap_or(0), "window_looks_needed": BOOT_WINDOW_LOOKS,
                 "pictures": self.boot.as_ref().map(|b| b.frames.len()).unwrap_or(0), "of": BOOT_PICTURES + 1,
                 "working": self.boot.as_ref().is_some_and(|b| b.job.is_some()), "note": self.boot_note,
             })
@@ -1728,30 +1744,50 @@ pub fn planetscan_save_maps(engine: tauri::State<'_, Engine>) -> Result<(), Stri
 pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) -> Result<tauri::ipc::Response, String> {
     let inner = engine.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (w, h, rgb) = {
+        // Inside the lock only a quick copy: the scanner keeps going while the picture is made.
+        enum Snapshot {
+            Planet(usize, usize, Vec<u8>),
+            Sky { w: usize, h: usize, sum: Vec<f32>, n: Vec<u16>, mw: usize, mh: usize, msum: Vec<f32>, mn: Vec<u16> },
+            None,
+        }
+        let copy = {
             let s = inner.state.lock().unwrap();
             if kind == "planet" {
                 match s.base.as_ref() {
-                    Some(b) => (b.w, b.h, b.rgb_filled()),
-                    None => return tauri::ipc::Response::new(Vec::new()),
+                    Some(b) => Snapshot::Planet(b.w, b.h, b.rgb()),
+                    None => Snapshot::None,
                 }
             } else {
                 let id = s.planet_id().filter(|id| s.skies.contains_key(id)).or(s.borrowed);
-                let Some(sky) = id.and_then(|id| s.skies.get(&id)) else { return tauri::ipc::Response::new(Vec::new()) };
-                let m = &sky.levels[sky::FINE];
+                match id.and_then(|id| s.skies.get(&id)) {
+                    Some(sky) => {
+                        let (m, mm) = (&sky.levels[sky::FINE], &sky.levels[sky::MEDIUM]);
+                        Snapshot::Sky { w: m.w, h: m.h, sum: m.sum.clone(), n: m.n.clone(), mw: mm.w, mh: mm.h, msum: mm.sum.clone(), mn: mm.n.clone() }
+                    }
+                    None => Snapshot::None,
+                }
+            }
+        };
+        let (w, h, rgb) = match copy {
+            Snapshot::None => return tauri::ipc::Response::new(Vec::new()),
+            Snapshot::Planet(w, h, mut rgb) => {
+                base::fill_gaps(&mut rgb, w, h);
+                (w, h, rgb)
+            }
+            Snapshot::Sky { w, h, sum, n, mw, mh, msum, mn } => {
                 let scale = sky::SPECS[sky::FINE].scale * 0.8;
-                let mut out = vec![0u8; m.w * m.h * 3];
-                for i in 0..m.w * m.h {
-                    let px = if m.n[i] > 0 {
-                        let v = (40.0 + scale * m.sum[i] / m.n[i] as f32).clamp(0.0, 255.0) as u8;
+                let mscale = sky::SPECS[sky::MEDIUM].scale * 0.8;
+                let mut out = vec![0u8; w * h * 3];
+                for i in 0..w * h {
+                    let px = if n[i] > 0 {
+                        let v = (40.0 + scale * sum[i] / n[i] as f32).clamp(0.0, 255.0) as u8;
                         [v, v, v]
                     } else {
-                        // Not recorded yet: dark blue (the medium level shows through where it has sky).
-                        let mm = &sky.levels[sky::MEDIUM];
-                        let (row, col) = (i / m.w, i % m.w);
-                        let k = (row * mm.h / m.h) * mm.w + col * mm.w / m.w;
-                        if mm.n[k] > 0 {
-                            let v = (40.0 + sky::SPECS[sky::MEDIUM].scale * 0.8 * mm.sum[k] / mm.n[k] as f32).clamp(0.0, 255.0) as u8;
+                        // Not recorded at this level yet: the medium level shows through (bluish), else dark blue.
+                        let (row, col) = (i / w, i % w);
+                        let k = (row * mh / h) * mw + col * mw / w;
+                        if mn[k] > 0 {
+                            let v = (40.0 + mscale * msum[k] / mn[k] as f32).clamp(0.0, 255.0) as u8;
                             [v / 2, v / 2, v / 2 + 30]
                         } else {
                             [12, 16, 48]
@@ -1759,7 +1795,7 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
                     };
                     out[i * 3..i * 3 + 3].copy_from_slice(&px);
                 }
-                (m.w, m.h, out)
+                (w, h, out)
             }
         };
         let mut jpeg = Vec::with_capacity(1 << 20);

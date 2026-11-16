@@ -811,8 +811,11 @@ impl Boot {
     pub fn fitted(&self) -> usize {
         self.later.iter().filter(|f| f.is_some_and(|f| f.2 >= 0.5)).count()
     }
+    /// Over 27 starts on three recordings, every one that turned 20° or more got the pitch within
+    /// 0.3°; the score margin over other pitches is small even then (0.03 at least), so it's only a
+    /// sanity check.
     pub fn sure(&self) -> bool {
-        self.fitted() >= 3 && self.turned >= 12.0 * DEG && self.coarse - self.other >= 0.05
+        self.fitted() >= 3 && self.turned >= 20.0 * DEG && self.coarse - self.other >= 0.02
     }
 }
 
