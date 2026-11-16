@@ -48,6 +48,9 @@
   .meter i { display: block; height: 100%; background: var(--ok); width: 0; }
   .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
   .legend b { font-weight: 600; color: var(--text); }
+  .sky { border: 1px solid #2f3a52; background: #10141d; border-radius: 8px; padding: 7px 9px; margin-bottom: 8px; }
+  .sky h4 { margin: 0 0 3px; font-size: 13px; }
+  .sky h4 em { font-style: normal; font-size: 10.5px; color: var(--ok); border: 1px solid var(--ok); border-radius: 999px; padding: 0 6px; margin-left: 4px; }
   kbd { background: #0d0d10; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
 </style>
 </head>
@@ -68,15 +71,23 @@
         <div class="row"><select id="planet" style="width: 100%"></select></div>
         <div class="row"><button class="btn" id="record" title="Saves this client's picture 3 times a second (up to 2 minutes) on this PC, so the scan can be tuned on real pictures">● Record for tuning</button><span class="small muted" id="recordSaid"></span></div>
         <label class="small muted"><input type="checkbox" id="others"> Show the other planets here (scan them using a corp mate's buildings)</label>
+        <label class="small muted" title="The picture at the client's own size instead of 1280 wide: sharper stars for the sky lock, a little slower. Changing it keeps the edge and the lock."><input type="checkbox" id="fullSize"> Full-size pictures (sharper sky, a little slower)</label>
       </div></div>
       <div class="step"><div class="n">2</div><div>
         <h3>The planet's edge</h3>
-        <div class="muted small">EVE always puts the planet in the middle of the window, so only its size is needed: <b>Click the edge</b>, then click once anywhere on the planet's edge. Mouse wheel over the picture fine-tunes it. Zoomed in EVE after locking on? Click the edge again: it keeps the lock and works out the new distance.</div>
+        <div class="muted small">EVE always puts the planet in the middle of the window, so only its size is needed: <b>Click the edge</b>, then click once anywhere on the planet's edge. Mouse wheel over the picture fine-tunes it. Zoomed in EVE after locking on? Click the edge again: it keeps the lock and works out the new distance. With this system's sky recorded, the edge is found by itself.</div>
         <div class="row"><button class="btn red" id="rim3">Click the edge</button><button class="btn" id="fit">Find edge</button><span class="small muted" id="discInfo"></span></div>
         <label class="small muted" title="Off: if you zoom in EVE, press Click 3 on the edge again (it keeps the lock). On: the app looks for the edge itself, which can latch onto a lava glow."><input type="checkbox" id="follow" checked> Follow zoom by itself</label>
       </div></div>
       <div class="step"><div class="n">3</div><div>
         <h3>Lock on</h3>
+        <div class="sky" id="skyBox">
+          <h4>Sky lock<em>NEW</em></h4>
+          <div class="small">The stars and nebula behind the planet never move (David's idea), so the sky shows which way the camera faces, on <b>every planet in the system</b>, under any filter. <b>Once per system:</b> lock on below (any way), zoomed all the way out, then turn the planet slowly all the way round, a bit from above and below too: the sky is recorded as you turn (Scan doesn't need to be on). <b>After that:</b> open any planet in this system and it locks on by itself; scans stay on it.</div>
+          <div class="row"><span class="small" id="skyState">No sky recorded for this system yet.</span></div>
+          <div class="row"><button class="btn" id="skyFindBtn" title="Drop the current lock and find the facing from the sky alone (to compare with a lock from buildings)">Find by the sky</button><button class="btn" id="skyForget" title="Delete this system's sky from this PC (for example if it was recorded under a wrong lock). Lock on again and turn round to record it again.">Forget this system's sky</button><label class="small muted"><input type="checkbox" id="skyShow"> Show the sky map</label></div>
+          <div class="status" id="skyStatus"></div>
+        </div>
         <div class="small" style="margin-bottom: 6px"><b>Most exact:</b> in EVE double-click the planet (your command center jumps to the middle), press <button class="btn red" id="followCc">Follow my command center</button>, then zoom all the way out slowly: the cross follows it and it locks by itself.</div>
         <div class="small" style="margin-bottom: 6px"><b>Quick:</b> double-click the planet, zoom <b>all the way out</b>, then <button class="btn red" id="dcLock">Lock on: double-clicked</button></div>
         <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
@@ -92,7 +103,7 @@
       </div></div>
       <div class="step"><div class="n">4</div><div>
         <h3>Scan</h3>
-        <div class="muted small"><b>Once per planet:</b> zoomed all the way out, EVE on <b>No filter</b>, pick <b>Bare planet</b> below, press Scan and turn the planet all the way round (top and bottom too). Every picture is placed on that map, so it can't slide; lose it and it finds itself again. <b>After that, no lock needed:</b> open the planet, set the edge, and the app finds where it is on its own. <b>Then for each resource:</b> in EVE's Scan panel drag both ends of the colour band right out (and leave them), pick the same resource here, press <b>Scan</b>, turn the planet round once, <b>Save to SeAT</b>.</div>
+        <div class="muted small"><b>Once per planet:</b> zoomed all the way out, EVE on <b>No filter</b>, pick <b>Bare planet</b> below, press Scan and turn the planet all the way round (top and bottom too): the app learns the planet's own colours, so they don't read as resource. <b>Then for each resource:</b> in EVE's Scan panel drag both ends of the colour band right out (and leave them), pick the same resource here, press <b>Scan</b>, turn the planet round once, <b>Save to SeAT</b>. With this system's sky recorded, every picture is placed on the sky, so nothing slides (and without it, on the bare map).</div>
         <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><button class="btn" id="recentre" title="In EVE double-click the planet, zoom all the way out, then press this. A scan keeps going.">Re-centre on command center</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
         <div class="row" style="display: block"><div class="meter"><i id="cover"></i></div></div>
         <div class="status" id="scanStatus"></div>
@@ -129,7 +140,7 @@
     temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Microorganisms"],
   };
   const say = (id, text, kind) => { const el = $(id); el.textContent = text || ""; el.className = "status" + (kind ? " " + kind : ""); };
-  $("home").addEventListener("click", () => { location.href = "index.html#groups"; });
+  $("home").addEventListener("click", () => { location.href = "index.html#pi"; });
 
   const shot = $("shot"), sctx = shot.getContext("2d", { willReadFrequently: true });
   const flat = $("flat"), fctx = flat.getContext("2d");
@@ -160,6 +171,174 @@
   const BARE = "__bare";
   let bare = null, focal = null, autoBusy = false, autoAsked = 0, worker = null, workerId = 0;
   try { worker = new Worker("piscan-worker.js"); } catch (e) { worker = null; }
+
+  // ---------- the sky ----------
+  // EVE's planet view moves the camera round the planet; the planet and the sky behind it (stars,
+  // nebula) stay put, and every planet in a system shares the same sky (checked on recordings:
+  // planet I found from planet VI's sky within about 1° of its own lock). So one sky map per
+  // system, recorded once while locked, tells which way the camera faces on any planet there.
+  // Kept on this PC in IndexedDB (about 1 MB a system).
+  const SKY_LENS_AT_1280 = 750; // EVE's lens, measured from the stars' own motion on three recordings (0.1–0.3 px)
+  const skyLens = () => SKY_LENS_AT_1280 * (shot.width || 1280) / 1280;
+  let sky = null, skySystem = null, skyDirty = false, skySavedAt = 0, skyPaintedAt = null, skyFindAt = 0, skySaidAt = 0;
+  let uiMask = null, uiMaskKey = null, uiSavedAt = 0, uiTick = 0, skyLast = null, skyRimAt = 0, skyRimOk = false;
+  const systemOf = (p) => (p && p.name ? String(p.name).replace(/\s+[IVXLCDM]+$/i, "") : "");
+  const pct = (x) => Math.round((x || 0) * 100) + "%";
+  const poseApart = (a, b) => { const M = E.mul(E.poseQ(a.yaw, a.pitch), E.transpose(E.poseQ(b.yaw, b.pitch))); return Math.acos(Math.max(-1, Math.min(1, (M[0] + M[4] + M[8] - 1) / 2))); };
+  const kv = (() => {
+    let opening = null;
+    const open = () => opening || (opening = new Promise((ok, bad) => {
+      const req = indexedDB.open("piscan", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("kv");
+      req.onsuccess = () => ok(req.result); req.onerror = () => bad(req.error);
+    }));
+    const run = (mode, fn) => open().then((db) => new Promise((ok, bad) => { const req = fn(db.transaction("kv", mode).objectStore("kv")); req.onsuccess = () => ok(req.result); req.onerror = () => bad(req.error); }));
+    return { get: (k) => run("readonly", (st) => st.get(k)), put: (k, v) => run("readwrite", (st) => st.put(v, k)), del: (k) => run("readwrite", (st) => st.delete(k)) };
+  })();
+  const skyCover = () => (sky ? E.skyCoverage(sky) : 0);
+  function showSkyState() {
+    const sys = skySystem || systemOf(currentPlanet()) || "this system";
+    $("skyState").textContent = sky ? `Sky of ${sys}: ${pct(skyCover())} of the sky recorded${sky.mirrored ? "" : " (longitude counted EVE's other way)"}.` : `No sky recorded for ${sys} yet.`;
+    $("skyForget").disabled = !sky;
+  }
+  async function loadSky() {
+    const sys = systemOf(currentPlanet());
+    if (sys === skySystem) { showSkyState(); return; }
+    if (sky && skyDirty) await saveSky(true);
+    skySystem = sys; sky = null; skyDirty = false; skyPaintedAt = null;
+    if (sys) {
+      try { const got = await kv.get("sky-" + sys); if (got && skySystem === sys) sky = E.skyFromBytes(new Uint8Array(got)); } catch (e) { say("skyStatus", "Couldn't read the sky kept on this PC: " + e, "warn"); }
+    }
+    showSkyState();
+  }
+  async function saveSky(now) {
+    if (!sky || !skyDirty || !skySystem) return;
+    if (!now && Date.now() - skySavedAt < 5000) return;
+    skySavedAt = Date.now(); skyDirty = false;
+    try { await kv.put("sky-" + skySystem, E.skyToBytes(sky).buffer); } catch (e) { say("skyStatus", "Couldn't keep the sky on this PC: " + e, "bad"); }
+  }
+  // EVE's own windows (screen-fixed) per client and picture size, learnt as the planet turns.
+  function uiMaskFor(f) {
+    const key = "piscan-ui-" + ($("client").value || "?") + "-" + f.w + "x" + f.h;
+    if (uiMaskKey !== key) {
+      uiMaskKey = key; uiMask = null;
+      try { const t = localStorage.getItem(key); if (t) uiMask = E.uiMaskFromBytes(Uint8Array.from(atob(t), (c) => c.charCodeAt(0)), f.w, f.h); } catch { uiMask = null; }
+      if (!uiMask) uiMask = E.newUiMask(f.w, f.h, 8);
+    }
+    return uiMask;
+  }
+  function learnUi(f) {
+    const m = uiMaskFor(f);
+    if ((uiTick++ & 1) !== 0) return;
+    if (E.updateUiMask(m, f.data.data, f.w, f.h, disc) && E.uiMaskReady(m) && Date.now() - uiSavedAt > 10000) {
+      uiSavedAt = Date.now();
+      try { const b = E.uiMaskToBytes(m); let bin = ""; for (let i = 0; i < b.length; i += 4096) bin += String.fromCharCode.apply(null, b.subarray(i, i + 4096)); localStorage.setItem(uiMaskKey, btoa(bin)); } catch {}
+    }
+  }
+  function skyViewOf(f) {
+    const m = uiMaskFor(f);
+    return E.skyView(f.data.data, f.w, f.h, disc, skyLens(), E.uiMaskReady(m) ? m : null);
+  }
+  const SKY_SURE = (found) => found && found.coarse >= 0.5 && found.score >= 0.4 && found.margin >= 0.3;
+  /** Not locked: look for this view on the system's sky (needs the edge; found by itself if not set). */
+  function skyFind(f) {
+    if (!sky || skyCover() < 0.02 || Date.now() - skyFindAt < 900) return false;
+    skyFindAt = Date.now();
+    // The planet's edge, found by itself (EVE puts the planet in the middle): from the picture, else
+    // the size it last had on this client if the picture agrees, else the edge set by hand.
+    const rim = E.rimRadius(f.data.data, f.w, f.h, null);
+    const lastR = Number(localStorage.getItem("piscan-lastr-" + f.w) || 0);
+    if (rim && rim.r >= 40) { if (!disc || Math.abs(rim.r - disc.r) > disc.r * 0.04) { disc = { cx: rim.cx, cy: rim.cy, r: rim.r }; updateButtons(); } }
+    else if (!disc && lastR >= 40 && E.rimStillThere(f.data.data, f.w, f.h, { cx: f.w / 2, cy: f.h / 2, r: lastR })) { disc = { cx: f.w / 2, cy: f.h / 2, r: lastR }; updateButtons(); }
+    if (!disc) { say("skyStatus", "Looking for the planet's edge… (or set it in step 2)", ""); return false; }
+    const found = E.findOnSky(skyViewOf(f), sky);
+    skyLast = found ? { how: "find", coarse: found.coarse, fine: found.score, margin: found.margin, yaw: found.yaw, pitch: found.pitch } : { how: "find", none: true };
+    if (!SKY_SURE(found)) {
+      say("skyStatus", found && found.coarse > 0.3 ? `Looking at the sky… not sure yet (match ${pct(found.coarse)}, stars ${pct(found.score)}). Turn the planet a little toward sky you've recorded.` : "Looking at the sky… this part isn't recorded yet: turn toward sky you recorded, or lock on below to record more.", "");
+      return false;
+    }
+    disc = { cx: disc.cx, cy: disc.cy, r: disc.r, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
+    focal = lensPx();
+    const me = $("client").value, p = currentPlanet();
+    const mine = !!(p && p.pins.some((pin) => pin.owner === me));
+    facing = { Q: E.poseQ(found.yaw, found.pitch), mirrored: sky.mirrored, misses: [], owners: mine ? [me] : [], sky: true, skyChecked: true };
+    anchors = []; forgetTrack(); mapMisses = 0; frozen = false;
+    const fixed = fitVersionsToLock();
+    say("lockStatus", `Locked on by the sky: no buildings needed.${fixed ? " " + fixed : ""}`, "ok");
+    say("skyStatus", `Found on the sky (match ${pct(found.coarse)}, stars ${pct(found.score)}). The green rings should sit on ${mine ? "your" : "the corp's"} buildings.`, "ok");
+    renderAnchors(); updateButtons(); drawShot();
+    return true;
+  }
+  /**
+   * Locked: place this picture on the sky (exact, no drift) and record more sky as the camera
+   * turns. trusted = the facing is fresh or the planet tracker just followed it (safe to record
+   * from while looking at sky that isn't recorded yet). Returns "placed", "conflict" or "none".
+   */
+  function skyStep(f, trusted) {
+    const m = uiMaskFor(f);
+    if (!E.uiMaskReady(m) && !sky) {
+      if (Date.now() - skySaidAt > 2000) { skySaidAt = Date.now(); say("skyStatus", "Learning where EVE's windows are: turn the planet a little.", ""); }
+      return "none";
+    }
+    if (sky && sky.mirrored !== facing.mirrored) {
+      if (Date.now() - skySaidAt > 4000) { skySaidAt = Date.now(); say("skyStatus", "This lock counts longitude the other way round from the recorded sky: the sky is left alone. Flip the lock, or Forget this system's sky.", "warn"); }
+      return "conflict";
+    }
+    if (facing.skyConflict) return "conflict";
+    const view = skyViewOf(f);
+    let result = "none";
+    if (sky && skyCover() > 0.005) {
+      const now = E.poseOf(facing.Q);
+      // A lock from buildings (or a bare map): check it against the sky once.
+      if (!facing.skyChecked) {
+        facing.skyChecked = true;
+        const found = E.findOnSky(view, sky);
+        if (SKY_SURE(found)) {
+          const apart = poseApart(found, now) / DEG;
+          if (apart > 3) {
+            facing.skyConflict = true;
+            say("skyStatus", `The recorded sky puts the planet ${apart.toFixed(1)}° from this lock. Your lock is kept (the sky isn't used or recorded while they disagree). Green rings sit right? Then the sky is off: Forget this system's sky and turn round to record it again. Rings off? Press Find by the sky.`, "warn");
+            return "conflict";
+          }
+          say("skyStatus", `Sky check: the sky agrees with this lock within ${apart.toFixed(1)}°. The sky keeps it exact from here.`, "ok");
+        } else say("skyStatus", "Sky check: this part of the sky isn't recorded yet; it gets recorded as you turn.", "");
+      }
+      const coarsePts = E.skyPoints(view, "coarse");
+      // Near where it was (the planet tracker's guess), wider if that misses (a fast turn).
+      let c = E.alignSky(coarsePts, sky.coarse, now, 3 * DEG, 1 * DEG, 0.3);
+      if (!(c && c.score >= 0.45)) { const wide = E.alignSky(coarsePts, sky.coarse, now, 10 * DEG, 1 * DEG, 0.3); if (wide && wide.score >= 0.5) c = wide; }
+      let at = null;
+      if (c && c.score >= 0.45) {
+        const fz = E.alignSky(E.skyPoints(view, "fine"), sky.fine, c, 0.5 * DEG, 0.25 * DEG, 0.3);
+        at = fz && fz.score >= 0.25 ? fz : c;
+        result = "placed";
+      } else if (c && c.seen >= 0.5) result = "conflict";
+      // Still not (lost the grip, or back from zooming in): look on the whole sky.
+      if (!at && Date.now() - skyFindAt > 900) {
+        skyFindAt = Date.now();
+        const found = E.findOnSky(view, sky);
+        if (SKY_SURE(found)) { at = found; result = "placed"; }
+      }
+      skyLast = { how: "track", coarse: c ? c.score : null, fine: at && at !== c ? at.score : null, seen: c ? c.seen : null, result };
+      if (at) facing.Q = E.poseQ(at.yaw, at.pitch);
+    }
+    // Record: placed on the sky, or looking at sky that isn't recorded yet from a trusted facing.
+    // Only with the planet's edge where the app thinks it is (zoomed in past it, the "sky" would be planet).
+    if (Date.now() - skyRimAt > 500) {
+      skyRimAt = Date.now();
+      skyRimOk = E.rimStillThere(f.data.data, f.w, f.h, disc);
+    }
+    if (E.uiMaskReady(m) && skyRimOk && (result === "placed" || (result === "none" && trusted))) {
+      const p = E.poseOf(facing.Q);
+      if (!skyPaintedAt || poseApart(p, skyPaintedAt) > 0.6 * DEG) {
+        if (!sky) { sky = E.newSky(facing.mirrored); skySystem = systemOf(currentPlanet()); facing.skyChecked = true; }
+        E.paintSky(sky, view, facing.Q); skyPaintedAt = p; skyDirty = true;
+        if (Date.now() - skySaidAt > 1500) { skySaidAt = Date.now(); showSkyState(); if (result !== "placed") say("skyStatus", `Recording the sky: ${pct(skyCover())} so far. Keep turning slowly (a bit from above and below too).`, "ok"); else say("skyStatus", `On the sky (match ${pct(skyLast && skyLast.coarse)}); ${pct(skyCover())} of the sky recorded.`, "ok"); }
+      }
+    }
+    saveSky(false);
+    return result;
+  }
 
   // ---------- clients and planets ----------
   async function loadClients() {
@@ -299,6 +478,7 @@
     if (bare && E.bareCoverage(bare) > 0.9 && res.options.length > 1) res.selectedIndex = 1;
     if (res.value && res.value !== BARE) loadCorpScan(res.value);
     say("lockStatus", p ? `${p.pins.length} buildings known on ${p.name}.` : "");
+    loadSky();
   }
   function anchorList() {
     const p = currentPlanet();
@@ -362,22 +542,31 @@
     const name = $("client").value;
     if (!name) return null;
     // Raw pixels straight from the app (fast); the JPEG path is the fallback.
-    const raw = await invoke("piscan_frame", { name, width: 1280 }).catch(() => null);
+    const raw = await invoke("piscan_frame", { name, width: $("fullSize").checked ? 3840 : 1280 }).catch(() => null);
     if (raw && raw.byteLength > 8) {
       const buf = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer, head = new DataView(buf);
       const w = head.getUint32(0, true), h = head.getUint32(4, true);
       const data = new ImageData(new Uint8ClampedArray(buf, 8, w * h * 4), w, h);
-      if (shot.width !== w || shot.height !== h) { shot.width = w; shot.height = h; }
+      if (shot.width !== w || shot.height !== h) { rescaleTo(w); shot.width = w; shot.height = h; }
       const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").putImageData(data, 0, 0);
       return { img: c, data, w, h };
     }
-    const url = await invoke("preview_frame", { name, width: 1280, quality: 88 });
+    const url = await invoke("preview_frame", { name, width: $("fullSize").checked ? 3840 : 1280, quality: 88 });
     const img = new Image();
     await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = url; });
-    if (shot.width !== img.naturalWidth || shot.height !== img.naturalHeight) { shot.width = img.naturalWidth; shot.height = img.naturalHeight; }
+    if (shot.width !== img.naturalWidth || shot.height !== img.naturalHeight) { rescaleTo(img.naturalWidth); shot.width = img.naturalWidth; shot.height = img.naturalHeight; }
     const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
     const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0);
     return { img, data: x.getImageData(0, 0, c.width, c.height), w: c.width, h: c.height };
+  }
+  /** The picture changed size (Full-size pictures on or off, or the EVE window resized): keep the edge, lock and clicks. */
+  function rescaleTo(w) {
+    const k = w / (shot.width || w);
+    if (!isFinite(k) || Math.abs(k - 1) < 1e-6) return;
+    if (disc) disc = { ...disc, cx: disc.cx * k, cy: disc.cy * k, r: disc.r * k };
+    if (focal) focal *= k;
+    anchors.forEach((a) => { a.px *= k; a.py *= k; });
+    rimClicks = []; frame = null; forgetTrack(); skyPaintedAt = null;
   }
   function drawShot() {
     if (!frame) { sctx.fillStyle = "#000"; sctx.fillRect(0, 0, shot.width, shot.height); sctx.fillStyle = "#666"; sctx.font = "20px Segoe UI"; sctx.fillText("Pick a client: its picture shows here.", 30, 50); return; }
@@ -412,7 +601,42 @@
       sctx.strokeStyle = "#f0c040"; sctx.lineWidth = lw; sctx.beginPath(); sctx.arc(mx, my, R, 0, Math.PI * 2); sctx.stroke();
     }
   }
+  let skyDrawnAt = 0;
+  /** The sky map unrolled like the planet map (grey = recorded, blue = not yet); red cross = where the camera looks now. */
+  function drawSkyMap() {
+    if (Date.now() - skyDrawnAt < 600) return;
+    skyDrawnAt = Date.now();
+    const W = flat.width, H = flat.height, img = fctx.createImageData(W, H);
+    const m = sky && sky.fine;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const k = (y * W + x) * 4;
+      let v = NaN;
+      if (m) {
+        const r0 = Math.floor(y * m.h / H), c0 = Math.floor(x * m.w / W);
+        let sum = 0, n = 0;
+        for (let dr = 0; dr < m.h / H; dr++) for (let dc = 0; dc < m.w / W; dc++) { const i = (r0 + dr) * m.w + c0 + dc; if (m.weight[i] > 0) { sum += m.sum[i] / m.weight[i]; n++; } }
+        if (n) v = sum / n;
+      }
+      if (v === v) { const g = Math.max(0, Math.min(255, 70 + 9 * v)); img.data.set([g, g, g, 255], k); } else img.data.set([10, 14, 40, 255], k);
+    }
+    fctx.putImageData(img, 0, 0);
+    if (facing) {
+      const Qt = E.transpose(facing.Q);
+      const mark = (d, colour, size) => {
+        const v = E.apply(Qt, d), lat = Math.acos(Math.max(-1, Math.min(1, v[2]))); let lon = Math.atan2(v[1], v[0]); if (lon < 0) lon += 2 * Math.PI;
+        const x = lon / (2 * Math.PI) * W, y = lat / Math.PI * H;
+        fctx.strokeStyle = colour; fctx.lineWidth = 2; fctx.beginPath(); fctx.moveTo(x - size, y); fctx.lineTo(x + size, y); fctx.moveTo(x, y - size); fctx.lineTo(x, y + size); fctx.stroke();
+      };
+      mark([0, 0, -1], "#ff5a4a", 9);
+    }
+    $("cover").style.width = pct(skyCover());
+    $("flatLegend").innerHTML = "";
+    const a = document.createElement("span"); a.textContent = "The sky all round, unrolled like the planet map (grey = recorded, blue = not yet). Red cross: behind the planet, where the camera looks now.";
+    const b = document.createElement("span"); b.innerHTML = "<b>Sky</b> "; b.append(`${pct(skyCover())} recorded${skySystem ? " for " + skySystem : ""}`);
+    $("flatLegend").append(a, b);
+  }
   function drawFlat() {
+    if ($("skyShow").checked) { drawSkyMap(); return; }
     const recordingBare = $("resource").value === BARE;
     const m = recordingBare ? null : maps.get($("resource").value);
     const img = fctx.createImageData(E.GRID_W, E.GRID_H);
@@ -466,6 +690,7 @@
   /** A new edge: keeps the lock after a zoom (same facing, new distance), else starts over. */
   function setEdge(c) {
     if (!c || c.r < 40) { say("lockStatus", "That's too close to the middle: click on the planet's edge.", "bad"); return; }
+    try { localStorage.setItem("piscan-lastr-" + shot.width, String(c.r)); } catch {}
     if (facing && !focal) {
       // Locked in the double-click view (no edge there): the lens comes from an earlier lock, else a usual value.
       focal = lensPx();
@@ -737,6 +962,26 @@
   $("resource").addEventListener("change", () => { keys = []; prevGrey = null; lastStep = null; lost = null; if ($("resource").value !== BARE) loadCorpScan($("resource").value); drawFlat(); updateButtons(); });
   $("scan").addEventListener("click", () => { if (running && $("resource").value === BARE) storeBare(); running = !running; prevGrey = null; lastStep = null; lost = null; lostRun = 0; frozen = false; updateButtons(); if (running) say("scanStatus", "Scanning: turn the planet slowly.", "ok"); });
   $("showHeat").addEventListener("change", drawShot);
+  $("skyShow").addEventListener("change", () => { skyDrawnAt = 0; drawFlat(); });
+  try { $("fullSize").checked = localStorage.getItem("piscan-fullsize") === "1"; } catch {}
+  $("fullSize").addEventListener("change", () => { try { localStorage.setItem("piscan-fullsize", $("fullSize").checked ? "1" : "0"); } catch {} });
+  $("skyFindBtn").addEventListener("click", () => {
+    if (!sky) return say("skyStatus", "No sky recorded for this system yet: lock on below, then turn the planet all the way round.", "warn");
+    facing = null; anchors = []; forgetTrack(); skyFindAt = 0; frozen = false;
+    say("lockStatus", ""); say("skyStatus", "Looking at the sky…", "");
+    renderAnchors(); updateButtons(); drawShot();
+  });
+  let forgetAsked = 0;
+  $("skyForget").addEventListener("click", async () => {
+    if (!sky || !skySystem) return;
+    if (Date.now() - forgetAsked > 4000) { forgetAsked = Date.now(); $("skyForget").textContent = "Click again to forget it"; setTimeout(() => { $("skyForget").textContent = "Forget this system's sky"; }, 4000); return; }
+    forgetAsked = 0; $("skyForget").textContent = "Forget this system's sky";
+    try { await kv.del("sky-" + skySystem); } catch {}
+    sky = null; skyDirty = false; skyPaintedAt = null;
+    if (facing) { facing.skyConflict = false; facing.skyChecked = true; }
+    showSkyState(); skyDrawnAt = 0; drawFlat();
+    say("skyStatus", `Forgot the sky of ${skySystem}. Lock on and turn the planet round to record it again.`, "ok");
+  });
 
   // ---------- automatic lock-on ----------
   function adoptPose(pose, how) {
@@ -802,7 +1047,10 @@
       if (!frozen && $("client").value) {
         const f = await grab().catch(() => null);
         if (f) frame = f;
+        if (f) learnUi(f);
         if (f && follow) followStep(f);
+        // The system's sky recorded: find which way the camera faces from it (no lock needed).
+        if (f && !facing && !follow && sky) skyFind(f);
         if (f && !disc && $("auto").checked && ticks % 8 === 0) say("autoStatus", "Set the edge first: Click the edge, then click once on the planet's edge.", "warn");
         // Zoomed in EVE: the rim moves; with the camera's lens known, so does the distance.
         if (f && facing && disc && focal && $("follow").checked && Date.now() - lastRimCheck > 250) {
@@ -851,9 +1099,11 @@
               turnSpeed = 0.7 * turnSpeed + 0.3 * (t.moved * 180 / Math.PI / dt); lastTurnAt = now;
             } else lastStep = null;
           }
+          // 1b) Placed on the sky: exact, no drift, any filter, every planet in the system.
+          const skyResult = skyStep(f, tracked || !prevGrey);
           // 2) Placed on the bare planet map: no piling-up error; lost → found again anywhere on the planet.
-          let ok = tracked || !prevGrey, placed = false;
-          const ref = mapRef();
+          let ok = tracked || !prevGrey || skyResult === "placed", placed = skyResult === "placed";
+          const ref = placed ? null : mapRef();
           if (ref) {
             const pts = E.samplePoints(f.data.data, f.w, f.h, disc, 600);
             const near = E.alignToMap(pts, ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
@@ -918,6 +1168,12 @@
     } finally { painting = false; }
   }
   setInterval(tick, 40); // as fast as pictures come (a tick still running skips the next)
+  // Offline test harness only (never set in the app): lets a test lock on and read the state.
+  if (window.__PISCAN_TEST__) window.__PISCAN_TEST__.page = {
+    tick, lock: (Q, mirrored, d) => { disc = { ...d }; focal = lensPx(); facing = { Q, mirrored, misses: [], owners: [] }; forgetTrack(); },
+    state: () => ({ facing, disc, skyCover: skyCover(), skySystem, skyLast, uiReady: !!uiMask && E.uiMaskReady(uiMask) }),
+    flush: () => saveSky(true),
+  };
 
   // ---------- save ----------
   $("save").addEventListener("click", async () => {
@@ -963,7 +1219,7 @@
       $("record").textContent = "■ Stop recording";
       recordTimer = setInterval(async () => {
         const p = currentPlanet();
-        invoke("piscan_record_note", { note: { ms: Date.now() - started, planet: p && p.name, resource: $("resource").value, disc, locked: !!facing, Q: facing && facing.Q, mirrored: facing && facing.mirrored } }).catch(() => {});
+        invoke("piscan_record_note", { note: { ms: Date.now() - started, planet: p && p.name, resource: $("resource").value, disc, locked: !!facing, Q: facing && facing.Q, mirrored: facing && facing.mirrored, bySky: !!(facing && facing.sky), sky: skyLast, skyCover: skyCover(), lens: skyLens(), width: shot.width } }).catch(() => {});
         const on = await invoke("piscan_recording").catch(() => false);
         $("recordSaid").textContent = on ? `recording… ${Math.round((Date.now() - started) / 1000)} s` : "Saved. Tell Claude it's done.";
         if (!on) { clearInterval(recordTimer); $("record").textContent = "● Record for tuning"; }

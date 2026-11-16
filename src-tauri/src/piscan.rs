@@ -85,7 +85,7 @@ pub async fn piscan_save(app: AppHandle, planet_id: u64, resource: String, chara
 /// second (smaller turns between them track more surely). Nothing leaves the PC.
 #[tauri::command]
 pub async fn piscan_frame(name: String, width: Option<u32>) -> Result<tauri::ipc::Response, String> {
-    let w = width.unwrap_or(1280).clamp(320, 1600);
+    let w = width.unwrap_or(1280).clamp(320, 3840);
     tauri::async_runtime::spawn_blocking(move || {
         let (width, height, rgba) = crate::capture::client_rgba(&name, w)?;
         Ok(tauri::ipc::Response::new(frame_bytes(width, height, &rgba)))

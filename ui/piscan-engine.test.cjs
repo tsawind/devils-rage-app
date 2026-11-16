@@ -253,5 +253,63 @@ check("picture ↔ planet round trip (close camera)", rt && Math.abs(rt[0] - 0.3
   check("a spot is followed through a zoom step (within 3 px)", t && Math.hypot(t.x - want.x, t.y - want.y) <= 3);
 }
 
+// ---- the sky ----
+// A made-up sky: smooth nebula plus pin-point stars, fixed in planet directions. The camera turns
+// round the planet (no roll); a window sits still in the top-left corner; the planet hides the middle.
+{
+  const SW = 640, SH = 360, SF = 375; // lens: 750 px at 1280 wide, scaled
+  const sdisc = { cx: SW / 2, cy: SH / 2, r: 100 };
+  const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  function skyAt(v) {
+    const [x, y, z] = v;
+    const neb = 34 + 20 * Math.sin(3 * x + 1) * Math.cos(2 * y - 0.5) + 14 * Math.sin(5 * z + 2 * x) + 10 * Math.cos(13 * y + 7 * z) * Math.sin(11 * x - 3) + 7 * Math.sin(29 * z + 17 * y) + 5 * Math.cos(47 * x - 23 * z);
+    const lat = Math.acos(Math.max(-1, Math.min(1, z))), lon = Math.atan2(y, x);
+    const a = Math.floor(lat / (0.12 * Math.PI / 180)), b = Math.floor((lon + Math.PI) / (0.12 * Math.PI / 180));
+    const star = hash(a, b) < 0.03 ? 90 + 130 * hash(b, a) : 0;
+    return Math.min(255, neb + star);
+  }
+  function skyFrame(Q) {
+    const rgba = new Uint8ClampedArray(SW * SH * 4), Qt = E.transpose(Q);
+    for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+      const k = (y * SW + x) * 4;
+      let v;
+      if (x < 150 && y < 90) v = (x % 9 < 3 && y % 7 < 4) ? 220 : 25; // a window with "text"
+      else if ((x + 0.5 - sdisc.cx) ** 2 + (y + 0.5 - sdisc.cy) ** 2 < (sdisc.r * 1.05) ** 2) v = 90 + 40 * Math.sin(x * 0.3) * Math.cos(y * 0.2);
+      else { const u = (x + 0.5 - SW / 2) / SF, w = -(y + 0.5 - SH / 2) / SF, l = Math.hypot(u, w, 1); v = skyAt(E.apply(Qt, [u / l, w / l, -1 / l])); }
+      rgba[k] = rgba[k + 1] = rgba[k + 2] = v; rgba[k + 3] = 255;
+    }
+    return rgba;
+  }
+  const D2R = Math.PI / 180;
+  const poses = []; for (let k = 0; k <= 16; k++) poses.push({ yaw: 0.3 + k * 4 * D2R, pitch: 0.25 + 3 * D2R * Math.sin(k / 3) });
+  const frames = poses.map((p) => skyFrame(E.poseQ(p.yaw, p.pitch)));
+  const mask = E.newUiMask(SW, SH, 8);
+  frames.forEach((f) => E.updateUiMask(mask, f, SW, SH, sdisc));
+  const uiAt = (x, y) => mask.ui[Math.floor(y / 8) * mask.bw + Math.floor(x / 8)];
+  check("the still window is learnt as a window", E.uiMaskReady(mask) && uiAt(60, 40) === 1 && uiAt(120, 70) === 1);
+  check("the moving sky isn't", uiAt(500, 300) === 0 && uiAt(600, 40) === 0 && uiAt(300, 340) === 0);
+  const sky = E.newSky(true);
+  frames.forEach((f, i) => E.paintSky(sky, E.skyView(f, SW, SH, sdisc, SF, mask), E.poseQ(poses[i].yaw, poses[i].pitch)));
+  check("the sky gets recorded as the camera turns", E.skyCoverage(sky) > 0.05);
+  const apart = (a, b) => { const M = E.mul(E.poseQ(a.yaw, a.pitch), E.transpose(E.poseQ(b.yaw, b.pitch))); return Math.acos(Math.max(-1, Math.min(1, (M[0] + M[4] + M[8] - 1) / 2))) / D2R; };
+  // A new view between the recorded ones, found with no guess at all.
+  const truth = { yaw: 0.3 + 22.7 * D2R, pitch: 0.25 + 1.3 * D2R };
+  const view = E.skyView(skyFrame(E.poseQ(truth.yaw, truth.pitch)), SW, SH, sdisc, SF, mask);
+  const found = E.findOnSky(view, sky);
+  check("a view is found on the sky with no guess (within 0.2°)", found && apart(found, truth) < 0.2);
+  check("and it's sure of it", found && found.coarse > 0.5 && found.score > 0.4 && found.margin > 0.3);
+  const near = E.alignSky(E.skyPoints(view, "fine"), sky.fine, { yaw: truth.yaw + 0.4 * D2R, pitch: truth.pitch - 0.3 * D2R }, 0.5 * D2R, 0.25 * D2R, 0.3);
+  check("following: placed on the sky from a guess 0.5° off (within 0.1°)", near && apart(near, truth) < 0.1);
+  const back = E.skyFromBytes(E.skyToBytes(sky));
+  const again = back && E.findOnSky(view, back);
+  check("the sky comes back from its bytes (and still finds it)", back && back.mirrored === true && again && apart(again, truth) < 0.25);
+  const other = E.findOnSky(E.skyView(skyFrame(E.poseQ(truth.yaw + Math.PI, -0.6)), SW, SH, sdisc, SF, mask), sky);
+  check("sky that was never recorded isn't 'found'", !(other && other.coarse >= 0.5 && other.score >= 0.4 && other.margin >= 0.3));
+  check("the edge is still there at the disc", E.rimStillThere(frames[3], SW, SH, { ...sdisc, r: sdisc.r * 1.05 }));
+  check("zoomed past it, it isn't", !E.rimStillThere(frames[3], SW, SH, { ...sdisc, r: sdisc.r * 0.8 }));
+  const m2 = E.uiMaskFromBytes(E.uiMaskToBytes(mask), SW, SH);
+  check("the window mask comes back from its bytes", m2 && m2.ui.every((v, i) => v === mask.ui[i]) && E.uiMaskReady(m2));
+}
+
 console.log(fails ? `\n${fails} failed` : "\nall passed");
 process.exit(fails ? 1 : 0);

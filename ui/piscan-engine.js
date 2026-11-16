@@ -801,6 +801,30 @@
     return { cx, cy, r: found[Math.floor(found.length / 2)] * 0.97 };
   }
 
+  /**
+   * Is the planet's edge still where the disc says (not zoomed past it)? Checks for the strongest
+   * brightness step along rays near the rim, whichever way it goes (dark space outside, or a
+   * bright nebula behind a dark limb). True when enough rays put it within 6% of the radius.
+   */
+  function rimStillThere(rgba, width, height, disc) {
+    const lum = (x, y) => { const k = ((y | 0) * width + (x | 0)) * 4; return 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2]; };
+    let rays = 0, agree = 0;
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a), prof = [];
+      for (let r = disc.r * 0.8; r <= disc.r * 1.2; r += Math.max(1, disc.r * 0.01)) {
+        const x = disc.cx + dx * r, y = disc.cy + dy * r;
+        if (x < 1 || y < 1 || x >= width - 1 || y >= height - 1) { prof.length = 0; break; }
+        prof.push([r, lum(x, y)]);
+      }
+      if (prof.length < 12) continue;
+      rays++;
+      let best = 0, at = 0;
+      for (let k = 2; k < prof.length - 2; k++) { const step = Math.abs(prof[k + 2][1] + prof[k + 1][1] - prof[k - 1][1] - prof[k - 2][1]) / 2; if (step > best) { best = step; at = prof[k][0]; } }
+      if (best > 10 && Math.abs(at - disc.r) < disc.r * 0.06) agree++;
+    }
+    return rays >= 12 && agree >= rays * 0.35;
+  }
+
   /** The circle through three clicks on the rim. */
   function circleFrom3(a, b, c) {
     const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]));
@@ -1016,7 +1040,346 @@
     return { ...pose, Q, inliers: pairs.length };
   }
 
-  const api = { shiftBare, despeckle, halfGrey, followSpot, GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
+
+  // ---- the sky ----
+  // EVE's planet view keeps the planet and everything behind it (stars, nebula, the sun) still
+  // and moves the camera round them, so the background turns exactly with the planet (David's
+  // idea). Painted once in planet directions while locked, the sky tells which way the camera
+  // faces from any picture with some sky in it: no buildings, no planet texture, and the same
+  // under every resource filter. The picture is measured as features (a spot's brightness minus
+  // its surroundings, at a fixed size in degrees) and the map keeps those same features, so
+  // picture and map compare like with like.
+  const SKY_LEVELS = {
+    // fine: stars and the nebula's edges (0.25° cells); coarse: the nebula's big shapes (1° cells).
+    fine: { w: 1440, h: 720, box: 0.3, ring: 1.4, paint: 0.25, match: 0.9, clip: 8 },
+    coarse: { w: 360, h: 180, box: 1.5, ring: 7, paint: 1, match: 2.2, clip: 5 },
+  };
+  const SKY_GLOW = 1.25; // the planet's disc plus its glow (lava, atmosphere) isn't sky
+  let skyBuffers = null;
+  /**
+   * A picture's sky, ready to measure. f = the lens's focal length in pixels at this picture's
+   * size; ui = the screen-fixed EVE windows to leave out (uiMask), optional. Rays go through the
+   * picture's middle (EVE's camera looks at the planet, which sits in the middle zoomed out).
+   * The view shares its buffers with the next one made.
+   */
+  function skyView(rgba, width, height, disc, f, ui) {
+    const W1 = width + 1, size = W1 * (height + 1);
+    if (!skyBuffers || skyBuffers.lum.length !== size) skyBuffers = { lum: new Float64Array(size), sky: new Float64Array(size) };
+    const lumI = skyBuffers.lum, skyI = skyBuffers.sky;
+    const r2 = disc ? (disc.r * SKY_GLOW) ** 2 : -1, cx = disc ? disc.cx : 0, cy = disc ? disc.cy : 0;
+    const ub = ui ? ui.size : 1, uw = ui ? ui.bw : 0, blocked = ui ? ui.ui : null;
+    for (let x = 0; x <= width; x++) { lumI[x] = 0; skyI[x] = 0; }
+    for (let y = 0; y < height; y++) {
+      let rowL = 0, rowS = 0;
+      const base = (y + 1) * W1, up = y * W1, dy2 = (y + 0.5 - cy) ** 2, urow = blocked ? Math.floor(y / ub) * uw : 0;
+      lumI[base] = 0; skyI[base] = 0;
+      for (let x = 0; x < width; x++) {
+        let s = 1;
+        if ((x + 0.5 - cx) ** 2 + dy2 < r2) s = 0;
+        else if (blocked && blocked[urow + Math.floor(x / ub)]) s = 0;
+        if (s) { const k = (y * width + x) * 4; rowL += 0.3 * rgba[k] + 0.59 * rgba[k + 1] + 0.11 * rgba[k + 2]; rowS++; }
+        lumI[base + x + 1] = lumI[up + x + 1] + rowL;
+        skyI[base + x + 1] = skyI[up + x + 1] + rowS;
+      }
+    }
+    return { width, height, f, cx0: width / 2, cy0: height / 2, lumI, skyI, ppd: f * Math.PI / 180 };
+  }
+  function skyBox(view, x0, y0, x1, y1) {
+    const W1 = view.width + 1;
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(view.width, x1); y1 = Math.min(view.height, y1);
+    if (x1 <= x0 || y1 <= y0) return null;
+    const a = y0 * W1 + x0, b = y0 * W1 + x1, c = y1 * W1 + x0, d = y1 * W1 + x1;
+    const n = view.skyI[d] - view.skyI[b] - view.skyI[c] + view.skyI[a];
+    return { n, sum: view.lumI[d] - view.lumI[b] - view.lumI[c] + view.lumI[a], area: (x1 - x0) * (y1 - y0) };
+  }
+  /** Spot minus surroundings at (x, y), or null where it isn't mostly sky. */
+  function skyFeature(view, x, y, hb, hr) {
+    const a = skyBox(view, x - hb, y - hb, x + hb + 1, y + hb + 1);
+    if (!a || a.n < (2 * hb + 1) * (2 * hb + 1) * 0.8) return null;
+    const b = skyBox(view, x - hr, y - hr, x + hr + 1, y + hr + 1);
+    if (!b || b.n < (2 * hr + 1) * (2 * hr + 1) * 0.35) return null;
+    return a.sum / a.n - b.sum / b.n;
+  }
+  /** Camera-space direction of a picture point (camera looking down −z, as in toSphere). */
+  function skyRay(view, x, y) {
+    const u = (x + 0.5 - view.cx0) / view.f, v = -(y + 0.5 - view.cy0) / view.f, l = Math.hypot(u, v, 1);
+    return [u / l, v / l, -1 / l];
+  }
+  /** Sky features on a grid every `gap` degrees: [{ d (camera direction), g }]. */
+  function skyPoints(view, level, gap) {
+    const L = SKY_LEVELS[level], hb = Math.max(1, Math.round(L.box * view.ppd / 2)), hr = Math.max(hb + 2, Math.round(L.ring * view.ppd / 2));
+    const step = Math.max(2, Math.round((gap || L.match) * view.ppd)), out = [];
+    for (let y = hb + (step >> 1); y < view.height - hb; y += step) for (let x = hb + (step >> 1); x < view.width - hb; x += step) {
+      const g = skyFeature(view, x, y, hb, hr);
+      if (g !== null) out.push({ d: skyRay(view, x, y), g: Math.max(-L.clip, Math.min(L.clip, g)) });
+    }
+    return out;
+  }
+  function newSkyLevel(level) { const L = SKY_LEVELS[level]; return { level, w: L.w, h: L.h, sum: new Float32Array(L.w * L.h), weight: new Float32Array(L.w * L.h), grey: null }; }
+  /** An empty sky map (mirrored: the longitude convention of the lock it's painted under). */
+  function newSky(mirrored) { return { fine: newSkyLevel("fine"), coarse: newSkyLevel("coarse"), mirrored: !!mirrored, frames: 0 }; }
+  function skyCellOf(m, s) {
+    const lat = Math.acos(Math.max(-1, Math.min(1, s[2])));
+    let lon = Math.atan2(s[1], s[0]); if (lon < 0) lon += 2 * Math.PI;
+    return Math.min(m.h - 1, Math.floor(lat / Math.PI * m.h)) * m.w + Math.min(m.w - 1, Math.floor(lon / (2 * Math.PI) * m.w));
+  }
+  /** Paint a picture's sky into the map at facing Q. Returns how many points went in. */
+  function paintSky(sky, view, Q) {
+    const Qt = transpose(Q);
+    let n = 0;
+    for (const level of ["fine", "coarse"]) {
+      const m = sky[level];
+      for (const p of skyPoints(view, level, SKY_LEVELS[level].paint)) {
+        const i = skyCellOf(m, apply(Qt, p.d));
+        m.sum[i] += p.g; m.weight[i] += 1; n++;
+      }
+      m.grey = null;
+    }
+    sky.frames++;
+    return n;
+  }
+  function skyGrey(m) {
+    if (m.grey) return m.grey;
+    const g = new Float32Array(m.w * m.h);
+    for (let i = 0; i < g.length; i++) g[i] = m.weight[i] > 0 ? m.sum[i] / m.weight[i] : NaN;
+    return (m.grey = g);
+  }
+  /** Map value at fractional cell (fy, fx): bilinear where all four cells are known, else the nearest; NaN unseen. */
+  function skySample(m, g, fy, fx, smooth) {
+    const w = m.w, h = m.h;
+    if (!smooth) {
+      const r = fy < 0 ? 0 : fy > h - 1 ? h - 1 : Math.round(fy);
+      let c = Math.round(fx) % w; if (c < 0) c += w;
+      return g[r * w + c];
+    }
+    const r0 = fy < 0 ? 0 : fy >= h - 1 ? h - 2 : Math.floor(fy), ty = fy < 0 ? 0 : fy >= h - 1 ? 1 : fy - r0;
+    const flo = Math.floor(fx), tx = fx - flo;
+    let c0 = flo % w; if (c0 < 0) c0 += w;
+    const c1 = c0 + 1 === w ? 0 : c0 + 1;
+    const a = g[r0 * w + c0], b = g[r0 * w + c1], c = g[r0 * w + w + c0], d = g[r0 * w + w + c1];
+    if (a === a && b === b && c === c && d === d) return (a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty;
+    const r = Math.round(r0 + ty);
+    let cc = Math.round(fx) % w; if (cc < 0) cc += w;
+    return g[Math.min(h - 1, r) * w + cc];
+  }
+  // EVE's camera has no roll, so a facing is a pitch and a yaw (poseQ), and the yaw only spins
+  // the map round its axis: for one pitch, each point's place on the map is worked out once and
+  // every yaw is just a shift in longitude. That makes searching the whole sky quick.
+  const STAND_T = transpose(STAND);
+  /** Scores (correlation, share seen) of a set of yaws at one pitch. */
+  function skyScanPitch(points, m, g, pitch, yaws, minSeen, out) {
+    const n = points.length, M = mul(STAND_T, rotationAbout([1, 0, 0], -pitch)), smooth = m.level === "fine";
+    const fy = new Float32Array(n), fx = new Float32Array(n), gs = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const d = points[i].d, x = M[0] * d[0] + M[1] * d[1] + M[2] * d[2], y = M[3] * d[0] + M[4] * d[1] + M[5] * d[2], z = M[6] * d[0] + M[7] * d[1] + M[8] * d[2];
+      fy[i] = Math.acos(z > 1 ? 1 : z < -1 ? -1 : z) / Math.PI * m.h - 0.5;
+      fx[i] = Math.atan2(y, x) / (2 * Math.PI) * m.w - 0.5;
+      gs[i] = points[i].g;
+    }
+    const need = Math.max(30, n * (minSeen === undefined ? 0.3 : minSeen));
+    for (let k = 0; k < yaws.length; k++) {
+      const shift = yaws[k] / (2 * Math.PI) * m.w;
+      let c = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+      for (let i = 0; i < n; i++) {
+        const v = skySample(m, g, fy[i], fx[i] - shift, smooth);
+        if (v !== v) continue;
+        const a = gs[i];
+        c++; sa += a; sb += v; saa += a * a; sbb += v * v; sab += a * v;
+      }
+      let score = NaN;
+      if (c >= need) { const va = saa - sa * sa / c, vb = sbb - sb * sb / c; if (va > 0 && vb > 0) score = (sab - sa * sb / c) / Math.sqrt(va * vb); }
+      out[k] = { score, seen: c / n };
+    }
+    return out;
+  }
+  /** How well facing Q explains the picture's sky: { score (correlation), seen (share of points on the map) } or null. */
+  function skyScore(points, m, Q, minSeen) {
+    const p = poseOf(Q), r = skyScanPitch(points, m, skyGrey(m), p.pitch, [p.yaw], minSeen, [])[0];
+    return r.score === r.score ? r : null;
+  }
+  /** Best facing near a guess on one level of the sky map: a grid, then finer grids round the best. */
+  function alignSky(points, m, around, span, step, minSeen) {
+    const g = skyGrey(m);
+    let best = null;
+    const grid = (cy, cp, half, st) => {
+      const yaws = [];
+      for (let k = -half; k <= half; k++) yaws.push(cy + k * st);
+      for (let j = -half; j <= half; j++) {
+        const pitch = cp + j * st, res = skyScanPitch(points, m, g, pitch, yaws, minSeen, new Array(yaws.length));
+        res.forEach((r, k) => { if (r.score === r.score && (!best || r.score > best.score)) best = { yaw: yaws[k], pitch, score: r.score, seen: r.seen }; });
+      }
+    };
+    grid(around.yaw, around.pitch, Math.round(span / step), step);
+    if (!best) return null;
+    for (let st = step / 3; st > step / 30; st /= 3) grid(best.yaw, best.pitch, 2, st);
+    return best;
+  }
+  /**
+   * Where the camera faces from the sky alone (no guess): the whole sky searched on the coarse
+   * map, the best few refined on the fine one. Returns { yaw, pitch, score (fine), coarse,
+   * margin } or null; margin = how far it beat the best answer somewhere else.
+   */
+  function findOnSky(view, sky) {
+    const coarse = skyPoints(view, "coarse");
+    if (coarse.length < 40) return null;
+    // Whole sky, every 2°: nearest cells and whole-cell longitude shifts (integers only in the inner loop).
+    const m = sky.coarse, g = skyGrey(m), W = m.w, step = 2 * Math.PI / 180;
+    const use = coarse.length > 400 ? coarse.filter((_, i) => i % Math.ceil(coarse.length / 400) === 0) : coarse;
+    const n = use.length, rowAt = new Int32Array(n), colAt = new Int32Array(n), gs = new Float64Array(n), found = [];
+    for (let i = 0; i < n; i++) gs[i] = use[i].g;
+    for (let pitch = -Math.PI; pitch < Math.PI - 1e-9; pitch += step) {
+      const M = mul(STAND_T, rotationAbout([1, 0, 0], -pitch));
+      for (let i = 0; i < n; i++) {
+        const d = use[i].d, x = M[0] * d[0] + M[1] * d[1] + M[2] * d[2], y = M[3] * d[0] + M[4] * d[1] + M[5] * d[2], z = M[6] * d[0] + M[7] * d[1] + M[8] * d[2];
+        rowAt[i] = Math.min(m.h - 1, Math.floor(Math.acos(z > 1 ? 1 : z < -1 ? -1 : z) / Math.PI * m.h)) * W;
+        colAt[i] = (Math.floor((Math.atan2(y, x) / (2 * Math.PI) + 1) * W) % W) + W * 4;
+      }
+      for (let k = 0, yaw = -Math.PI; yaw < Math.PI - 1e-9; k++, yaw += step) {
+        const shift = Math.round((yaw / (2 * Math.PI)) * W);
+        let c = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+        for (let i = 0; i < n; i++) {
+          const v = g[rowAt[i] + (colAt[i] - shift) % W];
+          if (v !== v) continue;
+          const a = gs[i];
+          c++; sa += a; sb += v; saa += a * a; sbb += v * v; sab += a * v;
+        }
+        if (c < Math.max(30, n * 0.5)) continue;
+        const va = saa - sa * sa / c, vb = sbb - sb * sb / c;
+        if (va > 0 && vb > 0) found.push({ yaw, pitch, score: (sab - sa * sb / c) / Math.sqrt(va * vb) });
+      }
+    }
+    if (!found.length) return null;
+    found.sort((a, b) => b.score - a.score);
+    const axis = (f) => apply(poseQ(f.yaw, f.pitch), [0, 0, 1]);
+    const tops = [];
+    for (const f of found) { if (tops.length >= 4) break; if (tops.every((t) => angle(axis(t), axis(f)) > 0.15)) tops.push(f); }
+    const fine = skyPoints(view, "fine");
+    let best = null;
+    for (const t of tops) {
+      const c = alignSky(coarse, sky.coarse, t, step, step / 2, 0.5);
+      const r = c && alignSky(fine, sky.fine, c, 0.75 * Math.PI / 180, 0.25 * Math.PI / 180, 0.3);
+      const out = r ? { ...r, coarse: c.score } : c ? { ...c, coarse: c.score, score: 0 } : null;
+      if (out && (!best || out.coarse + out.score > best.coarse + best.score)) best = out;
+    }
+    if (!best) return null;
+    const other = found.find((f) => angle(axis(f), axis(best)) > 0.25);
+    return { ...best, margin: best.coarse - (other ? other.score : 0) };
+  }
+  /** Share of the sky painted (area-weighted, coarse level). */
+  function skyCoverage(sky) {
+    const m = sky.coarse;
+    let seen = 0, all = 0;
+    for (let row = 0; row < m.h; row++) {
+      const w = Math.sin((row + 0.5) / m.h * Math.PI);
+      for (let col = 0; col < m.w; col++) { all += w; if (m.weight[row * m.w + col] > 0) seen += w; }
+    }
+    return seen / all;
+  }
+  /** The sky as bytes to keep (feature values, 0 = not seen). */
+  function skyToBytes(sky) {
+    const f = sky.fine, c = sky.coarse, out = new Uint8Array(2 + f.w * f.h + c.w * c.h);
+    out[0] = 1; out[1] = sky.mirrored ? 1 : 0;
+    const put = (m, at) => { for (let i = 0; i < m.w * m.h; i++) if (m.weight[i] > 0) out[at + i] = Math.max(1, Math.min(255, Math.round(128 + 2 * m.sum[i] / m.weight[i]))); };
+    put(f, 2); put(c, 2 + f.w * f.h);
+    return out;
+  }
+  function skyFromBytes(bytes) {
+    const sky = newSky(bytes[1] === 1), f = sky.fine, c = sky.coarse;
+    if (bytes.length !== 2 + f.w * f.h + c.w * c.h) return null;
+    const get = (m, at) => { for (let i = 0; i < m.w * m.h; i++) if (bytes[at + i]) { m.sum[i] = (bytes[at + i] - 128) / 2; m.weight[i] = 1; } };
+    get(f, 2); get(c, 2 + f.w * f.h);
+    sky.frames = 1;
+    return sky;
+  }
+
+  // EVE's own windows sit still on the picture while the sky moves behind them. Their text and
+  // icons have sharp edges that stay exactly put from one picture to the next while the camera
+  // turns; the sky's stars and nebula edges move. Blocks whose sharp pixels keep staying put
+  // are windows, left out of the sky (a block's flat dark parts say nothing either way).
+  /** A screen-fixed mask of EVE's windows, learnt as the camera turns. */
+  function newUiMask(width, height, size) {
+    const s = size || 8, bw = Math.ceil(width / s), bh = Math.ceil(height / s);
+    return { size: s, bw, bh, width, height, ui: new Uint8Array(bw * bh), still: new Float32Array(bw * bh), seen: new Uint8Array(bw * bh), flat: new Float32Array(bw * bh).fill(9), mean: null, prev: null, views: 0 };
+  }
+  /**
+   * Learn from one picture (counts only pictures where most of the sky's sharp pixels changed:
+   * the camera turned). Returns true when the mask changed.
+   */
+  function updateUiMask(mask, rgba, width, height, disc) {
+    if (width !== mask.width || height !== mask.height) return false;
+    const lum = new Uint8Array(width * height);
+    for (let i = 0, k = 0; i < lum.length; i++, k += 4) lum[i] = (77 * rgba[k] + 151 * rgba[k + 1] + 28 * rgba[k + 2]) >> 8;
+    const prev = mask.prev;
+    mask.prev = lum;
+    if (!prev) return false;
+    const { size, bw, bh } = mask, nb = bw * bh, tex = new Uint16Array(nb), still = new Uint16Array(nb);
+    const out = disc ? (disc.r * SKY_GLOW) ** 2 : -1;
+    // Each block's brightness too: bright flat parts of windows (bars, buttons) don't change either.
+    const mean = new Float32Array(nb), cnt = new Float32Array(nb);
+    for (let y = 0; y < height; y += 2) { const row = Math.floor(y / size) * bw; for (let x = 0; x < width; x += 2) { const b = row + Math.floor(x / size); mean[b] += lum[y * width + x]; cnt[b]++; } }
+    for (let b = 0; b < nb; b++) mean[b] /= cnt[b] || 1;
+    const lastMean = mask.mean;
+    mask.mean = mean;
+    let allTex = 0, allStill = 0;
+    for (let y = 0; y < height - 1; y++) {
+      const row = Math.floor(y / size) * bw, dy2 = disc ? (y - disc.cy) ** 2 : 0;
+      for (let x = 0; x < width - 1; x++) {
+        const i = y * width + x, l = lum[i];
+        if (Math.abs(lum[i + 1] - l) + Math.abs(lum[i + width] - l) < 28) continue;
+        if (disc && (x - disc.cx) ** 2 + dy2 < out) continue;
+        const b = row + Math.floor(x / size), same = Math.abs(l - prev[i]) <= 3 ? 1 : 0;
+        tex[b]++; still[b] += same; allTex++; allStill += same;
+      }
+    }
+    // Hardly any part of the picture changed: the camera held still, nothing to learn. (Counted
+    // in blocks, so a big window full of text doesn't outvote the sky.)
+    let texBlocks = 0, moved = 0;
+    for (let b = 0; b < nb; b++) { if (tex[b] < 4) continue; texBlocks++; if (still[b] < tex[b] * 0.4) moved++; }
+    if (allTex < 50 || moved < 10 || moved < texBlocks * 0.3) return false;
+    mask.views++;
+    let changed = false;
+    for (let b = 0; b < nb; b++) {
+      if (lastMean) mask.flat[b] = mask.flat[b] === 9 ? Math.abs(mean[b] - lastMean[b]) : 0.8 * mask.flat[b] + 0.2 * Math.abs(mean[b] - lastMean[b]);
+      if (tex[b] < 4) continue;
+      const share = still[b] / tex[b];
+      mask.still[b] = mask.seen[b] ? 0.8 * mask.still[b] + 0.2 * share : share;
+      mask.seen[b] = 1;
+    }
+    // Windows: blocks whose sharp pixels stay put, or bright blocks that don't change at all,
+    // plus one block round them (their soft edges and shadows).
+    const core = new Uint8Array(nb);
+    for (let b = 0; b < nb; b++) core[b] = (mask.seen[b] && mask.still[b] > 0.6) || (mean[b] > 35 && mask.flat[b] < 0.6) ? 1 : 0;
+    // A window's flat inside: still blocks within 5 on both sides (left and right, or above and below).
+    const near = (bx, by, sx, sy) => { for (let k = 1; k <= 5; k++) { const x = bx + sx * k, y = by + sy * k; if (x < 0 || y < 0 || x >= bw || y >= bh) return false; if (core[y * bw + x]) return true; } return false; };
+    const inside = new Uint8Array(nb);
+    for (let b = 0; b < nb; b++) { const bx = b % bw, by = Math.floor(b / bw); inside[b] = core[b] || (near(bx, by, -1, 0) && near(bx, by, 1, 0)) || (near(bx, by, 0, -1) && near(bx, by, 0, 1)) ? 1 : 0; }
+    core.set(inside);
+    for (let b = 0; b < nb; b++) {
+      const bx = b % bw, by = Math.floor(b / bw);
+      let ui = 0;
+      for (let dy = -1; dy <= 1 && !ui; dy++) for (let dx = -1; dx <= 1; dx++) { const x = bx + dx, y = by + dy; if (x >= 0 && y >= 0 && x < bw && y < bh && core[y * bw + x]) { ui = 1; break; } }
+      if (mask.views < 4) ui = 0;
+      if (ui !== mask.ui[b]) { mask.ui[b] = ui; changed = true; }
+    }
+    return changed;
+  }
+  const uiMaskReady = (mask) => !!mask && mask.views >= 4;
+  function uiMaskToBytes(mask) {
+    const out = new Uint8Array(6 + mask.bw * mask.bh);
+    out[0] = mask.size; out[1] = mask.bw >> 8; out[2] = mask.bw & 255; out[3] = mask.bh >> 8; out[4] = mask.bh & 255; out[5] = Math.min(255, mask.views);
+    out.set(mask.ui, 6);
+    return out;
+  }
+  function uiMaskFromBytes(bytes, width, height) {
+    const mask = newUiMask(width, height, bytes[0]);
+    if (mask.bw !== ((bytes[1] << 8) | bytes[2]) || mask.bh !== ((bytes[3] << 8) | bytes[4])) return null;
+    mask.ui.set(bytes.subarray(6, 6 + mask.bw * mask.bh));
+    mask.views = bytes[5];
+    for (let i = 0; i < mask.ui.length; i++) if (mask.ui[i]) { mask.still[i] = 1; mask.seen[i] = 1; }
+    return mask;
+  }
+
+  const api = { rimStillThere, SKY_LEVELS, skyView, skyPoints, skyRay, newSky, paintSky, skyScore, alignSky, findOnSky, skyCoverage, skyToBytes, skyFromBytes, newUiMask, updateUiMask, uiMaskReady, uiMaskToBytes, uiMaskFromBytes, shiftBare, despeckle, halfGrey, followSpot, GRID_W, GRID_H, SIZE, heat, fitRotation, rotationAbout, mul, apply, transpose, identity, angle, planetVector, latLon, toSphere, toPicture, facingOf,
     solveAnchors, solveAnchorsEitherWay, lockOne, northUp, poseQ, poseOf, upright, samplePoints, bareGrey, poseScore, alignToMap, findOnMap, solveMatching, findMarkers, autoLock, refineWithMarkers, fitCircle, findRim, rimRadius, circleFrom3, correctWithAnchor, greyDisc, trackRotation, newMap, paint, cells, fromCells, coverage, missingHint, unmix, newBare, bareCoverage, bareToBytes, bareFromBytes, fillHoles };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.PiScanEngine = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -17,13 +17,14 @@
           font-size: 44px; font-weight: 700; letter-spacing: 1px; }
   h1 { font-size: 24px; font-weight: 600; margin: 14px 0 2px; }
   .sub { color: var(--muted); margin: 0 0 28px; }
-  /* Patch 122: the second row opens a section below it (Launch groups, Peepshow); Settings and Assets are pages. */
+  /* Patch 122: the second row opens a section below it (Launch groups, Peepshow); Settings and Assets are pages. PI (first row) opens its section too. */
   .hubs { margin-top: 16px; }
-  .hubs button.site.on { border-color: var(--red-hi, #d6242c); }
+  button.site.on { border-color: var(--red-hi, #d6242c); }
   body:not([data-hub]) .tools, body:not([data-hub]) .plinks { display: none !important; }
   body:not([data-hub="peep"]) .plinks { display: none !important; }
   body[data-hub="groups"] .tool:not([data-sec~="groups"]) { display: none; }
   body[data-hub="peep"] .tool:not([data-sec~="peep"]) { display: none; }
+  body[data-hub="pi"] .tool:not([data-sec~="pi"]) { display: none; }
   .sites { display: grid; grid-template-columns: repeat(4, 210px); gap: 16px; }
   @media (max-width: 960px) { .sites { grid-template-columns: repeat(2, 230px); } }
   button.site { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -96,9 +97,9 @@
         <path d="M5.8 16.5c.6-1.8 1.8-2.7 3.2-2.7s2.6.9 3.2 2.7M14.5 10h3.5M14.5 13.5h3.5"/></svg>
       <b>Your accounts</b><span>Logins, alts, order</span>
     </button>
-    <button class="site" data-site="pi">
+    <button class="site" data-hub="pi">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5.2"/><ellipse cx="12" cy="12" rx="10" ry="3.4" transform="rotate(-20 12 12)"/></svg>
-      <b>PI</b><span>What to restart, where</span>
+      <b>PI</b><span>What to restart, where; planet scans</span>
     </button>
   </div>
   <div class="sites hubs">
@@ -122,6 +123,14 @@
 
   <div class="tools">
     <h2>EVE clients</h2>
+    <button class="tool" data-tool="pioverview" data-sec="pi">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5.2"/><ellipse cx="12" cy="12" rx="10" ry="3.4" transform="rotate(-20 12 12)"/></svg>
+      <div><b>PI overview</b><span>Every colony in SeAT: what to restart, where, and the corp's resource maps</span></div>
+    </button>
+    <button class="tool" data-tool="piscan" data-sec="pi">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 2.6 3 14.4 0 17M12 3.5c-3 2.6-3 14.4 0 17"/></svg>
+      <div><b>PI planet scan<em>BETA</em></b><span>Turn a planet in EVE; the app maps the whole planet's resources for the corp. Finds which way the planet faces from the stars behind it</span></div>
+    </button>
     <button class="tool" data-tool="newgroup" data-sec="groups">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9M7.5 12h9"/></svg>
       <div><b>New launch group<em>NEW</em></b><span>Pick characters, preset and keys: one page, its own profile</span></div>
@@ -143,10 +152,6 @@
     <button class="tool" data-tool="settings" data-sec="groups">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
       <div><b>Client settings</b><span>Copy one client's settings to the others, profiles, backups</span></div>
-    </button>
-    <button class="tool" data-tool="piscan" data-sec="groups">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 2.6 3 14.4 0 17M12 3.5c-3 2.6-3 14.4 0 17"/></svg>
-      <div><b>PI planet scan<em>BETA</em></b><span>Turn a planet in EVE; the app maps the whole planet's resources for the corp</span></div>
     </button>
     <button class="tool" data-tool="tuning" data-sec="groups">
       <svg viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16"/><circle cx="5" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="7" r="2"/></svg>
@@ -212,12 +217,12 @@
     if (hub) document.body.dataset.hub = hub; else delete document.body.dataset.hub;
     document.querySelectorAll("button.site[data-hub]").forEach(b => b.classList.toggle("on", b.dataset.hub === hub));
     const h2 = document.querySelector(".tools h2");
-    if (h2) h2.textContent = hub === "peep" ? "Devil's Peepshow" : "Launch Groups";
+    if (h2) h2.textContent = hub === "peep" ? "Devil's Peepshow" : hub === "pi" ? "PI" : "Launch Groups";
     try { history.replaceState(null, "", hub ? "#" + hub : "#"); } catch (e) {}
   }
   document.querySelectorAll("button.site[data-hub]").forEach(btn => btn.addEventListener("click", () => showHub(document.body.dataset.hub === btn.dataset.hub ? null : btn.dataset.hub)));
   document.querySelectorAll("button.site[data-page]").forEach(btn => btn.addEventListener("click", () => { location.href = btn.dataset.page; }));
-  if (["#groups", "#peep"].includes(location.hash)) showHub(location.hash.slice(1));
+  if (["#groups", "#peep", "#pi"].includes(location.hash)) showHub(location.hash.slice(1));
   document.querySelectorAll("button.site[data-site]").forEach(btn => {
     btn.addEventListener("click", () => {
       const remember = document.getElementById("skip").checked;
@@ -237,6 +242,7 @@
       if (btn.dataset.tool === "tuning") { location.href = "tuning.html"; return; }
       if (btn.dataset.tool === "newgroup") { location.href = "newgroup.html"; return; }
       if (btn.dataset.tool === "piscan") { location.href = "piscan.html"; return; }
+      if (btn.dataset.tool === "pioverview") { invoke("open_site", { site: "pi", remember: document.getElementById("skip").checked }).catch((err) => alert(err)); return; }
       if (btn.dataset.tool === "launcheraccounts") {
         soon.textContent = "Reading the EVE launcher's logs…";
         try { soon.textContent = await invoke("group_accounts_from_launcher"); } catch (e) { soon.textContent = String(e); }
