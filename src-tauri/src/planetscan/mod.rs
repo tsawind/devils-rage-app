@@ -355,7 +355,7 @@ impl Session {
         }
     }
     fn ui_path(&self) -> Option<PathBuf> {
-        Some(self.dir.as_ref()?.join(format!("ui-{}-{}x{}.bin", safe_name(self.client.as_deref()?), self.size.0, self.size.1)))
+        Some(self.dir.as_ref()?.join(format!("windows-{}-{}x{}.bin", safe_name(self.client.as_deref()?), self.size.0, self.size.1)))
     }
     fn list_path(&self) -> Option<PathBuf> {
         Some(self.dir.as_ref()?.join(format!("list-{}-{}x{}.txt", safe_name(self.client.as_deref()?), self.size.0, self.size.1)))
@@ -372,7 +372,8 @@ impl Session {
         }
         self.size = (w, h);
         self.mask = None;
-        self.ui = self.ui_path().and_then(|p| std::fs::read(p).ok()).and_then(|b| UiMask::from_bytes(&b, w, h)).or_else(|| Some(UiMask::new(w, h)));
+        // EVE's windows rarely cover more than a third of the picture: a saved mask that does is wrong.
+        self.ui = self.ui_path().and_then(|p| std::fs::read(p).ok()).and_then(|b| UiMask::from_bytes(&b, w, h)).filter(|m| m.share() < 0.35).or_else(|| Some(UiMask::new(w, h)));
         self.ui_version += 1;
         let saved = self.list_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| {
             let v: Vec<f64> = t.split_whitespace().filter_map(|x| x.parse().ok()).collect();
@@ -434,7 +435,7 @@ impl Session {
         // when a planet opens passes through other sizes). Then it's kept; Follow zoom follows it.
         if self.edge_r.is_none() && self.edge_auto && self.frames % 8 == 1 {
             let expect = sky::ZOOMED_OUT_RIM * self.lens();
-            match sky::rim_radius(&pic, Some(expect), self.lens(), self.ui.as_ref()) {
+            match sky::rim_radius(&pic, Some(expect), self.lens(), None) {
                 Some(r) => {
                     self.edge_missing = None;
                     self.edge_seen.push(r);
@@ -457,7 +458,7 @@ impl Session {
             }
         } else if self.auto_zoom && self.frames % 15 == 0 {
             if let Some(r0) = self.edge_r {
-                if let Some(r) = sky::rim_radius(&pic, Some(r0), self.lens(), self.ui.as_ref()) {
+                if let Some(r) = sky::rim_radius(&pic, Some(r0), self.lens(), None) {
                     if (r - r0).abs() > r0 * 0.015 {
                         self.edge_r = Some(r);
                         self.mask = None;
@@ -1439,7 +1440,7 @@ pub fn planetscan_edge(engine: tauri::State<'_, Engine>, r: Option<f64>, find: O
     s.mask = None;
     if find == Some(true) {
         let f = frame.ok_or("no picture yet")?;
-        let found = sky::rim_radius(&Pic { w: f.w, h: f.h, bgra: &f.bgra }, Some(sky::ZOOMED_OUT_RIM * lens_for(f.w)), lens_for(f.w), s.ui.as_ref())
+        let found = sky::rim_radius(&Pic { w: f.w, h: f.h, bgra: &f.bgra }, Some(sky::ZOOMED_OUT_RIM * lens_for(f.w)), lens_for(f.w), None)
             .ok_or("no planet edge at the zoomed-out size: zoom all the way out in EVE (or click the edge)")?;
         s.edge_seen.clear();
         s.edge_r = Some(found);

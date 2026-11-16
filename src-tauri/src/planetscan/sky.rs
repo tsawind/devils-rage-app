@@ -109,16 +109,26 @@ pub struct UiMask {
     still: Vec<f32>,
     seen: Vec<u8>,
     flat: Vec<f32>,
-    mean: Option<Vec<f32>>,
+    /// Block means at an earlier look, `FLAT_GAP` counted looks back: a flat window is told from
+    /// smooth nebula by how little it changed since then (looks a moment apart barely differ
+    /// anywhere when EVE draws 60 pictures a second).
+    flat_ref: Option<(Vec<f32>, u32)>,
     prev: Option<Vec<u8>>,
     pub views: u32,
 }
+
+/// Counted looks between the flat-window comparisons (about a second of turning at 60 fps).
+const FLAT_GAP: u32 = 8;
 
 impl UiMask {
     pub fn new(w: usize, h: usize) -> UiMask {
         let size = 8;
         let (bw, bh) = (w.div_ceil(size), h.div_ceil(size));
-        UiMask { size, bw, bh, w, h, ui: vec![0; bw * bh], still: vec![0.0; bw * bh], seen: vec![0; bw * bh], flat: vec![9.0; bw * bh], mean: None, prev: None, views: 0 }
+        UiMask { size, bw, bh, w, h, ui: vec![0; bw * bh], still: vec![0.0; bw * bh], seen: vec![0; bw * bh], flat: vec![9.0; bw * bh], flat_ref: None, prev: None, views: 0 }
+    }
+    /// Share of the picture marked as EVE's windows.
+    pub fn share(&self) -> f64 {
+        self.ui.iter().filter(|&&u| u != 0).count() as f64 / self.ui.len().max(1) as f64
     }
     pub fn ready(&self) -> bool {
         self.views >= 4
@@ -128,7 +138,11 @@ impl UiMask {
         self.ui[(y / self.size) * self.bw + x / self.size] != 0
     }
     /// Learn from one picture (only pictures where the camera turned count). True when it changed.
+    /// Only once the planet's edge is known: the planet and its glow are never a window (smooth and
+    /// slow to change, they'd look like one).
     pub fn learn(&mut self, pic: &Pic, disc: Option<&Disc>) -> bool {
+        let Some(disc) = disc else { return false };
+        let disc = Some(disc);
         if pic.w != self.w || pic.h != self.h {
             return false;
         }
@@ -152,7 +166,6 @@ impl UiMask {
         for b in 0..nb {
             mean[b] /= cnt[b].max(1.0);
         }
-        let last_mean = self.mean.replace(mean.clone());
         let Some(prev) = self.prev.replace(lum.clone()) else { return false };
         let out = disc.map(|d| (d.r * GLOW).powi(2)).unwrap_or(-1.0);
         let mut tex = vec![0u16; nb];
@@ -195,11 +208,25 @@ impl UiMask {
             return false;
         }
         self.views += 1;
-        for b in 0..nb {
-            if let Some(last) = &last_mean {
-                let d = (mean[b] - last[b]).abs();
-                self.flat[b] = if self.flat[b] == 9.0 { d } else { 0.8 * self.flat[b] + 0.2 * d };
+        // Flat windows: how much each block changed since a look at least a second and FLAT_GAP
+        // looks back (the camera has turned a few degrees by then; nebula has changed, a window not).
+        let compare = match &self.flat_ref {
+            None => {
+                self.flat_ref = Some((mean.clone(), self.views));
+                false
             }
+            Some((_, v)) => self.views >= v + FLAT_GAP,
+        };
+        if compare {
+            if let Some((last, _)) = self.flat_ref.take() {
+                for b in 0..nb {
+                    let d = (mean[b] - last[b]).abs();
+                    self.flat[b] = if self.flat[b] == 9.0 { d } else { 0.7 * self.flat[b] + 0.3 * d };
+                }
+            }
+            self.flat_ref = Some((mean.clone(), self.views));
+        }
+        for b in 0..nb {
             if tex[b] < 4 {
                 continue;
             }
@@ -243,6 +270,12 @@ impl UiMask {
             }
             if self.views < 4 {
                 ui = 0;
+            }
+            if let Some(d) = disc {
+                let (px, py) = ((bx as f64 + 0.5) * size as f64, (by as f64 + 0.5) * size as f64);
+                if (px - d.cx).powi(2) + (py - d.cy).powi(2) < out {
+                    ui = 0;
+                }
             }
             if ui != self.ui[b] {
                 self.ui[b] = ui;
@@ -1294,5 +1327,66 @@ mod tests {
         assert!((near - r).abs() < r * 0.01);
         let zoomed = planet_picture(w, h, r * 2.2);
         assert!(rim_radius(&Pic { w, h, bgra: &zoomed }, None, lens, None).is_none());
+    }
+
+    /// A slow turn (0.5° between looks) past gentle, bright nebula: between two looks it barely
+    /// changes, so only a longer comparison tells it from a window. The nebula and the planet must
+    /// stay sky; a window (sharp text on a flat panel) must be learnt.
+    #[test]
+    fn windows_learnt_without_the_nebula_or_the_planet() {
+        let (w, h) = (640usize, 360usize);
+        let disc = Disc::with_lens(320.0, 180.0, 94.0, 375.0);
+        let mut ui = UiMask::new(w, h);
+        // Nothing is learnt before the planet's edge is known.
+        let blank = vec![0u8; w * h * 4];
+        assert!(!ui.learn(&Pic { w, h, bgra: &blank }, None));
+        for k in 0..120 {
+            let shift = k as f64 * 10.0; // px a look: a slow turn
+            let mut px = vec![0u8; w * h * 4];
+            for y in 0..h {
+                for x in 0..w {
+                    let sx = x as f64 + shift;
+                    // nebula: broad and bright; stars: sharp dots on a grid that moves with it
+                    let neb = 60.0 + 15.0 * ((sx / 150.0).sin() * (y as f64 / 120.0).cos());
+                    // stars: soft dots scattered over 6 px cells (a hash picks which cells have one,
+                    // and where in it), moving with the sky
+                    let (cx6, cy6) = ((sx / 6.0).floor() as i64, (y / 6) as i64);
+                    let hash = (cx6.wrapping_mul(73_856_093) ^ cy6.wrapping_mul(19_349_663)).rem_euclid(1009);
+                    let star = if hash < 220 {
+                        let (ox, oy) = (cx6 as f64 * 6.0 + 1.5 + (hash % 3) as f64, cy6 as f64 * 6.0 + 1.5 + (hash % 5) as f64 * 0.6);
+                        let d2 = (sx - ox).powi(2) + (y as f64 - oy).powi(2);
+                        200.0 * (-d2 / 1.5).exp()
+                    } else {
+                        0.0
+                    };
+                    let mut v = neb + star;
+                    let (dx, dy) = (x as f64 - disc.cx, y as f64 - disc.cy);
+                    if dx * dx + dy * dy < disc.r * disc.r {
+                        v = 140.0 + 5.0 * ((x as f64 + shift * 0.3) / 60.0).sin(); // the planet, smooth
+                    }
+                    if x < 96 && y < 150 {
+                        v = if (x % 9 < 2 && y % 11 < 6) || y % 40 == 0 { 230.0 } else { 70.0 }; // a window
+                    }
+                    let v = v.clamp(0.0, 255.0) as u8;
+                    px[(y * w + x) * 4..(y * w + x) * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+                }
+            }
+            ui.learn(&Pic { w, h, bgra: &px }, Some(&disc));
+        }
+        assert!(ui.ready());
+        let share = |x0: usize, x1: usize, y0: usize, y1: usize| {
+            let (mut n, mut b) = (0, 0);
+            for y in (y0..y1).step_by(4) {
+                for x in (x0..x1).step_by(4) {
+                    n += 1;
+                    b += ui.blocked(x, y) as usize;
+                }
+            }
+            b as f64 / n as f64
+        };
+        assert!(share(8, 88, 8, 142) > 0.8, "window {}", share(8, 88, 8, 142));
+        assert!(share(260, 380, 120, 240) == 0.0, "planet {}", share(260, 380, 120, 240));
+        assert!(share(450, 640, 0, 360) < 0.05, "nebula {}", share(450, 640, 0, 360));
+        assert!(ui.share() < 0.35);
     }
 }
