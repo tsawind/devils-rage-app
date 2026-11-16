@@ -20,7 +20,7 @@
   button { font: inherit; cursor: pointer; }
   .back { background: none; border: 0; color: var(--muted); }
   .back:hover { color: var(--text); }
-  main { display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+  main { display: grid; grid-template-columns: 330px 1fr; min-height: 0; }
   #left { overflow-y: auto; border-right: 1px solid var(--line); padding: 8px 10px 20px; }
   .step { display: grid; grid-template-columns: 22px 1fr; gap: 7px; padding: 8px 0; border-top: 1px solid #23232a; }
   .step:first-child { border-top: 0; }
@@ -28,27 +28,24 @@
   .step .n.done { background: #3b5f0f; }
   .step h3 { margin: 0 0 3px; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
   .step h3 .state { margin-left: auto; font-weight: 400; font-size: 11.5px; }
-  /* A finished step folds to its title line (click the title to open it again), so Scan stays on screen. */
+  /* A finished step folds to its title line (click the title to open it again). */
   .step.fold h3 { cursor: pointer; }
   .step.fold.done h3::after { content: "▸"; color: var(--muted); font-size: 11px; }
   .step.fold.done.open h3::after { content: "▾"; }
   .step.fold.done:not(.open) .more { display: none; }
-  .legend { display: flex; gap: 7px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-top: 3px; }
-  .legend .sq { display: inline-block; vertical-align: -3px; margin-right: 3px; }
   .muted { color: var(--muted); } .small { font-size: 12px; } .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
   select { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 4px 7px; font: inherit; max-width: 100%; }
   .btn { border: 1px solid var(--line); border-radius: 7px; background: #121216; color: var(--text); padding: 4px 10px; }
   .btn:hover { border-color: var(--red-hi); }
-  .btn.red { border-color: var(--red); background: #1c0d0e; color: #f3c6c6; font-weight: 600; }
-  .btn.go { border-color: #4e7f12; background: #13200a; color: var(--ok); font-weight: 600; }
-  .btn.big { font-size: 15px; padding: 7px 14px; width: 100%; }
   .btn.on { border-color: var(--ok); color: var(--ok); }
   .btn:disabled { opacity: .45; cursor: default; }
   .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; }
   label.tog { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 4px; cursor: pointer; }
   label.tog input { margin: 0; }
-  .meter { height: 7px; border-radius: 4px; background: #23232a; overflow: hidden; flex: 1; }
-  .meter i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .15s; }
+  .meter { height: 9px; border-radius: 5px; background: #23232a; overflow: hidden; margin-top: 5px; }
+  .meter i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .2s; }
+  .meter.sky i { background: var(--sky); }
+  .big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
   /* planets: one row each, with the corp's scans as squares (EVE's list order) */
   #planets { margin-top: 5px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .pl { display: grid; grid-template-columns: 1fr 16px 16px repeat(5, 18px); gap: 3px; align-items: center; padding: 3px 7px; border-top: 1px solid #202026; cursor: pointer; font-size: 12px; }
@@ -62,29 +59,23 @@
   .sq.old { background: #b88a1a; border-color: #e0ae2c; }
   .sq.stale { background: #7a2a2a; border-color: #a33; }
   .sq.part { background: repeating-linear-gradient(45deg, #6aa51b 0 3px, #26262c 3px 6px); }
-  .sq.me { outline: 2px solid #fff; outline-offset: 0; }
   .dot { width: 11px; height: 11px; border-radius: 50%; background: #2a2a30; border: 1px solid #3a3a42; justify-self: center; }
   .dot.on { background: var(--sky); border-color: #a8ccff; }
   .dot.bare.on { background: #c98a52; border-color: #e5ad79; }
   .plhead { display: grid; grid-template-columns: 1fr 16px 16px repeat(5, 18px); gap: 3px; padding: 2px 7px; font-size: 10px; color: var(--muted); background: #121216; }
   .plhead span { text-align: center; }
-  .status { min-height: 1.3em; margin-top: 4px; color: var(--muted); font-size: 12px; }
-  .status.ok { color: var(--ok); } .status.bad { color: var(--bad); } .status.warn { color: var(--warn); }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; font-size: 12px; margin-top: 4px; }
   .kv span:nth-child(odd) { color: var(--muted); }
-  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 4px; }
-  .pins { max-height: 150px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; margin-top: 4px; }
-  .pin { padding: 2px 7px; font-size: 12px; cursor: pointer; border-top: 1px solid #202026; }
-  .pin:first-child { border-top: 0; }
-  .pin.sel { background: #2a1a0a; color: var(--warn); }
-  .pin.many { color: var(--muted); }
-  .pin .got { float: right; color: var(--ok); }
-  /* right side */
-  #right { display: grid; grid-template-columns: 1fr 380px; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; padding: 8px; min-height: 0; min-width: 0; }
+  /* right side: the live picture and the map, each zoomable; the panel beside them */
+  #right { display: grid; grid-template-columns: 1fr 360px; grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr); gap: 8px; padding: 8px; min-height: 0; min-width: 0; }
   .view { position: relative; background: #000; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; min-height: 0; }
-  #shot { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+  .view canvas.aim { cursor: crosshair; }
   .badge { position: absolute; left: 8px; top: 8px; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: rgba(0,0,0,.65); border: 1px solid var(--line); pointer-events: none; }
   .badge.ok { color: var(--ok); border-color: #4e7f12; } .badge.warn { color: var(--warn); border-color: #7a6416; }
+  .zoomsaid { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: var(--muted); background: rgba(0,0,0,.55); padding: 1px 7px; border-radius: 6px; pointer-events: none; }
+  .tabs { position: absolute; left: 8px; top: 8px; display: flex; gap: 4px; }
+  .tabs .btn { padding: 2px 10px; font-size: 12px; background: rgba(10,10,14,.8); }
   .clickhint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: rgba(40,20,5,.9); border: 1px solid var(--warn); color: var(--warn); padding: 4px 12px; border-radius: 8px; font-size: 13px; pointer-events: none; display: none; }
   #panel { grid-row: 1 / span 2; grid-column: 2; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
   .card { border: 1px solid var(--line); border-radius: 9px; background: var(--card); padding: 9px 11px; }
@@ -97,20 +88,14 @@
   #log div { padding: 2px 0; border-top: 1px solid #202026; }
   #log div:first-child { border-top: 0; }
   #log .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
-  .mapbox { display: grid; grid-template-columns: minmax(0, 720px) minmax(170px, 1fr); gap: 10px; align-items: start; min-width: 0; }
-  #flat { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; image-rendering: pixelated; background: #0a0a0d; border: 1px solid var(--line); border-radius: 7px; }
-  .maptext { font-size: 12px; min-width: 0; }
-  .maptext h4 { margin: 0 0 2px; font-size: 14px; }
-  .bigpct { font-size: 34px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
-  .scale { height: 10px; border-radius: 3px; background: linear-gradient(90deg, #14102a, #152a50, #12452f, #2c6f0a, #8a7d05, #a85a08, #b0180c, #c7c0bf); margin: 4px 0 2px; }
   /* the done pop-up */
-  @media (max-width: 1700px) { #right { grid-template-columns: 1fr 300px; } .now .say { font-size: 14.5px; } }
   #pop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
   #pop .box { width: 480px; border: 2px solid #4e7f12; background: #10180a; border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 40px #000; }
   #pop.err .box { border-color: var(--red); background: #1c0d0e; }
   #pop h2 { margin: 0 0 6px; font-size: 19px; color: var(--ok); }
   #pop.err h2 { color: var(--bad); }
   #pop .next { margin-top: 10px; font-size: 15px; color: var(--warn); }
+  @media (max-width: 1700px) { #right { grid-template-columns: 1fr 300px; } .now .say { font-size: 14.5px; } }
 </style>
 </head>
 <body>
@@ -124,80 +109,68 @@
 <main>
   <div id="left">
     <div class="step"><div class="n" id="n1">1</div><div>
-      <h3>Client and planet <span class="state" id="s1"></span></h3>
+      <h3>Character and planet <span class="state" id="s1"></span></h3>
       <div class="row"><select id="client" style="flex: 1"></select><button class="btn" id="reload" title="Look for clients and planets again">↻</button></div>
-      <div class="small muted" style="margin-top: 4px">Open the planet in EVE and pick it here. This page only watches the picture; it never clicks or types in EVE.</div>
+      <div class="small muted" style="margin-top: 4px">Open the planet in EVE and pick it here. The app only watches; it never clicks or types in EVE.</div>
       <div id="planets"></div>
-      <div class="legend" title="The corp's scans of each resource; hover a square for who and when"><span><i class="sq fresh"></i>&lt; 7 d</span><span><i class="sq old"></i>older</span><span><i class="sq stale"></i>14 d+ / none</span><span><i class="sq part"></i>part</span><span><i class="sq me"></i>yours</span></div>
-      <label class="tog" title="Once a planet's own colours are mapped, the app can tell which planet EVE shows and switch to it"><input type="checkbox" id="autoPlanet"> Switch planet by itself (mapped planets)</label>
     </div></div>
 
     <div class="step fold"><div class="n" id="n2">2</div><div>
       <h3>The planet's edge <span class="state" id="s2"></span></h3>
       <div class="more">
-      <div class="small muted">Zoomed all the way out in EVE (every planet is then about the same size). Found by itself; set once, it stays.</div>
+      <div class="small muted">Zoom all the way out in EVE: every planet is then the same size, and the edge is found by itself.</div>
       <div class="row"><button class="btn" id="findEdge">Find edge</button><button class="btn" id="clickEdge">Click the edge</button></div>
-      <label class="tog" title="Follow the edge when you zoom in EVE (off: the size stays where it was set)"><input type="checkbox" id="autoZoom"> Follow zoom</label>
+      <label class="tog" title="Follow the edge when you zoom in EVE (off: the size stays where it was found)"><input type="checkbox" id="autoZoom"> Follow zoom</label>
       </div>
     </div></div>
 
     <div class="step fold"><div class="n" id="n3">3</div><div>
-      <h3>Sky lock <span class="state" id="s3"></span></h3>
+      <h3>The sky <span class="state" id="s3"></span></h3>
       <div class="more">
-      <div class="small muted">The stars and nebula behind the planet never move, so the sky tells which way the camera faces. Each planet records its own sky as you turn it (until then it borrows another planet's).</div>
+      <div class="small muted">The stars and nebula behind the planet never move, so the sky tells which way the camera looks. No sky in the system yet: turn the planet slowly <b>sideways</b> and the app starts one from what it sees. Then keep turning every way, over the poles too, and it records.</div>
+      <div class="meter sky"><i id="skyMeter"></i></div>
       <div class="kv" id="skyFacts"></div>
-      <div class="row"><button class="btn" id="findSky" title="Drop the lock and find the facing from the sky alone">Find by the sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button><label class="tog" style="margin: 0"><input type="checkbox" id="showSky"> Show the sky map</label></div>
-      <details id="pointOut"><summary>Point out buildings (first lock in a system)</summary>
-        <div class="small muted">Only needed once per system (the corp shares the sky). In EVE, click your command center so your colony shows. Easy-to-spot buildings are listed first.</div>
-        <div class="small warn" id="pinSaid" style="margin-top: 3px"></div>
-        <div class="pins" id="pins"></div>
-        <div class="row"><button class="btn" id="lockPins" disabled>Lock on</button><button class="btn" id="clearPins">Clear</button></div>
-      </details>
+      <div class="row"><button class="btn" id="newSky" title="Don't use another planet's sky: start this planet's own from what it sees">Start its own sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button></div>
       </div>
     </div></div>
 
     <div class="step"><div class="n" id="n4">4</div><div>
-      <h3>Scan <span class="state" id="s4"></span></h3>
-      <div class="row"><button class="btn go big" id="scan">Scan</button></div>
-      <div class="row"><button class="btn" id="stop" disabled>Stop</button><button class="btn" id="saveNow" disabled title="Save what's scanned so far (under 99 %)">Save now</button><select id="resource" title="Used when the app can't see EVE's list"></select></div>
-      <label class="tog"><input type="checkbox" id="autoNext" checked> Start the next scan when EVE switches resource</label>
-      <div class="small muted" style="margin-top: 4px">EVE's resource list: <span id="listSaid"></span> <button class="btn" id="pointList" style="padding: 1px 7px">Point it out</button></div>
-      <div class="small muted" style="margin-top: 4px">Zoomed all the way out. In EVE's Scan panel, drag both ends of the colour band right out (once). Pick a resource in EVE, press Scan, spin the planet (over the poles too) until 99 %.</div>
+      <h3>The planet map <span class="state" id="s4"></span></h3>
+      <div class="small muted">EVE on <b>No filter</b>, zoomed all the way out. Spin the planet until 99 %: every side, over both poles. It records along with the sky.</div>
+      <div class="row" style="align-items: baseline"><span class="big" id="basePct">–</span><span class="small muted" id="baseSaid"></span></div>
+      <div class="meter"><i id="baseMeter"></i></div>
+      <label class="tog"><input type="checkbox" id="baseOn" checked> Record the planet's colours</label>
+      <div class="small muted" style="margin-top: 4px">EVE's resource list: <span id="listSaid"></span> <button class="btn" id="pointList" style="padding: 1px 7px" title="Show the app where EVE's list is (two clicks), if it reads it wrong">Point it out</button></div>
+      <div class="row"><button class="btn" id="forgetBase" title="Throw this planet's map away (here and the corp's copy) and start again">Start over</button></div>
     </div></div>
 
     <div class="step"><div class="n" id="n5">5</div><div>
       <h3>Save for the corp <span class="state" id="s5"></span></h3>
-      <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (and each planet's own colours and sky)</label>
+      <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (the planet map and its sky)</label>
+      <div class="row"><button class="btn" id="saveMaps" title="Save this planet's sky and map for the corp now, even under 99 %">Save now</button></div>
     </div></div>
   </div>
 
   <div id="right">
-    <div class="view" id="viewBox"><canvas id="shot"></canvas><div class="badge" id="badge"></div><div class="clickhint" id="clickHint"></div></div>
+    <div class="view" id="viewBox"><canvas id="shot"></canvas><div class="badge" id="badge"></div><div class="zoomsaid" id="shotZoom"></div><div class="clickhint" id="clickHint"></div></div>
+    <div class="view" id="mapBox"><canvas id="map"></canvas>
+      <div class="tabs"><button class="btn" id="tabPlanet">Planet map</button><button class="btn" id="tabSky">Sky map</button></div>
+      <div class="zoomsaid" id="mapZoom"></div>
+    </div>
     <div id="panel">
       <div class="card now"><h2>Do now</h2><div class="say" id="say">Starting…</div><ul id="also"></ul></div>
+      <div class="card small muted" id="mapNote">Wheel: zoom (on the picture and the map). Drag: move. Double-click: all of it.</div>
       <div class="card" style="flex: 1; display: flex; flex-direction: column; min-height: 0"><div class="small muted" style="margin-bottom: 4px">What happened</div><div id="log"></div></div>
-    </div>
-    <div class="mapbox">
-      <canvas id="flat" width="720" height="360"></canvas>
-      <div class="maptext">
-        <h4 id="mapTitle">Map</h4>
-        <div class="bigpct" id="mapPct">–</div>
-        <div class="muted" id="mapSub"></div>
-        <div class="scale" id="scale"></div><div class="small muted" id="scaleSaid">low → high</div>
-        <div class="small" id="missing" style="margin-top: 6px"></div>
-      </div>
     </div>
   </div>
 </main>
 <div id="pop"><div class="box"><h2 id="popTitle"></h2><div id="popText"></div><div class="next" id="popNext"></div><div class="row" style="justify-content: flex-end; margin-top: 12px"><button class="btn" id="popOk">OK</button></div></div></div>
-<script src="piscan-engine.js"></script>
+
 <script>
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
-  const E = window.PiScanEngine;
-  const DEG = Math.PI / 180;
   const RESOURCES = {
     barren: ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Microorganisms", "Noble Metals"],
     gas: ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Reactive Gas"],
@@ -210,8 +183,7 @@
   };
   const FRESH_DAYS = 7;
   let planets = [], planet = null, me = null, status = null, seq = 0, alive = true;
-  let picture = null, shownSeq = 0, frozen = false, clickMode = null, listClicks = [], pinPick = null, anchors = [];
-  let mapVersion = -1, mapAt = 0, lastEvent = 0, lastPicked = null, skyDrawnAt = 0;
+  let picture = null, clickMode = null, listClicks = [];
   const settings = (() => { try { return JSON.parse(localStorage.getItem("planetscan") || "{}"); } catch { return {}; } })();
   const keep = () => { try { localStorage.setItem("planetscan", JSON.stringify(settings)); } catch {} };
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -234,8 +206,12 @@
     div.append(t, m); $("log").prepend(div);
     while ($("log").children.length > 60) $("log").lastChild.remove();
   }
+  function popup(title, text, next, err) {
+    $("popTitle").textContent = title; $("popText").textContent = text; $("popNext").textContent = next || "";
+    $("pop").classList.toggle("err", !!err); $("pop").style.display = "flex";
+  }
 
-  // ---------- 1: client and planets ----------
+  // ---------- 1: character and planet ----------
   async function loadClients() {
     const [list, front] = await Promise.all([invoke("preview_clients").catch(() => []), invoke("last_eve_client").catch(() => null)]);
     const names = (list || []).map((c) => c.name || c).filter((n) => n && !/^Login/.test(n));
@@ -286,7 +262,7 @@
     box.innerHTML = "";
     if (!planets.length) { box.innerHTML = '<div class="small muted" style="padding: 6px">No planets yet (SeAT signed in? ↻)</div>'; return; }
     const head = document.createElement("div"); head.className = "plhead";
-    head.innerHTML = "<span style='text-align: left'>Planet</span><span title='Its own sky recorded'>sky</span><span title='Its own colours mapped'>own</span><span style='grid-column: span 5' title='In the order EVE lists them'>resources</span>";
+    head.innerHTML = "<span style='text-align: left'>Planet</span><span title='Its sky is recorded'>sky</span><span title='Its planet map is done'>map</span><span style='grid-column: span 5' title=\"The corp's resource scans, in EVE's order\">resources</span>";
     box.append(head);
     const shown = planet ? systemOf(planet) : planets;
     for (const p of shown) {
@@ -294,16 +270,16 @@
       row.className = "pl" + (planet && planet.planet_id === p.planet_id ? " sel" : "");
       const mine = (p.characters || []).some((c) => c.name === me);
       const nm = document.createElement("span"); nm.className = "nm";
-      nm.innerHTML = `${esc(p.name.replace(systemName(p) + " ", ""))} <small>${esc(p.type || "")}${mine ? " · yours" : p.no_colony ? " · no colony" : ""}</small>`;
+      nm.innerHTML = `${esc(p.name.replace(systemName(p) + " ", ""))} <small>${esc(p.type || "")}${mine ? " · yours" : ""}</small>`;
       nm.title = p.name;
       row.append(nm);
-      const sky = mapInfo(p, "sky"), bare = mapInfo(p, "bare");
-      const d1 = document.createElement("span"); d1.className = "dot" + (sky ? " on" : ""); d1.title = sky ? `Own sky: ${pct(sky.coverage)}, ${ago(sky.at)} by ${sky.by}` : "No own sky yet";
-      const d2 = document.createElement("span"); d2.className = "dot bare" + (bare ? " on" : ""); d2.title = bare ? `Own colours: ${pct(bare.coverage)}, ${ago(bare.at)} by ${bare.by}` : "Own colours not mapped yet (a No filter pass, once)";
+      const sky = mapInfo(p, "sky"), base = mapInfo(p, "bare");
+      const d1 = document.createElement("span"); d1.className = "dot" + (sky ? " on" : ""); d1.title = sky ? `Sky: ${pct(sky.coverage)}, ${ago(sky.at)} by ${sky.by}` : "No sky recorded yet";
+      const d2 = document.createElement("span"); d2.className = "dot bare" + (base ? " on" : ""); d2.title = base ? `Planet map: ${pct(base.coverage)}, ${ago(base.at)} by ${base.by}` : "No planet map yet";
       row.append(d1, d2);
       resourcesOf(p).forEach((r, i) => {
         const s = scanInfo(p, r), sq = document.createElement("span");
-        sq.className = "sq " + scanClass(s) + (s && s.by && planets.some((q) => (q.characters || []).some((c) => c.name === s.by && c.mine)) ? " me" : "");
+        sq.className = "sq " + scanClass(s);
         sq.textContent = i + 1;
         sq.title = `${r}: ` + (s ? `${pct(s.coverage)} by ${s.by || "?"}, ${ago(s.at)}` : "not scanned");
         row.append(sq);
@@ -312,93 +288,91 @@
       box.append(row);
     }
   }
-  function nextToScan(p) {
-    if (!p) return null;
-    if (!mapInfo(p, "bare") && !(status && status.bare && status.bare.coverage > 0.9)) return { row: 0, resource: "" };
-    const list = resourcesOf(p);
-    for (let i = 0; i < list.length; i++) if (scanClass(scanInfo(p, list[i])) !== "fresh") return { row: i + 1, resource: list[i] };
-    return null;
-  }
   async function selectPlanet(id, quiet) {
     const p = planets.find((q) => q.planet_id === id);
     if (!p) return;
     const changed = !planet || planet.planet_id !== id;
     planet = p; settings.planet = id; keep();
-    renderPlanets(); renderResources(); renderPins();
-    if (changed) { anchors = []; pinPick = null; letGo(); mapVersion = -1; }
+    renderPlanets();
+    if (changed) { mapImg = null; mapVersion = -1; drawMap(); }
     const info = (q) => {
-      const sky = mapInfo(q, "sky"), bare = mapInfo(q, "bare");
-      return { id: q.planet_id, name: q.name, type: q.type || "", sky_at: sky ? sky.at : null, bare_at: bare ? bare.at : null, sky_coverage: sky ? sky.coverage : null };
+      const sky = mapInfo(q, "sky"), base = mapInfo(q, "bare");
+      return { id: q.planet_id, name: q.name, type: q.type || "", sky_at: sky ? sky.at : null, bare_at: base ? base.at : null, sky_coverage: sky ? sky.coverage : null };
     };
     if (changed && !quiet) log(`Planet: ${p.name}`);
     await invoke("planetscan_planet", { planet: info(p), system: systemOf(p).map(info) }).catch((e) => log("Couldn't load the planet's maps: " + e, "bad"));
   }
-  function renderResources() {
-    const sel = $("resource"); sel.innerHTML = "";
-    sel.append(new Option("Bare planet (No filter)", ""));
-    resourcesOf(planet).forEach((r) => sel.append(new Option(r, r)));
+  function nextPlanet() {
+    if (!planet) return null;
+    return systemOf(planet).find((p) => p.planet_id !== planet.planet_id && !mapInfo(p, "bare")) || null;
   }
 
-  // ---------- the picture ----------
-  const shot = $("shot"), sctx = shot.getContext("2d");
-  let fit = { x: 0, y: 0, k: 1 };
-  function sizeCanvas() {
-    const r = $("viewBox").getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
-    if (shot.width !== w || shot.height !== h) { shot.width = w; shot.height = h; }
+  // ---------- zoom: wheel zooms where the mouse is, drag moves, double-click shows it all ----------
+  function zoomable(canvas, redraw) {
+    const z = { k: 1, x: 0, y: 0, moved: false };
+    let drag = null;
+    const dpr = () => window.devicePixelRatio || 1;
+    canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const r = canvas.getBoundingClientRect(), mx = (e.clientX - r.left) * dpr(), my = (e.clientY - r.top) * dpr();
+      const k = Math.min(40, Math.max(1, z.k * (e.deltaY < 0 ? 1.25 : 0.8))), g = k / z.k;
+      z.x = mx - (mx - z.x) * g; z.y = my - (my - z.y) * g; z.k = k;
+      if (k === 1) { z.x = 0; z.y = 0; }
+      redraw();
+    }, { passive: false });
+    canvas.addEventListener("mousedown", (e) => { drag = { x: e.clientX, y: e.clientY, zx: z.x, zy: z.y }; z.moved = false; });
+    window.addEventListener("mousemove", (e) => {
+      if (!drag) return;
+      const dx = (e.clientX - drag.x) * dpr(), dy = (e.clientY - drag.y) * dpr();
+      if (Math.abs(dx) + Math.abs(dy) > 4 * dpr()) z.moved = true;
+      if (z.k > 1 && z.moved) { z.x = drag.zx + dx; z.y = drag.zy + dy; redraw(); }
+    });
+    window.addEventListener("mouseup", () => { drag = null; });
+    canvas.addEventListener("dblclick", () => { z.k = 1; z.x = 0; z.y = 0; redraw(); });
+    return z;
   }
+  /** Fit (w × h) inside the canvas, then the zoom on top: picture point → canvas = x + k · p. */
+  function fitWithZoom(canvas, w, h, z) {
+    const k = Math.min(canvas.width / w, canvas.height / h);
+    const base = { k, x: (canvas.width - w * k) / 2, y: (canvas.height - h * k) / 2 };
+    return { k: base.k * z.k, x: z.x + base.x * z.k, y: z.y + base.y * z.k };
+  }
+  function sizeCanvas(canvas, box) {
+    const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  }
+
+  // ---------- the live picture ----------
+  const shot = $("shot"), sctx = shot.getContext("2d");
+  const zShot = zoomable(shot, () => drawShot());
+  let fit = { x: 0, y: 0, k: 1 };
   function drawShot() {
-    sizeCanvas();
+    sizeCanvas(shot, $("viewBox"));
     sctx.fillStyle = "#000"; sctx.fillRect(0, 0, shot.width, shot.height);
     const s = status;
     const fw = s && s.size ? s.size[0] : 1920, fh = s && s.size ? s.size[1] : 1024;
-    const k = Math.min(shot.width / fw, shot.height / fh);
-    fit = { k, x: (shot.width - fw * k) / 2, y: (shot.height - fh * k) / 2 };
-    if (picture) sctx.drawImage(picture, fit.x, fit.y, fw * k, fh * k);
+    fit = fitWithZoom(shot, fw, fh, zShot);
+    sctx.imageSmoothingEnabled = fit.k < 1.5;
+    if (picture) sctx.drawImage(picture, fit.x, fit.y, fw * fit.k, fh * fit.k);
+    $("shotZoom").textContent = zShot.k > 1 ? `${zShot.k.toFixed(1)}×` : "";
     if (!s) return;
-    const P = (x, y) => [fit.x + x * k, fit.y + y * k];
+    const P = (x, y) => [fit.x + x * fit.k, fit.y + y * fit.k];
     const dpr = window.devicePixelRatio || 1;
     if (s.disc) {
       const [cx, cy] = P(s.disc.cx, s.disc.cy);
-      sctx.strokeStyle = "rgba(214,36,44,.85)"; sctx.lineWidth = 1.5 * dpr;
-      sctx.beginPath(); sctx.arc(cx, cy, s.disc.r * k, 0, 2 * Math.PI); sctx.stroke();
-      // Buildings where the facing says they are.
-      if (s.pose && planet && planet.pins) {
-        const Q = s.pose.q, disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D };
-        sctx.strokeStyle = s.pose.placed ? "rgba(173,255,47,.9)" : "rgba(240,192,64,.7)"; sctx.lineWidth = 1.5 * dpr;
-        for (const pin of planet.pins) {
-          const v = E.apply(Q, E.planetVector(pin.lat, pin.lon, s.pose.mirrored));
-          const at = E.toPicture(v, disc);
-          if (!at.front) continue;
-          const [x, y] = P(at.x, at.y);
-          sctx.beginPath(); sctx.arc(x, y, 6 * dpr, 0, 2 * Math.PI); sctx.stroke();
-        }
-      }
+      sctx.strokeStyle = "rgba(214,36,44,.8)"; sctx.lineWidth = 1.5 * dpr;
+      sctx.beginPath(); sctx.arc(cx, cy, s.disc.r * fit.k, 0, 2 * Math.PI); sctx.stroke();
     }
-    // Pointing out buildings: where all of them land with the clicks so far (blue), and the clicks.
-    if (s.disc && anchors.length >= 2 && planet && planet.pins) {
-      const disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D }, lock = lockFromAnchors(disc);
-      if (lock) {
-        sctx.strokeStyle = "rgba(127,180,255,.95)"; sctx.lineWidth = 1.5 * dpr;
-        for (const pin of planet.pins) {
-          const at = E.toPicture(E.apply(lock.Q, E.planetVector(pin.lat, pin.lon, lock.mirrored)), disc);
-          if (!at.front) continue;
-          const [x, y] = P(at.x, at.y);
-          sctx.beginPath(); sctx.arc(x, y, 7 * dpr, 0, 2 * Math.PI); sctx.stroke();
-        }
-      }
-    }
-    sctx.fillStyle = "#f0c040";
-    for (const a of anchors) { const [x, y] = P(a.px, a.py); sctx.fillRect(x - 3 * dpr, y - 3 * dpr, 6 * dpr, 6 * dpr); }
     // EVE's resource list rows (while pointing it out, or when the app can't see which is lit).
     if (s.list && s.list.spot && (clickMode === "list" || s.list.picked == null)) {
       const sp = s.list.spot, gap = (sp.y5 - sp.y0) / 5;
       sctx.strokeStyle = "rgba(127,180,255,.8)"; sctx.lineWidth = 1 * dpr;
-      for (let i = 0; i < 6; i++) { const [x, y] = P(sp.x, sp.y0 + gap * i); sctx.strokeRect(x - gap * 2.4 * k, y - gap * 0.2 * k, gap * 4 * k, gap * 0.4 * k); }
+      for (let i = 0; i < 6; i++) { const [x, y] = P(sp.x, sp.y0 + gap * i); sctx.strokeRect(x - gap * 2.4 * fit.k, y - gap * 0.2 * fit.k, gap * 4 * fit.k, gap * 0.4 * fit.k); }
     }
     if (s.list && s.list.picked != null && s.list.spot) {
       const sp = s.list.spot, gap = (sp.y5 - sp.y0) / 5, [x, y] = P(sp.x, sp.y0 + gap * s.list.picked);
-      sctx.strokeStyle = "rgba(173,255,47,.9)"; sctx.lineWidth = 2 * dpr; sctx.strokeRect(x - gap * 2.6 * k, y - gap * 0.5 * k, gap * 4.4 * k, gap * k);
+      sctx.strokeStyle = "rgba(173,255,47,.9)"; sctx.lineWidth = 2 * dpr; sctx.strokeRect(x - gap * 2.6 * fit.k, y - gap * 0.5 * fit.k, gap * 4.4 * fit.k, gap * fit.k);
     }
   }
   function toFrame(e) {
@@ -406,6 +380,7 @@
     return { x: ((e.clientX - r.left) * dpr - fit.x) / fit.k, y: ((e.clientY - r.top) * dpr - fit.y) / fit.k };
   }
   shot.addEventListener("click", (e) => {
+    if (zShot.moved) return;
     const p = toFrame(e), s = status;
     if (!s || !s.size) return;
     if (clickMode === "edge") {
@@ -420,11 +395,6 @@
         invoke("planetscan_list", { x: (a.x + b.x) / 2, y0: a.y, y5: b.y }).then(() => log("EVE's resource list pointed out.", "ok")).catch((e2) => log(String(e2), "bad"));
         setClick(null);
       }
-    } else if (clickMode === "pin" && pinPick && s.disc) {
-      anchors = anchors.filter((a) => a.id !== pinPick.id);
-      anchors.push({ id: pinPick.id, px: p.x, py: p.y, lat: pinPick.lat, lon: pinPick.lon });
-      pinPick = null; setClick(null);
-      renderPins();
     }
   });
   function setClick(mode, hint) {
@@ -432,219 +402,72 @@
     if (mode !== "list") listClicks = [];
     $("clickHint").style.display = mode ? "block" : "none";
     $("clickHint").textContent = hint || "";
+    shot.classList.toggle("aim", !!mode);
     $("clickEdge").classList.toggle("on", mode === "edge");
     $("pointList").classList.toggle("on", mode === "list");
   }
-  $("clickEdge").addEventListener("click", () => setClick(clickMode === "edge" ? null : "edge", "Click once anywhere on the planet's edge"));
-  $("findEdge").addEventListener("click", () => invoke("planetscan_edge", { find: true }).then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok")).catch((e) => log(String(e), "bad")));
-  $("pointList").addEventListener("click", () => { listClicks = []; setClick(clickMode === "list" ? null : "list", "Click 'No filter' in EVE's resource list (on the picture)"); });
 
-  // ---------- 3: pointing out buildings (no sky in this system yet) ----------
-  // Buildings that are one of a kind in a colony are easy to find on the picture: those first.
-  const pinRank = (name) => /command center/i.test(name) ? 0 : /launch ?pad/i.test(name) ? 1 : /storage/i.test(name) ? 2 : /extractor control/i.test(name) ? 3 : 4;
-  function renderPins() {
-    const box = $("pins"); box.innerHTML = "";
-    const pins = (planet && planet.pins || []).filter((p) => p.owner === me).slice().sort((a, b) => pinRank(a.name) - pinRank(b.name) || a.name.localeCompare(b.name));
-    if (!pins.length) { box.innerHTML = `<div class="small muted" style="padding: 4px 7px">${esc(me || "This character")} has no buildings on ${esc(planet ? planet.name : "this planet")}. Pick a character with a colony here (1), or a planet where you have one.</div>`; }
-    const count = {}, total = {};
-    for (const p of pins) total[p.name] = (total[p.name] || 0) + 1;
-    for (const p of pins) {
-      count[p.name] = (count[p.name] || 0) + 1;
-      const label = total[p.name] > 1 ? `${p.name} #${count[p.name]}` : p.name;
-      const div = document.createElement("div");
-      div.className = "pin" + (pinPick && pinPick.id === p.id ? " sel" : "") + (total[p.name] > 1 ? " many" : "");
-      div.innerHTML = esc(label) + (anchors.some((a) => a.id === p.id) ? '<span class="got">✓</span>' : "");
-      div.title = total[p.name] > 1 ? "You have several of these: only use it if you can tell which one it is" : "One of a kind in your colony: easy to find";
-      div.addEventListener("click", () => pickPin(p, label));
-      box.append(div);
-    }
-    $("lockPins").disabled = anchors.length < 2;
-    renderPinSaid();
+  // ---------- the map: this planet's map, or its sky ----------
+  const mapCanvas = $("map"), mctx = mapCanvas.getContext("2d");
+  const zMap = zoomable(mapCanvas, () => drawMap());
+  let mapKind = settings.mapKind === "sky" ? "sky" : "planet", mapImg = null, mapVersion = -1, mapAt = 0, mapBusy = false;
+  function setMapKind(kind) {
+    mapKind = kind; settings.mapKind = kind; keep();
+    $("tabPlanet").classList.toggle("on", kind === "planet"); $("tabSky").classList.toggle("on", kind === "sky");
+    mapImg = null; mapVersion = -1; drawMap(); refreshMap(true);
   }
-  async function pickPin(p, label) {
+  $("tabPlanet").addEventListener("click", () => setMapKind("planet"));
+  $("tabSky").addEventListener("click", () => setMapKind("sky"));
+  async function refreshMap(force) {
     const s = status;
-    if (!s || !s.disc) return log("Set the planet's edge first (2).", "bad");
-    if (!s.ui || !s.ui.ready) return log("Turn the planet a little first: the app is still learning where EVE's windows are.", "warn");
-    if (!frozen) {
-      const ok = await invoke("planetscan_hold", { seq: shownSeq }).catch(() => false);
-      if (!ok) return log("No picture to hold yet.", "bad");
-      frozen = true;
-    }
-    pinPick = p; setClick("pin", `Click ${label} on the picture`); renderPins();
-  }
-  function letGo() {
-    if (frozen) { frozen = false; invoke("planetscan_hold", { seq: null }).catch(() => {}); }
-  }
-  /** Yaw and pitch (EVE's camera never rolls) that put the pointed-out buildings closest to their
-   * clicks: a pattern search from a first guess, in picture pixels. */
-  function fitPose(start, mirrored, disc) {
-    const miss = (yaw, pitch) => {
-      const Q = E.poseQ(yaw, pitch);
-      let e = 0;
-      for (const a of anchors) {
-        const at = E.toPicture(E.apply(Q, E.planetVector(a.lat, a.lon, mirrored)), disc);
-        if (!at.front) return Infinity;
-        e += (at.x - a.px) ** 2 + (at.y - a.py) ** 2;
-      }
-      return e;
-    };
-    let yaw = start.yaw, pitch = start.pitch, best = miss(yaw, pitch), step = 4 * DEG;
-    for (let i = 0; i < 4000 && step > 0.002 * DEG; i++) {
-      let moved = false;
-      for (const [dy, dp] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
-        const e = miss(yaw + dy * step, pitch + dp * step);
-        if (e < best) { best = e; yaw += dy * step; pitch += dp * step; moved = true; break; }
-      }
-      if (!moved) step /= 2;
-    }
-    return { yaw, pitch };
-  }
-  /** The facing from the pointed-out buildings, as EVE's camera can have it (no roll), and how far
-   * each building then lands from its click (px). Tries both ways EVE could count longitude. */
-  function lockFromAnchors(disc) {
-    const options = [];
-    for (const mirrored of [true, false]) {
-      const solved = E.solveAnchors(anchors, disc, mirrored);
-      if (!solved) continue;
-      const pose = fitPose(E.poseOf(solved.Q), mirrored, disc), Q = E.poseQ(pose.yaw, pose.pitch);
-      let worst = 0;
-      for (const a of anchors) {
-        const at = E.toPicture(E.apply(Q, E.planetVector(a.lat, a.lon, mirrored)), disc);
-        worst = Math.max(worst, at.front ? Math.hypot(at.x - a.px, at.y - a.py) : Infinity);
-      }
-      options.push({ pose, Q, mirrored, worst });
-    }
-    // Two buildings can't tell the ways apart: EVE's (mirrored, as every lock so far) unless the other clearly fits better.
-    options.sort((a, b) => (a.mirrored ? a.worst : a.worst * 1.5) - (b.mirrored ? b.worst : b.worst * 1.5));
-    return options[0] || null;
-  }
-  function renderPinSaid() {
-    const s = status, el = $("pinSaid");
-    if (!el) return;
-    if (!s || !s.disc) { el.textContent = "Set the planet's edge first (2)."; return; }
-    if (!s.ui || !s.ui.ready) { el.textContent = "Turn the planet a little first: the app is learning where EVE's windows are."; return; }
-    if (!anchors.length) { el.textContent = frozen ? "Picture held. Click the building you picked." : "Hold the planet still, pick a building below, then click it on the picture (the picture holds still while you do)."; return; }
-    const disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D };
-    if (anchors.length < 2) { el.textContent = "Now a second building, as far from the first as you can."; return; }
-    const lock = lockFromAnchors(disc);
-    el.textContent = lock ? `They fit within ${Math.round(lock.worst)} px${lock.worst > 10 ? ": check them (the blue rings should sit on your buildings)" : ". Press Lock on (a third building makes it surer)."}` : "Those don't fit: Clear and try again.";
-  }
-  $("clearPins").addEventListener("click", () => { anchors = []; pinPick = null; setClick(null); letGo(); renderPins(); });
-  $("lockPins").addEventListener("click", () => {
-    const s = status;
-    if (!s || !s.disc) return log("Set the planet's edge first (2).", "bad");
-    const disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D };
-    const lock = anchors.length >= 2 ? lockFromAnchors(disc) : null;
-    if (!lock) return log("Point out two buildings first.", "bad");
-    if (lock.worst > 25) return log(`Those don't fit together (${Math.round(lock.worst)} px off): check which building is which, or Clear and start again.`, "bad");
-    invoke("planetscan_pose", { yaw: lock.pose.yaw / DEG, pitch: lock.pose.pitch / DEG, mirrored: lock.mirrored });
-    log(`Locked on from ${anchors.length} buildings (within ${Math.round(lock.worst)} px).`, "ok");
-    frozen = false; // the app records the sky from the held picture, then lets it go
-    anchors = []; pinPick = null; setClick(null); renderPins();
-    $("pointOut").open = false;
-  });
-
-  // ---------- 3/4/5: commands ----------
-  $("findSky").addEventListener("click", () => { invoke("planetscan_find"); log("Looking on the sky…"); });
-  let forgetAsked = 0;
-  $("forgetSky").addEventListener("click", () => {
-    if (!planet) return;
-    if (Date.now() - forgetAsked > 4000) { forgetAsked = Date.now(); $("forgetSky").textContent = "Click again"; setTimeout(() => { $("forgetSky").textContent = "Record again"; }, 4000); return; }
-    $("forgetSky").textContent = "Record again";
-    invoke("planetscan_forget_sky", { planetId: planet.planet_id });
-    log(`${planet.name}: its own sky is forgotten; it records again as you turn.`, "warn");
-  });
-  function currentTarget() {
-    const picked = status && status.list ? status.list.picked : null;
-    if (picked != null && planet) return picked === 0 ? { row: 0, resource: "" } : { row: picked, resource: resourcesOf(planet)[picked - 1] };
-    const r = $("resource").value;
-    return { row: null, resource: r };
-  }
-  function startScan(target) {
-    const t = target || currentTarget();
-    if (!planet) return log("Pick the planet first.", "bad");
-    invoke("planetscan_scan", { resource: t.resource, row: t.row }).then(() => log(`Scanning ${t.resource || "the bare planet (its own colours)"} on ${planet.name}…`)).catch((e) => log(String(e), "bad"));
-    mapVersion = -1;
-  }
-  $("scan").addEventListener("click", () => startScan());
-  $("stop").addEventListener("click", () => { invoke("planetscan_scan", { resource: null }); log("Scan stopped (not saved)."); });
-  $("saveNow").addEventListener("click", () => invoke("planetscan_save").catch((e) => log(String(e), "bad")));
-  const options = () => invoke("planetscan_options", { options: { autosave: $("autosave").checked, auto_zoom: $("autoZoom").checked, auto_planet: $("autoPlanet").checked } });
-  for (const id of ["autosave", "autoZoom", "autoPlanet", "autoNext"]) {
-    if (settings[id] !== undefined) $(id).checked = settings[id];
-    $(id).addEventListener("change", () => { settings[id] = $(id).checked; keep(); options(); if (id === "autoPlanet" && $(id).checked) invoke("planetscan_load_bares").then((n) => log(`${n} planets' own colours loaded for telling them apart.`)); });
-  }
-  $("client").addEventListener("change", startClient);
-  $("reload").addEventListener("click", () => { loadClients(); loadPlanets(); });
-  $("showSky").addEventListener("change", () => { skyDrawnAt = 0; mapVersion = -1; });
-  $("home").addEventListener("click", () => { alive = false; invoke("planetscan_stop"); location.href = "index.html#pi"; });
-  window.addEventListener("beforeunload", () => invoke("planetscan_stop"));
-  $("popOk").addEventListener("click", () => { $("pop").style.display = "none"; });
-
-  // ---------- the map ----------
-  const flat = $("flat"), fctx = flat.getContext("2d");
-  const HEAT = [[20, 16, 42], [21, 42, 80], [18, 69, 47], [44, 111, 10], [138, 125, 5], [168, 90, 8], [176, 24, 12], [199, 192, 191]];
-  function heatColour(v) {
-    const t = Math.max(0, Math.min(1, v)) * (HEAT.length - 1), a = Math.floor(t), b = Math.min(HEAT.length - 1, a + 1), f = t - a;
-    return [0, 1, 2].map((c) => HEAT[a][c] * (1 - f) + HEAT[b][c] * f);
-  }
-  async function drawMap() {
-    const s = status;
-    if ($("showSky").checked) {
-      if (Date.now() - skyDrawnAt < 1500) return;
-      skyDrawnAt = Date.now();
-      const raw = await invoke("planetscan_skymap", { level: 2 }).catch(() => null);
-      if (!raw) return;
+    if (!s || mapBusy) return;
+    const version = mapKind === "planet" ? (s.base_map ? s.base_map.version : 0) : (s.sky && s.sky.own ? s.sky.own.frames : -2);
+    if (!force && version === mapVersion && Date.now() - mapAt < 15000) return;
+    if (!force && Date.now() - mapAt < (mapKind === "planet" ? 1000 : 2500)) return;
+    mapBusy = true;
+    try {
+      const raw = await invoke("planetscan_mapview", { kind: mapKind });
       const bytes = new Uint8Array(raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer);
-      const img = fctx.createImageData(720, 360);
-      for (let i = 0; i < 720 * 360; i++) { const v = bytes[i]; img.data.set(v ? [v, v, v, 255] : [10, 14, 40, 255], i * 4); }
-      fctx.putImageData(img, 0, 0);
-      drawViewMark(s);
-      $("mapTitle").textContent = "This planet's own sky (fine stars)"; $("mapPct").textContent = s && s.sky && s.sky.own ? pct(s.sky.own.levels[2]) : "–";
-      $("mapSub").textContent = "Grey = recorded, blue = not yet. Red cross: where the camera looks."; $("scale").style.visibility = "hidden"; $("scaleSaid").textContent = "";
-      return;
-    }
-    $("scale").style.visibility = "";
-    const version = s && s.run ? s.run.version : -2;
-    if (version === mapVersion && Date.now() - mapAt < 2000) { drawViewMark(s); return; }
-    mapVersion = version; mapAt = Date.now();
-    const raw = await invoke("planetscan_map").catch(() => null);
-    if (!raw) return;
-    const bytes = new Uint8Array(raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer);
-    const kind = bytes[0], img = fctx.createImageData(360, 180);
-    for (let i = 0; i < 360 * 180; i++) {
-      let c = [8, 8, 12];
-      if (kind === 1 && bytes[1 + i]) c = heatColour((bytes[1 + i] - 1) / 250);
-      else if (kind === 2 && (bytes[1 + i * 3] || bytes[2 + i * 3] || bytes[3 + i * 3])) c = [bytes[1 + i * 3], bytes[2 + i * 3], bytes[3 + i * 3]];
-      img.data.set([c[0], c[1], c[2], 255], i * 4);
-    }
-    const tmp = document.createElement("canvas"); tmp.width = 360; tmp.height = 180; tmp.getContext("2d").putImageData(img, 0, 0);
-    fctx.imageSmoothingEnabled = false; fctx.drawImage(tmp, 0, 0, 720, 360);
-    // Grid and buildings.
-    fctx.strokeStyle = "rgba(255,255,255,.07)"; fctx.lineWidth = 1;
-    for (let x = 60; x < 720; x += 60) { fctx.beginPath(); fctx.moveTo(x + .5, 0); fctx.lineTo(x + .5, 360); fctx.stroke(); }
-    for (let y = 60; y < 360; y += 60) { fctx.beginPath(); fctx.moveTo(0, y + .5); fctx.lineTo(720, y + .5); fctx.stroke(); }
-    fctx.fillStyle = "#f0c040";
-    for (const pin of (planet && planet.pins) || []) fctx.fillRect(pin.lon / (2 * Math.PI) * 720 - 1.5, pin.lat / Math.PI * 360 - 1.5, 3, 3);
-    drawViewMark(s);
-    const run = s && s.run;
-    $("mapTitle").textContent = run ? (run.resource || "Bare planet (its own colours)") + " · " + (planet ? planet.name : "") : kind === 2 ? "This planet's own colours" : "Map";
-    $("mapPct").textContent = run ? pct(run.coverage) : kind === 2 && s.bare ? pct(s.bare.coverage) : "–";
-    $("mapSub").textContent = run ? (run.done ? "done" : run.paused ? "paused: " + run.paused : `${Math.round(run.secs)} s · ${run.frames} pictures painted`) : "Whole planet, north at the top. Yellow: buildings.";
-    $("scaleSaid").textContent = run && run.resource ? "low → high" : "";
-    $("scale").style.visibility = run && run.resource ? "" : "hidden";
+      if (bytes.length) {
+        const img = await createImageBitmap(new Blob([bytes], { type: "image/jpeg" }));
+        if (mapImg && mapImg.close) mapImg.close();
+        mapImg = img;
+      } else mapImg = null;
+      mapVersion = version; mapAt = Date.now();
+      drawMap();
+    } catch (e) { /* next time */ }
+    mapBusy = false;
   }
-  // Red cross: the middle of the view on the map (the planet map), or behind the planet (the sky).
-  let markAt = null;
-  function drawViewMark(s) {
-    if (!s || !s.pose) return;
-    const Qt = E.transpose(s.pose.q), sky = $("showSky").checked;
-    const v = E.apply(Qt, sky ? [0, 0, -1] : [0, 0, 1]);
-    const ll = sky ? { lat: Math.acos(Math.max(-1, Math.min(1, v[2]))), lon: (Math.atan2(v[1], v[0]) + 2 * Math.PI) % (2 * Math.PI) } : E.latLon(v, s.pose.mirrored);
-    const x = ll.lon / (2 * Math.PI) * 720, y = ll.lat / Math.PI * 360;
-    markAt = [x, y];
-    fctx.strokeStyle = "#ff5a4a"; fctx.lineWidth = 2;
-    fctx.beginPath(); fctx.moveTo(x - 8, y); fctx.lineTo(x + 8, y); fctx.moveTo(x, y - 8); fctx.lineTo(x, y + 8); fctx.stroke();
+  function drawMap() {
+    sizeCanvas(mapCanvas, $("mapBox"));
+    const W = mapCanvas.width, H = mapCanvas.height, dpr = window.devicePixelRatio || 1;
+    mctx.fillStyle = "#08080b"; mctx.fillRect(0, 0, W, H);
+    const iw = mapImg ? mapImg.width : 2048, ih = mapImg ? mapImg.height : 1024;
+    const f = fitWithZoom(mapCanvas, iw, ih, zMap);
+    if (mapImg) {
+      mctx.imageSmoothingEnabled = f.k < 1.5;
+      mctx.drawImage(mapImg, f.x, f.y, iw * f.k, ih * f.k);
+    } else {
+      mctx.fillStyle = "#0e0e14"; mctx.fillRect(f.x, f.y, iw * f.k, ih * f.k);
+      mctx.fillStyle = "#8a8a92"; mctx.font = `${13 * dpr}px Segoe UI, sans-serif`; mctx.textAlign = "center";
+      mctx.fillText(mapKind === "planet" ? "No planet map yet: it paints in as you spin the planet (EVE on No filter)." : "No sky yet: turn the planet sideways in EVE.", W / 2, H / 2);
+    }
+    // 30° grid.
+    mctx.strokeStyle = "rgba(255,255,255,.08)"; mctx.lineWidth = 1;
+    for (let lon = 0; lon <= 360; lon += 30) { const x = f.x + (lon / 360) * iw * f.k; mctx.beginPath(); mctx.moveTo(x, f.y); mctx.lineTo(x, f.y + ih * f.k); mctx.stroke(); }
+    for (let lat = 0; lat <= 180; lat += 30) { const y = f.y + (lat / 180) * ih * f.k; mctx.beginPath(); mctx.moveTo(f.x, y); mctx.lineTo(f.x + iw * f.k, y); mctx.stroke(); }
+    // Where the camera looks: the planet's middle on the planet map, the view's middle on the sky.
+    const s = status;
+    if (s && s.pose && s.pose.q) {
+      const Q = s.pose.q;
+      const t = mapKind === "planet" ? [0, 0, 1] : [0, 0, -1];
+      const v = [Q[0] * t[0] + Q[3] * t[1] + Q[6] * t[2], Q[1] * t[0] + Q[4] * t[1] + Q[7] * t[2], Q[2] * t[0] + Q[5] * t[1] + Q[8] * t[2]];
+      const lat = Math.acos(Math.max(-1, Math.min(1, v[2]))); let lon = Math.atan2(v[1], v[0]); if (lon < 0) lon += 2 * Math.PI;
+      const x = f.x + (lon / (2 * Math.PI)) * iw * f.k, y = f.y + (lat / Math.PI) * ih * f.k;
+      mctx.strokeStyle = s.pose.placed ? "#ff5a4a" : "#f0c040"; mctx.lineWidth = 2 * dpr;
+      mctx.beginPath(); mctx.moveTo(x - 9 * dpr, y); mctx.lineTo(x + 9 * dpr, y); mctx.moveTo(x, y - 9 * dpr); mctx.lineTo(x, y + 9 * dpr); mctx.stroke();
+    }
+    $("mapZoom").textContent = (zMap.k > 1 ? `${zMap.k.toFixed(1)}× · ` : "") + (mapKind === "planet" ? "north at the top" : "the sky round this planet");
   }
 
   // ---------- reading the status: steps, tips, events ----------
@@ -654,151 +477,157 @@
     $("n" + n).closest(".step").classList.toggle("done", !!done);
   }
   for (const h of document.querySelectorAll(".step.fold h3")) h.addEventListener("click", () => h.closest(".step").classList.toggle("open"));
-  function popup(title, text, next, err) {
-    $("popTitle").textContent = title; $("popText").textContent = text; $("popNext").textContent = next || "";
-    $("pop").classList.toggle("err", !!err); $("pop").style.display = "flex";
-  }
-  let firstStatus = true;
+  let firstStatus = true, lastEvent = 0, lookingSince = null;
   function onEvents(s) {
     if (firstStatus) { firstStatus = false; for (const ev of s.events || []) lastEvent = Math.max(lastEvent, ev.id); }
     for (const ev of s.events || []) {
       if (ev.id <= lastEvent) continue;
       lastEvent = ev.id;
-      const cls = ev.kind === "error" ? "bad" : ev.kind === "done" || ev.kind === "saved" || ev.kind === "map-saved" || ev.kind === "locked" ? "ok" : "";
+      const cls = ev.kind === "error" ? "bad" : ["base-done", "map-saved", "locked", "saved"].includes(ev.kind) ? "ok" : "";
       log(ev.text, cls);
-      if (ev.kind === "saved" || ev.kind === "map-saved") {
-        // Show it in the squares straight away; SeAT's list catches up on the next reload.
+      if (ev.kind === "map-saved") {
         const p = planets.find((q) => q.planet_id === ev.planet_id);
-        if (p && ev.resource) { p.scans = (p.scans || []).filter((x) => x.resource !== ev.resource); p.scans.push({ resource: ev.resource, coverage: ev.coverage || 0.99, at: Date.now() / 1000, by: me }); }
-        if (p && ev.map) { p.maps = (p.maps || []).filter((x) => x.kind !== ev.map); p.maps.push({ kind: ev.map, coverage: 1, at: Date.now() / 1000, by: me }); }
-        renderPlanets();
-        if (ev.kind === "saved") {
-          const next = nextToScan(p);
-          popup("Done and saved for the corp", ev.text, next ? (next.row === 0 ? "Next: set EVE to No filter (this planet's own colours), then Scan." : `Next: click ${next.resource} in EVE${$("autoNext").checked ? " (the scan starts by itself)" : ", then Scan"}.`) : "This planet is done. Next: open the next planet in EVE.");
-        }
+        if (p && ev.map) { p.maps = (p.maps || []).filter((x) => x.kind !== ev.map); p.maps.push({ kind: ev.map, coverage: 1, at: Date.now() / 1000, by: me }); renderPlanets(); }
       }
-      if (ev.kind === "done" && !s.autosave) popup("Scan done", ev.text, "Press Save now to give it to the corp.");
-      if (ev.kind === "done" && ev.resource === "" && s.autosave) {
-        const next = nextToScan(planet);
-        popup("Planet's own colours mapped", ev.text, next ? `Next: click ${next.resource || "the first resource"} in EVE${$("autoNext").checked ? " (the scan starts by itself)" : ", then Scan"}.` : "");
+      if (ev.kind === "base-done") {
+        const next = nextPlanet();
+        popup(ev.saving ? "Done and saved for the corp" : "Planet map done", ev.text,
+          (ev.saving ? "" : "Autosave is off: press Save now to give it to the corp. ") + (next ? `Next: open ${next.name} in EVE, zoomed all the way out, and pick it on the left.` : "Every planet in this system has a map."));
       }
-      if (ev.kind === "error" && ev.resource) popup("Not saved", ev.text, "", true);
-      if (ev.kind === "planet" && ev.planet_id && $("autoPlanet").checked) selectPlanet(ev.planet_id);
+      if (ev.kind === "error" && ev.map) popup("Not saved", ev.text, "Press Save now to try again.", true);
     }
   }
   function onStatus(s) {
     status = s;
-    // Header rates.
     const cap = s.capture || {}, proc = s.proc || {};
-    $("rates").innerHTML = s.client ? `EVE <b>${Math.round(cap.fps || 0)}</b> fps · scan <b>${Math.round(proc.fps || 0)}</b> fps · ${Math.round(proc.ms || 0)} ms · ${s.size ? s.size.join("×") : ""} · ${esc(cap.method || "starting")}` : "";
+    $("rates").innerHTML = s.client ? `EVE <b>${Math.round(cap.fps || 0)}</b> fps · app <b>${Math.round(proc.fps || 0)}</b> fps · ${Math.round(proc.ms || 0)} ms · ${s.size ? s.size.join("×") : ""} · ${esc(cap.method || "starting")}` : "";
     onEvents(s);
-    // Steps.
+    const pose = s.pose, own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed, base = s.base_map || {};
+    // 1, 2
     setState(1, planet ? planet.name : "pick one", planet ? "ok" : "warn", !!planet && !!s.client);
-    setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : "not set", s.edge ? "ok" : "warn", !!s.edge);
-    const pose = s.pose;
-    const own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed;
-    const anySky = own || (bor && bor.loaded);
-    setState(3, pose ? (pose.placed ? (own && own.coverage < 0.95 && pose.sky_of === (planet && planet.planet_id) ? `locked · sky ${pct(own.coverage)}` : "locked") : "lost") : anySky ? "looking" : "first lock: buildings", pose && pose.placed ? "ok" : "warn", !!(pose && pose.placed));
-    renderPinSaid();
+    setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : "zoom all the way out", s.edge ? "ok" : "warn", !!s.edge);
+    // 3: the sky
+    const skyCov = own ? own.coverage : 0;
+    let s3 = "", c3 = "warn";
+    if (pose && pose.placed) { s3 = own && pose.sky_of === (planet && planet.planet_id) ? `on its own sky · ${pct(skyCov)}` : `on ${pose.sky_name || "the"} sky`; c3 = "ok"; }
+    else if (pose) s3 = "lost: turn back a little";
+    else if (s.boot && s.boot.working) s3 = "working out which way is up…";
+    else if (s.boot && s.boot.pictures) s3 = `watching ${s.boot.pictures}/${s.boot.of}`;
+    else s3 = own || (bor && bor.loaded) ? "looking for it…" : "turn it sideways";
+    setState(3, s3, c3, !!(pose && pose.placed) && skyCov >= 0.95);
+    $("skyMeter").style.width = `${Math.round(skyCov * 100)}%`;
     const facts = [];
-    facts.push(["Locked by", pose ? (pose.sky_name ? `${pose.sky_of === (planet && planet.planet_id) ? "its own sky" : pose.sky_name + "'s sky (borrowed)"}` : "buildings") : "–"]);
-    if (pose) facts.push(["Match", `nebula ${pct(pose.coarse)} · stars ${pct(pose.stars)} (${pose.level})`]);
-    facts.push(["Own sky", own ? `${pct(own.coverage)} · stars ${pct(own.levels[2])}${s.sky.recording ? " · recording" : ""}${s.sky.unsent ? " · not shared yet" : ""}` : "none yet (records as you turn)"]);
+    facts.push(["Sky", own ? `nebula ${pct(own.levels[0])} · stars ${pct(own.levels[1])} · fine ${pct(own.levels[2])}${s.sky.recording ? " · recording" : ""}` : "none of its own yet"]);
     if (bor) facts.push(["Borrowing", `${bor.name}'s sky`]);
     if (s.sky && s.sky.compare) facts.push(["Same sky?", `own vs ${s.sky.compare.with}: ${s.sky.compare.deg.toFixed(2)}° apart`]);
+    if (pose) facts.push(["Match", `nebula ${pct(pose.coarse)} · stars ${pct(pose.stars)}`]);
     if (s.sky && s.sky.rings != null) facts.push(["Rings", s.sky.rings ? "cut out of the sky" : "none"]);
     $("skyFacts").innerHTML = facts.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
-    const run = s.run;
+    $("newSky").hidden = !(bor || (!own && pose));
+    $("forgetSky").hidden = !own;
+    $("forgetBase").hidden = !((s.base_map || {}).coverage > 0);
+    // 4: the planet map
+    const bc = base.coverage || 0;
+    $("basePct").textContent = pct(bc); $("baseMeter").style.width = `${Math.round(bc * 100)}%`;
+    $("baseSaid").textContent = base.done ? "done" : !base.on ? "not recording" : base.paused ? `paused: ${base.paused}` : pose && pose.placed ? "recording" : "";
+    $("baseSaid").className = "small " + (base.done ? "ok" : base.paused ? "warn" : "muted");
+    setState(4, base.done ? "done" : base.paused && pose ? "paused" : pct(bc), base.done ? "ok" : base.paused && pose ? "warn" : "muted", !!base.done);
+    $("baseOn").checked = base.on !== false;
     const picked = s.list ? s.list.picked : null;
-    $("listSaid").textContent = picked == null ? (s.list && s.list.guessed ? "not seen (point it out)" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`;
-    $("listSaid").className = picked == null ? "warn" : "ok";
-    const target = currentTarget();
-    $("scan").textContent = run && !run.done ? `Scanning ${run.resource || "bare planet"}… ${pct(run.coverage)}` : `Scan ${target.resource || "bare planet (No filter)"}`;
-    $("scan").disabled = !planet || !(pose && pose.placed) || (run && !run.done);
-    $("stop").disabled = !(run && !run.done);
-    $("saveNow").disabled = !(run && run.coverage > 0.05 && (!run.done || !s.autosave));
-    setState(4, run ? (run.done ? "done" : run.paused ? "paused" : pct(run.coverage)) : "", run ? (run.done ? "ok" : run.paused ? "warn" : "ok") : "muted", run && run.done);
+    $("listSaid").textContent = picked == null ? (s.list && s.list.guessed ? "not seen" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`;
+    $("listSaid").className = picked === 0 ? "ok" : "warn";
+    // 5
     setState(5, s.autosave ? "autosave on" : "autosave off", s.autosave ? "ok" : "warn");
-    // The next scan starts by itself when EVE switches to a resource still to do.
-    if ($("autoNext").checked && planet && pose && pose.placed && picked != null && picked !== lastPicked && (!run || run.done)) {
-      const res = picked === 0 ? "" : resourcesOf(planet)[picked - 1];
-      const s0 = res ? scanInfo(planet, res) : null;
-      if (lastPicked != null && (picked === 0 ? !mapInfo(planet, "bare") : scanClass(s0) !== "fresh")) { $("pop").style.display = "none"; startScan({ row: picked, resource: res }); }
-    }
-    if (picked != null) lastPicked = picked;
     // Do now.
+    if (!pose && (own || (bor && bor.loaded))) lookingSince = lookingSince || Date.now(); else lookingSince = null;
     const [say, also, ok] = tips(s);
     $("say").textContent = say; $("say").className = "say" + (ok ? " ok" : "");
     $("also").innerHTML = also.map((t) => `<li>${esc(t)}</li>`).join("");
-    const [where, how] = run && !run.done && run.missing ? run.missing.split(": ") : [];
-    $("missing").textContent = where ? `Not seen yet: ${where}.` + (how ? ` ${how[0].toUpperCase()}${how.slice(1)}.` : "") : "";
-    // Badge on the picture.
     const badge = $("badge");
-    badge.textContent = frozen ? "Picture held: point out buildings" : pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.edge ? (anySky ? "Looking on the sky…" : "No sky yet: point out buildings") : "Edge not set";
-    badge.className = "badge " + (pose && pose.placed && !frozen ? "ok" : "warn");
+    badge.textContent = pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
+    badge.className = "badge " + (pose && pose.placed ? "ok" : "warn");
+    refreshMap(false);
   }
-  let pointOutFor = null;
   function tips(s) {
     const also = [];
-    const cap = s.capture || {};
+    const cap = s.capture || {}, base = s.base_map || {};
     if (!s.client) return ["Open EVE and log in a character, then pick it at the top left.", also];
     if (cap.trouble) also.push(cap.trouble);
-    if (s.client && cap.fps && cap.fps < 40 && s.run && !s.run.done) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second: for 60, keep EVE in front and lift any frame-rate limit in EVE's settings.`);
+    if (cap.fps && cap.fps < 40) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second: for 60, keep EVE in front and lift any frame-rate limit in EVE's settings.`);
     if (!planet) return ["Pick the planet you have open in EVE (1).", also];
-    if (!s.edge) return ["Zoom all the way out in EVE, then press Find edge (2).", also];
-    const learning = s.ui && !s.ui.ready;
-    const pose = s.pose, run = s.run;
+    if (!s.edge) return [`Open ${planet.name} in EVE and zoom all the way out: the app finds the planet's edge by itself.`, also];
+    if (s.rim_ok === false) return ["Zoom all the way out in EVE: the planet's edge isn't where it was.", also];
+    if (s.ui && !s.ui.ready) return ["Turn the planet a little: the app learns where EVE's windows are.", also];
+    const pose = s.pose, own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed;
     if (!pose) {
-      const any = (s.sky && (s.sky.own || (s.sky.borrowed && s.sky.borrowed.loaded)));
-      if (!any) {
-        if (pointOutFor !== planet.planet_id) { pointOutFor = planet.planet_id; $("pointOut").open = true; }
-        if (learning) return ["First lock in this system. Turn the planet a little in EVE: the app learns where EVE's windows are.", also];
-        if (frozen) return [anchors.length < 2 ? "Picture held. Pick a building in the list (3), then click it on the picture." : "Press Lock on (3). A third building, far from the others, makes it surer.", also];
-        return ["First lock in this system: hold the planet still, then point out two of your buildings (3).", also];
+      if (s.boot) {
+        if (s.boot.note) also.push(s.boot.note);
+        if (s.boot.working) return ["Working out which way is up… keep turning the planet slowly.", also];
+        return [`No sky in this system yet: turn the planet slowly sideways (left or right). Watching ${s.boot.pictures || 0} of ${s.boot.of} pictures.`, also];
       }
-      if (learning) also.push("Turn the planet a little: the app learns where EVE's windows are.");
-      if (s.find && !s.find.sure) also.push(`Best guess not sure yet (nebula ${pct(s.find.coarse)}, stars ${pct(s.find.stars)}).`);
-      return ["Looking for the planet on the sky… turn the planet a little.", also];
+      if (own || (bor && bor.loaded)) {
+        if (lookingSince && Date.now() - lookingSince > 20000) also.push("Not finding it? Press Start its own sky (3).");
+        return ["Looking for this planet on the sky… turn the planet a little.", also];
+      }
+      return ["Turn the planet slowly sideways (left or right): the app starts the sky from what it sees.", also];
     }
-    if (!pose.placed) return ["Lost the sky: turn a bit slower, or zoom back out if you zoomed in.", also];
-    if (learning) also.push("Turn the planet a little: the app learns where EVE's windows are.");
-    const own = s.sky && s.sky.own, ownSky = pose.sky_of === planet.planet_id;
-    const recordingSky = ownSky && !(s.sky && s.sky.borrowed) && (!own || own.coverage < 0.95);
+    if (!pose.placed) return ["Lost the sky: turn back a little, a bit slower.", also];
     if (s.fast_turn) also.push("Turning fast: fine, but slow down if it loses the sky.");
-    const picked = s.list ? s.list.picked : null;
-    if (picked == null) also.push("The app can't see which resource EVE shows: point out EVE's list (4) so a wrong one can't be saved.");
-    if (run && !run.done) {
-      if (run.paused === "EVE shows another resource") return [`EVE shows another resource: click ${run.resource || "No filter"} in EVE, or Stop.`, also];
-      if (run.resource && !s.bare) also.push("This planet's own colours aren't mapped yet: readings are rougher. Do a No filter pass once.");
-      if (run.resource) also.push("EVE's colour band: both ends dragged right out.");
-      if (recordingSky) also.push(`This planet's sky: ${pct(own ? own.coverage : 0)} recorded (it records as you turn, over the poles too).`);
-      return [`Spin the planet: ${pct(run.coverage)} of ${run.resource || "its own colours"}${run.missing ? "; the rest is " + run.missing.split(":")[0] : ""}.`, also];
+    const skyCov = own ? own.coverage : 0;
+    if (pose.sky_of === planet.planet_id && skyCov < 0.95) also.push(`The sky is ${pct(skyCov)} recorded: it grows as you turn every way.`);
+    if (base.done) {
+      const next = nextPlanet();
+      return [`${planet.name} is mapped.${next ? ` Next: open ${next.name} in EVE and pick it on the left.` : ""}`, also, true];
     }
-    const next = nextToScan(planet);
-    if (!next) return [`${planet.name} is up to date for the corp. Open the next planet in EVE.`, also, true];
-    if (next.row === 0) {
-      if (recordingSky) return [`Locked. Check EVE shows ${planet.name}, set EVE to No filter and press Scan, then turn the planet slowly all the way round, over both poles: its colours and its sky record together (sky ${pct(own ? own.coverage : 0)}).`, also];
-      return [`Once per planet: check EVE shows ${planet.name}, set EVE to No filter, then Scan: the app maps this planet's own colours.`, also];
-    }
-    if (recordingSky) also.push(`This planet's sky is ${pct(own ? own.coverage : 0)} recorded: keep turning all the way round while you scan.`);
-    return [`Click ${next.resource} in EVE's Scan panel, then Scan${$("autoNext").checked ? " (or it starts when EVE switches)" : ""}.`, also];
+    if (!base.on) return ["Planet map recording is off (4). Tick Record the planet's colours to map it.", also];
+    if (base.paused === "EVE shows a resource: set it to No filter") return ["Set EVE's scan to No filter: the planet map records its own colours.", also];
+    if (base.paused) return [`Planet map paused: ${base.paused}.`, also];
+    const miss = base.missing ? `; the rest is ${base.missing.split(":")[0]}` : "";
+    return [`Spin the planet: its map is ${pct(base.coverage || 0)} done${miss}.`, also];
   }
+
+  // ---------- commands ----------
+  $("clickEdge").addEventListener("click", () => setClick(clickMode === "edge" ? null : "edge", "Click once anywhere on the planet's edge"));
+  $("findEdge").addEventListener("click", () => invoke("planetscan_edge", { find: true }).then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok")).catch((e) => log(String(e), "bad")));
+  $("pointList").addEventListener("click", () => { listClicks = []; setClick(clickMode === "list" ? null : "list", "Click 'No filter' in EVE's resource list (on the picture)"); });
+  $("newSky").addEventListener("click", () => { invoke("planetscan_new_sky"); log("Starting this planet's own sky: turn it slowly sideways."); });
+  const twice = (id, label, what) => {
+    let asked = 0;
+    $(id).addEventListener("click", () => {
+      if (!planet) return;
+      if (Date.now() - asked > 4000) { asked = Date.now(); $(id).textContent = "Click again"; setTimeout(() => { $(id).textContent = label; }, 4000); return; }
+      asked = 0; $(id).textContent = label; what();
+    });
+  };
+  twice("forgetSky", "Record again", () => { invoke("planetscan_forget_sky", { planetId: planet.planet_id }); log(`${planet.name}: its own sky is forgotten; it starts again as you turn.`, "warn"); });
+  twice("forgetBase", "Start over", () => { invoke("planetscan_forget_base", { planetId: planet.planet_id }); mapImg = null; drawMap(); log(`${planet.name}: its planet map starts over.`, "warn"); });
+  $("baseOn").addEventListener("change", () => invoke("planetscan_base", { on: $("baseOn").checked }));
+  $("saveMaps").addEventListener("click", () => invoke("planetscan_save_maps").then(() => log("Saving this planet's sky and map for the corp…")).catch((e) => log(String(e), "bad")));
+  const options = () => invoke("planetscan_options", { options: { autosave: $("autosave").checked, auto_zoom: $("autoZoom").checked, auto_planet: false } });
+  for (const id of ["autosave", "autoZoom"]) {
+    if (settings[id] !== undefined) $(id).checked = settings[id];
+    $(id).addEventListener("change", () => { settings[id] = $(id).checked; keep(); options(); });
+  }
+  $("client").addEventListener("change", startClient);
+  $("reload").addEventListener("click", () => { loadClients(); loadPlanets(); });
+  $("home").addEventListener("click", () => { alive = false; invoke("planetscan_stop"); location.href = "index.html#pi"; });
+  window.addEventListener("beforeunload", () => invoke("planetscan_stop"));
+  $("popOk").addEventListener("click", () => { $("pop").style.display = "none"; });
 
   // ---------- the loop: picture + status in one call ----------
   async function pollLoop() {
     while (alive) {
       try {
-        const want = Math.min(3840, Math.max(640, shot.width || 1280));
+        // Sharp enough for the zoom (EVE's own size at most).
+        const want = Math.min(3840, Math.max(640, Math.round((shot.width || 1280) * zShot.k)));
         const raw = await invoke("planetscan_poll", { after: seq, width: want });
         const buf = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer;
         const n = new DataView(buf).getUint32(0, true);
         const msg = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n)));
         if (buf.byteLength > 4 + n) {
-          if (!frozen) {
-            const bmp = await createImageBitmap(new Blob([new Uint8Array(buf, 4 + n)], { type: "image/jpeg" }));
-            if (picture && picture.close) picture.close();
-            picture = bmp; shownSeq = msg.seq;
-          }
+          const bmp = await createImageBitmap(new Blob([new Uint8Array(buf, 4 + n)], { type: "image/jpeg" }));
+          if (picture && picture.close) picture.close();
+          picture = bmp;
           seq = msg.seq;
         }
         if (msg.s && msg.s.size) onStatus(msg.s);
@@ -809,9 +638,9 @@
       await new Promise((r) => requestAnimationFrame(r));
     }
   }
-  setInterval(() => { if (alive) drawMap(); }, 250);
   setInterval(() => { if (alive) loadPlanets(); }, 5 * 60 * 1000);
-  window.addEventListener("resize", drawShot);
+  window.addEventListener("resize", () => { drawShot(); drawMap(); });
+  setMapKind(mapKind);
 
   (async () => {
     await loadClients();

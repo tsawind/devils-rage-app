@@ -547,9 +547,24 @@ impl Sky {
         self.frames += 1;
         painted
     }
-    /// Bytes to keep: "SKY2", mirrored, then each level (w, h, a byte a cell; 0 = not seen).
+    /// Paint ready-made points on one level (a start from nothing works from points alone).
+    pub fn paint_points(&mut self, level: usize, pts: &[Pt], q: &M3) {
+        let qt = transpose(q);
+        let m = &mut self.levels[level];
+        for p in pts {
+            let d = [p.d[0] as f64, p.d[1] as f64, p.d[2] as f64];
+            let i = m.cell_of(&apply(&qt, &d));
+            if m.n[i] < u16::MAX {
+                m.sum[i] += p.g;
+                m.n[i] += 1;
+            }
+        }
+        m.grey = None;
+    }
+    /// Bytes to keep: "SKY3" (a sky in its own frame: north the planet's axis, longitude 0 where
+    /// the system's sky started), mirrored, then each level (w, h, a byte a cell; 0 = not seen).
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = b"SKY2".to_vec();
+        let mut out = b"SKY3".to_vec();
         out.push(self.mirrored as u8);
         out.push(3);
         for (k, m) in self.levels.iter().enumerate() {
@@ -560,9 +575,13 @@ impl Sky {
         }
         out
     }
-    /// From bytes ("SKY2", or the old scanner's sky: its fine level is our medium one).
+    /// Bytes from this scanner (SKY3), not an older one.
+    pub fn is_current(bytes: &[u8]) -> bool {
+        bytes.len() > 6 && &bytes[0..4] == b"SKY3"
+    }
+    /// From bytes ("SKY3"/"SKY2", or the old scanner's sky: its fine level is our medium one).
     pub fn from_bytes(bytes: &[u8]) -> Option<Sky> {
-        if bytes.len() > 6 && &bytes[0..4] == b"SKY2" {
+        if bytes.len() > 6 && (&bytes[0..4] == b"SKY3" || &bytes[0..4] == b"SKY2") {
             let mut sky = Sky::new(bytes[4] != 0);
             let mut at = 6;
             for k in 0..(bytes[5] as usize).min(3) {
@@ -697,15 +716,20 @@ fn scan_pitch(points: &[Pt], m: &Level, g: &[f32], pitch: f64, yaws: &[f64], min
 
 /// Best facing near a guess on one level: a grid, then finer grids round the best.
 pub fn align(points: &[Pt], sky: &mut Sky, level: usize, around: (f64, f64), span: f64, step: f64, min_seen: f64, rings: Option<(Rings, f64)>) -> Option<Found> {
+    align_box(points, sky, level, around, (span, span), step, min_seen, rings)
+}
+
+/// As `align`, with its own reach in yaw and in pitch.
+pub fn align_box(points: &[Pt], sky: &mut Sky, level: usize, around: (f64, f64), spans: (f64, f64), step: f64, min_seen: f64, rings: Option<(Rings, f64)>) -> Option<Found> {
     let smooth = level != COARSE;
     let m = &mut sky.levels[level];
     m.grey();
     let m = &sky.levels[level];
     let g = m.grey.as_ref().unwrap();
     let mut best: Option<Found> = None;
-    let grid = |cy: f64, cp: f64, half: i64, st: f64, best: &mut Option<Found>| {
-        let yaws: Vec<f64> = (-half..=half).map(|k| cy + k as f64 * st).collect();
-        for j in -half..=half {
+    let grid = |cy: f64, cp: f64, half: (i64, i64), st: f64, best: &mut Option<Found>| {
+        let yaws: Vec<f64> = (-half.0..=half.0).map(|k| cy + k as f64 * st).collect();
+        for j in -half.1..=half.1 {
             let pitch = cp + j as f64 * st;
             for (k, (score, seen)) in scan_pitch(points, m, g, pitch, &yaws, min_seen, rings, smooth).into_iter().enumerate() {
                 if score.is_finite() && best.is_none_or(|b| score > b.score) {
@@ -714,16 +738,134 @@ pub fn align(points: &[Pt], sky: &mut Sky, level: usize, around: (f64, f64), spa
             }
         }
     };
-    grid(around.0, around.1, (span / step).round() as i64, step, &mut best);
+    grid(around.0, around.1, ((spans.0 / step).round() as i64, (spans.1 / step).round() as i64), step, &mut best);
     // Then three rounds of 3 × 3 at half the step each time (to an eighth of it).
     let mut st = step / 2.0;
     for _ in 0..3 {
         if let Some(b) = best {
-            grid(b.yaw, b.pitch, 1, st, &mut best);
+            grid(b.yaw, b.pitch, (1, 1), st, &mut best);
         }
         st /= 2.0;
     }
     best
+}
+
+// ---------------------------------------------------------------------------------------------
+// Starting a sky from nothing: no buildings, no other planet's sky.
+//
+// The first picture is put at yaw 0 (that picks where longitude 0 is: any place will do) and at a
+// trial pitch. A sideways turn of the planet spins the sky round the planet's axis, so the later
+// pictures only fit that first one at the right pitch; at a wrong one they'd need the camera to
+// roll, which EVE's camera never does. So: every trial pitch, scored by how well the later
+// pictures fit, coarse to fine.
+
+/// What a start from nothing found.
+#[derive(Clone, Debug)]
+pub struct Boot {
+    /// The first picture's pitch (the yaw is 0).
+    pub pitch: f64,
+    /// Each later picture's facing and fit (medium level); None: it didn't fit.
+    pub later: Vec<Option<(f64, f64, f64)>>,
+    /// Mean fit of the later pictures at the best pitch (coarse), and the best of any pitch more
+    /// than 8° away: how clearly this pitch is the one.
+    pub coarse: f64,
+    pub other: f64,
+    /// How far the pictures that fit turned from the first.
+    pub turned: f64,
+}
+
+impl Boot {
+    pub fn fitted(&self) -> usize {
+        self.later.iter().filter(|f| f.is_some_and(|f| f.2 >= 0.5)).count()
+    }
+    pub fn sure(&self) -> bool {
+        self.fitted() >= 3 && self.turned >= 12.0 * DEG && self.coarse - self.other >= 0.05
+    }
+}
+
+/// One picture's points for a start from nothing: for matching and for painting, coarse and medium.
+pub struct BootFrame {
+    pub match_coarse: Vec<Pt>,
+    pub match_medium: Vec<Pt>,
+    pub paint_coarse: Vec<Pt>,
+    pub paint_medium: Vec<Pt>,
+}
+
+impl BootFrame {
+    pub fn of(view: &View) -> BootFrame {
+        BootFrame {
+            match_coarse: match_points(view, COARSE),
+            match_medium: match_points(view, MEDIUM),
+            paint_coarse: points(view, COARSE, SPECS[COARSE].paint),
+            paint_medium: points(view, MEDIUM, SPECS[MEDIUM].paint),
+        }
+    }
+}
+
+/// One trial pitch: the pictures in turn, each matched to all the sky placed so far (so the turn
+/// can go on past where the first picture's sky ends) and then added to it. Mean fit, and each
+/// picture's facing and fit.
+fn boot_try(first: &BootFrame, later: &[BootFrame], pitch: f64, medium: bool) -> (f64, Vec<Option<(f64, f64, f64)>>) {
+    let mut sky = Sky::new(false);
+    let q0 = pose_q(0.0, pitch);
+    sky.paint_points(COARSE, &first.paint_coarse, &q0);
+    if medium {
+        sky.paint_points(MEDIUM, &first.paint_medium, &q0);
+    }
+    let mut at = (0.0, pitch);
+    let mut total = 0.0;
+    let mut out = Vec::with_capacity(later.len());
+    for f in later {
+        let coarse = align_box(&f.match_coarse, &mut sky, COARSE, at, (25.0 * DEG, 10.0 * DEG), 2.5 * DEG, 0.25, None);
+        let found = match (coarse, medium) {
+            (Some(c), true) if c.score >= 0.3 => align_box(&f.match_medium, &mut sky, MEDIUM, (c.yaw, c.pitch), (1.5 * DEG, 1.5 * DEG), 0.5 * DEG, 0.25, None),
+            (c, false) => c,
+            _ => None,
+        };
+        match found {
+            Some(fd) if fd.score.is_finite() && fd.score >= if medium { 0.45 } else { 0.35 } => {
+                total += fd.score;
+                at = (fd.yaw, fd.pitch);
+                let q = pose_q(fd.yaw, fd.pitch);
+                sky.paint_points(COARSE, &f.paint_coarse, &q);
+                if medium {
+                    sky.paint_points(MEDIUM, &f.paint_medium, &q);
+                }
+                out.push(Some((fd.yaw, fd.pitch, fd.score)));
+            }
+            _ => out.push(None),
+        }
+    }
+    (total / later.len().max(1) as f64, out)
+}
+
+/// The first picture's pitch from the later ones (the planet turned sideways in between).
+pub fn boot(first: &BootFrame, later: &[BootFrame]) -> Option<Boot> {
+    if later.is_empty() {
+        return None;
+    }
+    // Every 5°, coarse.
+    let trials: Vec<(f64, f64)> = (-17..=17).map(|k| {
+        let p = k as f64 * 5.0 * DEG;
+        (p, boot_try(first, later, p, false).0)
+    }).collect();
+    let (p0, coarse) = trials.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1))?;
+    let other = trials.iter().filter(|t| (t.0 - p0).abs() > 8.0 * DEG).map(|t| t.1).fold(0.0, f64::max);
+    // Then 1° round the best, then 0.2°, on the medium level.
+    let mut best: (f64, f64, Vec<Option<(f64, f64, f64)>>) = (p0, f64::NEG_INFINITY, Vec::new());
+    for (span, step) in [(5.0, 1.0), (1.0, 0.2)] {
+        let centre = best.0;
+        let n = (span / step) as i64;
+        for k in -n..=n {
+            let p = centre + k as f64 * step * DEG;
+            let (score, poses) = boot_try(first, later, p, true);
+            if score > best.1 {
+                best = (p, score, poses);
+            }
+        }
+    }
+    let turned = best.2.iter().flatten().map(|&(y, p, _)| super::geom::apart((0.0, best.0), (y, p))).fold(0.0, f64::max);
+    Some(Boot { pitch: best.0, later: best.2, coarse, other, turned })
 }
 
 /// Share of the points that land on recorded sky at a facing (no score).
