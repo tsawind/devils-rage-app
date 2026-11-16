@@ -385,7 +385,7 @@ impl Session {
         // Which pixels are sky (rebuilt when the edge, EVE's windows or the rings' tilt change).
         let rings = self.rings_now();
         let ring_pitch = self.pose.as_ref().map(|p| p.pitch).unwrap_or(0.0);
-        let key = ((disc.r * 4.0) as i64, f.w as i64, f.h as i64, self.ui_version, if rings.is_some() && self.pose.is_some() { (ring_pitch / (0.5 * DEG)).round() as i64 } else { i64::MIN });
+        let key = ((disc.r * 4.0) as i64, f.w as i64, f.h as i64, self.ui_version, if rings.is_some() && self.pose.is_some() { (ring_pitch / DEG).round() as i64 } else { i64::MIN });
         if self.mask.as_ref().is_none_or(|(k, _)| *k != key) {
             let ui = self.ui.as_ref().filter(|u| u.ready());
             let ring_now = rings.filter(|_| self.pose.is_some()).map(|rg| (rg, sky::axis_for_pitch(ring_pitch), disc.d));
@@ -477,7 +477,7 @@ impl Session {
                 }
                 let moved = self.last_paint.is_none_or(|(y, p, t)| apart((y, p), (pose.yaw, pose.pitch)) > 0.6 * DEG && t.elapsed() > Duration::from_millis(120));
                 let own = self.skies.get(&pid);
-                let want = own.is_none_or(|s| s.coverage() < 0.999 || s.frames < 4000);
+                let want = own.is_none_or(|s| s.coverage() < 0.995 || s.frames < 600);
                 if self.rim_ok.0 && moved && want && own.is_none_or(|s| s.mirrored == pose.mirrored) {
                     let q = pose_q(pose.yaw, pose.pitch);
                     let (yaw, pitch, mirrored) = (pose.yaw, pose.pitch, pose.mirrored);
@@ -513,7 +513,8 @@ impl Session {
         // ---- scanning ----
         let placed = self.pose.as_ref().is_some_and(|p| p.placed);
         let picked = self.picked;
-        let list_known = !self.list_guessed || picked.is_some();
+        // Only a list the pilot pointed out stops a scan (a guessed spot could read the wrong row).
+        let list_known = !self.list_guessed;
         if let (Some(run), Some(pose)) = (self.run.as_mut(), self.pose.as_ref()) {
             if !run.done {
                 run.paused = None;

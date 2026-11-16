@@ -315,18 +315,23 @@ impl SkyMask {
         let (dcx, dcy) = disc.map(|d| (d.cx, d.cy)).unwrap_or((0.0, 0.0));
         for y in 0..h {
             let dy2 = (y as f64 + 0.5 - dcy).powi(2);
-            let v = -(y as f64 + 0.5 - cy0) / lens;
             for x in 0..w {
-                let i = y * w + x;
                 if (x as f64 + 0.5 - dcx).powi(2) + dy2 < r2 || ui.is_some_and(|ui| ui.blocked(x, y)) {
-                    bits[i] = 0;
-                    continue;
+                    bits[y * w + x] = 0;
                 }
-                if let Some((rg, n, d)) = &rings {
-                    let u = (x as f64 + 0.5 - cx0) / lens;
+            }
+        }
+        // The rings, tested on 4 × 4 blocks (their edges are soft anyway).
+        if let Some((rg, n, d)) = &rings {
+            for by in (0..h).step_by(4) {
+                let v = -((by + 2) as f64 - cy0) / lens;
+                for bx in (0..w).step_by(4) {
+                    let u = ((bx + 2) as f64 - cx0) / lens;
                     let l = (u * u + v * v + 1.0).sqrt();
                     if rg.hit(&[(u / l) as f32, (v / l) as f32, (-1.0 / l) as f32], n, *d) {
-                        bits[i] = 0;
+                        for y in by..(by + 4).min(h) {
+                            bits[y * w + bx..y * w + (bx + 4).min(w)].fill(0);
+                        }
                     }
                 }
             }
@@ -658,8 +663,9 @@ fn scan_pitch(points: &[Pt], m: &Level, g: &[f32], pitch: f64, yaws: &[f64], min
         fx.push((v[1].atan2(v[0]) / (2.0 * PI) * m.w as f64 - 0.5) as f32);
         gs.push(p.g);
     }
+    // Shares count among the points that aren't behind the rings.
     let n = fy.len();
-    let need = 30f64.max(points.len() as f64 * min_seen);
+    let need = 30f64.max(n as f64 * min_seen);
     yaws.iter()
         .map(|&yaw| {
             let shift = (yaw / (2.0 * PI) * m.w as f64) as f32;
@@ -678,13 +684,13 @@ fn scan_pitch(points: &[Pt], m: &Level, g: &[f32], pitch: f64, yaws: &[f64], min
                 sab += a * v;
             }
             if c < need {
-                return (f64::NAN, c / points.len().max(1) as f64);
+                return (f64::NAN, c / n.max(1) as f64);
             }
             let (va, vb) = (saa - sa * sa / c, sbb - sb * sb / c);
             if va <= 0.0 || vb <= 0.0 {
-                return (f64::NAN, c / points.len() as f64);
+                return (f64::NAN, c / n as f64);
             }
-            ((sab - sa * sb / c) / (va * vb).sqrt(), c / points.len() as f64)
+            ((sab - sa * sb / c) / (va * vb).sqrt(), c / n as f64)
         })
         .collect()
 }
@@ -1011,4 +1017,57 @@ pub fn rim_still_there(pic: &Pic, disc: &Disc) -> bool {
         }
     }
     rays >= 12 && agree as f64 >= rays as f64 * 0.35
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sky_bytes_round_trip() {
+        let mut sky = Sky::new(true);
+        for (k, m) in sky.levels.iter_mut().enumerate() {
+            for i in (0..m.sum.len()).step_by(97) {
+                m.sum[i] = ((i % 13) as f32 - 6.0) * 0.3 * (k + 1) as f32;
+                m.n[i] = 1;
+            }
+        }
+        let back = Sky::from_bytes(&sky.to_bytes()).unwrap();
+        assert!(back.mirrored);
+        for k in 0..3 {
+            let (a, b) = (&sky.levels[k], &back.levels[k]);
+            for i in (0..a.sum.len()).step_by(97) {
+                let (va, vb) = (a.sum[i] / a.n[i] as f32, b.sum[i] / b.n[i] as f32);
+                assert!((va - vb).abs() <= 0.5 / SPECS[k].scale + 1e-4, "level {k} cell {i}: {va} vs {vb}");
+            }
+        }
+        assert!((back.coverage() - sky.coverage()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn old_scanner_sky_reads_as_medium_and_coarse() {
+        let (fw, cw) = (1440 * 720, 360 * 180);
+        let mut bytes = vec![0u8; 2 + fw + cw];
+        bytes[0] = 1;
+        bytes[1] = 1;
+        bytes[2 + 5] = 140; // medium cell 5: +6
+        bytes[2 + fw + 7] = 120; // coarse cell 7: −4
+        let sky = Sky::from_bytes(&bytes).unwrap();
+        assert!(sky.mirrored);
+        assert_eq!(sky.levels[MEDIUM].sum[5] / sky.levels[MEDIUM].n[5] as f32, 6.0);
+        assert_eq!(sky.levels[COARSE].sum[7] / sky.levels[COARSE].n[7] as f32, -4.0);
+        assert_eq!(sky.levels[FINE].n.iter().filter(|&&n| n > 0).count(), 0);
+    }
+
+    #[test]
+    fn rings_hit_only_where_the_ring_is() {
+        let axis = axis_for_pitch(20.0 * DEG);
+        // Straight at the planet's middle: the ring plane passes through the centre, inside r1.
+        assert!(!RINGS.hit(&[0.0, 0.0, -1.0], &axis, 4.0));
+        // Edge-on (pitch 0): never.
+        assert!(!RINGS.hit(&[0.3, -0.2, -0.93], &axis_for_pitch(0.0), 4.0));
+        // Looking down past the planet at pitch 20°: the plane, about 2 radii out.
+        let l = (0.0f32 * 0.0 + 0.28 * 0.28 + 1.0).sqrt();
+        assert!(RINGS.hit(&[0.0, -0.28 / l, -1.0 / l], &axis, 4.0));
+    }
 }
