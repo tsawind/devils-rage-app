@@ -45,8 +45,15 @@
   .todo-list li.did .what ul, .todo-list li.did .what details, .todo-list li.did .what select { text-decoration: none; }
   .todo-list select { background: #121216; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 1px 4px; max-width: 420px; }
   ul.plain { list-style: none; padding-left: 4px; }
-  .todo-list li > input.todo { vertical-align: top; margin-top: 4px; }
-  .todo-list .what { display: inline-block; width: calc(100% - 26px); vertical-align: top; }
+  .todo-list li > input.todo { vertical-align: top; margin: 3px 6px 0 -46px; }
+  .todo-list input.todo, .todo-list input.shipmove { appearance: none; -webkit-appearance: none; width: 15px; height: 15px; border: 1.5px solid #6b6b78; border-radius: 3px; background: #121216; display: inline-grid; place-content: center; cursor: pointer; font-size: 12px; line-height: 1; }
+  .todo-list input.todo { border-color: #a33; }
+  .todo-list input.todo:checked { background: #c62f2f; border-color: #e04848; }
+  .todo-list input.todo:checked::after { content: "✓"; color: #fff; font-weight: 700; }
+  .todo-list input.shipmove:checked { border-color: #c9922a; }
+  .todo-list input.shipmove:checked::after { content: "✕"; color: #f0c040; font-weight: 700; }
+  .todo-list .what { display: inline-block; width: 100%; vertical-align: top; }
+  .todo-list > li { margin-left: 22px; }
   details.mine { margin: 4px 0 6px 18px; }
   li.batch { list-style: none; margin: 10px 0 2px -18px; border-bottom: 1px solid var(--line); }
   .bar input[type=range] { width: 100%; margin: 0; accent-color: var(--warn); }
@@ -675,7 +682,7 @@
         .sort((a, b) => worthOf(b) - worthOf(a));
       const sitValue = sit ? worthOf(sit) : 0;
       // Ships unticked under "Your ships" stay where they are.
-      const dump = !personalOn() ? [] : own.filter(x => top(x) && (!sit || (x.item_id !== sit.item_id && x.holder !== sit.item_id)) && x.value > 0 && !(x.ship && x.assembled && store.get("leave." + x.item_id, false)));
+      const dump = !personalOn() ? [] : own.filter(x => top(x) && (!sit || (x.item_id !== sit.item_id && x.holder !== sit.item_id)) && x.value > 0 && !(x.ship && x.assembled && store.get("leave." + x.item_id, null) === true));
       const ships = own.filter(x => x.ship && x.assembled && top(x) && (!sit || x.item_id !== sit.item_id));
       const c = clone.get(p.name);
       const saves = (already ? 0 : sitValue) + dump.reduce((a, x) => a + fitted(x), 0) + (c ? c.gain : 0);
@@ -765,11 +772,13 @@
       // 3. Ships: tick what goes, untick what stays in your own hangar.
       if (x.ships.length) {
         const hullRow = (d) => rows.find(r => r.h.item_id === d.item_id);
+        // Ticked = it goes; cheap ones (under the vacation cut) start unticked.
+        const goes = (d) => store.get("leave." + d.item_id, null) === true ? false : keptIds.has(d.item_id);
         const fateOf = (d) => hullRow(d) ? (hullRow(d).pilot ? `<span class="note">coffin hull: ${esc(hullRow(d).pilot.name)} sits in it</span>` : '<span class="short">coffin hull: needs a pilot</span>')
-          : store.get("leave." + d.item_id, false) ? '<span class="note">stays in your hangar</span>'
+          : store.get("leave." + d.item_id, null) === true ? '<span class="note">stays in your hangar</span>'
           : !keptIds.has(d.item_id) ? '<span class="note">leave (cheap)</span>' : bayOf.has(d.item_id) ? `→ ${bayOf.get(d.item_id).pilot === p ? "your " + esc(bayOf.get(d.item_id).h.type) + "'s bay" : `division hangar for the ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}`}`
           : repacked.has(d.item_id) ? "→ repackage into your containers" : '<span class="short">no room</span>';
-        acts.push({ k: "ships", html: `Your ships <span class="note">(untick to keep one in your own hangar · ISK with fittings)</span><ul class="list plain">${[...x.ships].sort((a, b) => fitted(b) - fitted(a)).map(d => `<li>${hullRow(d) ? `<span class="tick">⛴</span> ${label(d)}` : `<label class="tick"><input type="checkbox" class="shipmove" data-item="${d.item_id}"${store.get("leave." + d.item_id, false) ? "" : " checked"}> ${label(d)}</label>`} <small>${isk(fitted(d))} ${fateOf(d)}</small></li>`).join("")}</ul>` });
+        acts.push({ k: "ships", html: `Your ships <span class="note">(✕ = it goes; untick to keep one in your own hangar · ISK with fittings)</span><ul class="list plain">${[...x.ships].sort((a, b) => fitted(b) - fitted(a)).map(d => `<li>${hullRow(d) ? `<span class="tick">⛴</span> ${label(d)}` : `<label class="tick"><input type="checkbox" class="shipmove" data-item="${d.item_id}"${goes(d) ? " checked" : ""}> ${label(d)}</label>`} <small>${isk(fitted(d))} ${fateOf(d)}</small></li>`).join("")}</ul>` });
       }
       if (rep.length) acts.push({ k: "repack", html: `Repackage ${rep.map(label).join(", ")} <span class="note">(rigs lost: ${isk(rep.reduce((a, d) => a + ((f.repackage.find(r => r.item_id === d.item_id) || {}).rig || 0), 0))})</span>` });
       if (mine.length) acts.push({ k: "pack", html: `Pack your freight containers, named ${mine.map(u => `“${esc(u.name)}”`).join(", ")}: <b>${countSizes(mine.map(u => [u.size, u.cap]))}</b> · ${isk(boxIsk)} · ${Math.round(boxM3).toLocaleString()} m³
@@ -782,7 +791,7 @@
       const doneKey = (k) => `todo.${p.name}.${k}`;
       const todo = acts.map(a => { const on = store.get(doneKey(a.k), false); return `<li class="${on ? "did" : ""}"><input type="checkbox" class="todo" title="done" data-k="${esc(doneKey(a.k))}"${on ? " checked" : ""}> <div class="what">${a.html}</div></li>`; });
       const allDone = acts.every(a => store.get(doneKey(a.k), false));
-      const changed = x.want !== null || want || x.ships.some(d => store.get("leave." + d.item_id, false));
+      const changed = x.want !== null || want || x.ships.some(d => store.get("leave." + d.item_id, null) !== null);
       return `<li class="${i < n ? "" : "off"}"><details class="login" data-login="${who}"${openLogins.has(p.name) ? " open" : ""}><summary><b>${esc(p.name)}</b> ${tag(p)} <span class="note">${acct(p)}</span> · <span class="enough">${isk(x.saves)}</span>
         <span class="note">${h ? "→ " + esc(h.h.type) + (h.own ? " (own)" : " (coffin)") : x.sit ? (x.already ? "in " : "→ ") + esc(x.sit.type) : "pod"}${mine.length ? ` · ${mine.length} container${mine.length === 1 ? "" : "s"}` : ""}${x.clone ? " · clone" : ""}${changed ? " · your changes" : ""}${allDone ? ' · <span class="enough">✓ done</span>' : ""}</span></summary><ol class="list todo-list">${todo.join("")}</ol></details></li>`;
     };
@@ -804,6 +813,7 @@
     document.querySelectorAll("#steps input.todo").forEach(b => b.addEventListener("change", () => { store.set(b.dataset.k, b.checked); render(); }));
     document.querySelectorAll("#steps input.clonepick").forEach(b => b.addEventListener("change", () => { store.set("clonePick." + b.dataset.who, b.value || null); render(); }));
     document.querySelectorAll("#steps input.shipmove").forEach(b => b.addEventListener("change", () => { store.set("leave." + b.dataset.item, !b.checked); render(); }));
+
     const sl = $("loginSlider");
     if (sl) sl.addEventListener("change", () => { store.set("logins", Number(sl.value)); render(); });
   }
@@ -862,7 +872,7 @@
   // Vacation leaves cheap things behind (Ventures, Epithals…): slider 0–500 m, 150 m to start.
   const vacCut = () => mode === "vacation" ? store.get("vacCut", 150e6) : 0;
   const worth = (x) => fitted(x);
-  const keepVac = (l) => l.filter(x => worth(x) >= vacCut() || /Freight Container/.test(x.in || ""));
+  const keepVac = (l) => l.filter(x => worth(x) >= vacCut() || /Freight Container/.test(x.in || "") || store.get("leave." + x.item_id, null) === false);
   // The stricter of your own mode and the corp's applies: Being evicted > War > Vacation.
   const RANK = { vacation: 1, war: 2, eviction: 3 };
   const stricter = (a, b) => (RANK[a] || 0) >= (RANK[b] || 0) ? a || null : b || null;
