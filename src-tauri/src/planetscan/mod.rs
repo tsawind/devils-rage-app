@@ -149,6 +149,10 @@ struct Session {
     system: Vec<PlanetInfo>,
     edge_r: Option<f64>,
     edge_auto: bool,
+    /// Edges found lately while looking for it (it's taken once a few agree), and since when
+    /// none was found at the zoomed-out size.
+    edge_seen: Vec<f64>,
+    edge_missing: Option<Instant>,
     auto_zoom: bool,
     pose: Option<Pose>,
     skies: HashMap<u64, Sky>,
@@ -215,6 +219,8 @@ impl Default for Session {
             system: Vec::new(),
             edge_r: None,
             edge_auto: true,
+            edge_seen: Vec::new(),
+            edge_missing: None,
             auto_zoom: false,
             pose: None,
             skies: HashMap::new(),
@@ -423,11 +429,31 @@ impl Session {
             self.picked = self.list.as_ref().and_then(|s| scan::picked_row(&pic, s));
         }
 
-        // The edge: found once (zoomed all the way out) and then kept; Auto-zoom follows it.
-        if self.edge_r.is_none() && self.edge_auto && self.frames % 15 == 1 {
-            if let Some(r) = sky::rim_radius(&pic, None, self.lens(), self.ui.as_ref()) {
-                self.edge_r = Some(r);
-                self.mask = None;
+        // The edge: zoomed all the way out every planet is the same size (0.26 lens lengths), so
+        // only an edge near that is taken, and only once four looks in a row agree (EVE's zoom
+        // when a planet opens passes through other sizes). Then it's kept; Follow zoom follows it.
+        if self.edge_r.is_none() && self.edge_auto && self.frames % 8 == 1 {
+            let expect = sky::ZOOMED_OUT_RIM * self.lens();
+            match sky::rim_radius(&pic, Some(expect), self.lens(), self.ui.as_ref()) {
+                Some(r) => {
+                    self.edge_missing = None;
+                    self.edge_seen.push(r);
+                    if self.edge_seen.len() > 4 {
+                        self.edge_seen.remove(0);
+                    }
+                    let (lo, hi) = self.edge_seen.iter().fold((f64::MAX, f64::MIN), |(a, b), &r| (a.min(r), b.max(r)));
+                    if self.edge_seen.len() == 4 && hi - lo < expect * 0.012 {
+                        let mut v = self.edge_seen.clone();
+                        v.sort_by(f64::total_cmp);
+                        self.edge_r = Some((v[1] + v[2]) / 2.0);
+                        self.edge_seen.clear();
+                        self.mask = None;
+                    }
+                }
+                None => {
+                    self.edge_seen.clear();
+                    self.edge_missing.get_or_insert_with(Instant::now);
+                }
             }
         } else if self.auto_zoom && self.frames % 15 == 0 {
             if let Some(r0) = self.edge_r {
@@ -886,6 +912,11 @@ impl Session {
         } else {
             serde_json::Value::Null
         };
+        let edge_seek = if self.edge_r.is_none() {
+            json!({ "agree": self.edge_seen.len(), "missing_ms": self.edge_missing.map(|t| t.elapsed().as_millis() as u64) })
+        } else {
+            serde_json::Value::Null
+        };
         let base_missing = self.pose.as_ref().filter(|_| !self.base_done).and_then(|p| self.base.as_ref().and_then(|b| b.missing_hint(&pose_q(p.yaw, p.pitch))));
         let pose = self.pose.as_ref().map(|p| {
             json!({
@@ -937,6 +968,7 @@ impl Session {
             "boot": boot,
             "new_sky": self.new_sky,
             "rim_ok": self.rim_ok.0,
+            "edge_seek": edge_seek,
         })
     }
 }
@@ -1407,13 +1439,17 @@ pub fn planetscan_edge(engine: tauri::State<'_, Engine>, r: Option<f64>, find: O
     s.mask = None;
     if find == Some(true) {
         let f = frame.ok_or("no picture yet")?;
-        let found = sky::rim_radius(&Pic { w: f.w, h: f.h, bgra: &f.bgra }, None, lens_for(f.w), s.ui.as_ref()).ok_or("couldn't find the planet's edge: zoom all the way out in EVE, or click the edge")?;
+        let found = sky::rim_radius(&Pic { w: f.w, h: f.h, bgra: &f.bgra }, Some(sky::ZOOMED_OUT_RIM * lens_for(f.w)), lens_for(f.w), s.ui.as_ref())
+            .ok_or("no planet edge at the zoomed-out size: zoom all the way out in EVE (or click the edge)")?;
+        s.edge_seen.clear();
         s.edge_r = Some(found);
         s.edge_auto = true;
         return Ok(Some(found));
     }
     s.edge_r = r.filter(|r| *r > 20.0);
     s.edge_auto = r.is_none();
+    s.edge_seen.clear();
+    s.edge_missing = None;
     Ok(s.edge_r)
 }
 

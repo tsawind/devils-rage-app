@@ -118,7 +118,7 @@
     <div class="step fold"><div class="n" id="n2">2</div><div>
       <h3>The planet's edge <span class="state" id="s2"></span></h3>
       <div class="more">
-      <div class="small muted">Zoom all the way out in EVE: every planet is then the same size, and the edge is found by itself.</div>
+      <div class="small muted">Zoom all the way out in EVE: every planet is then the same size, and the edge is found by itself (it waits until the zoom has settled).</div>
       <div class="row"><button class="btn" id="findEdge">Find edge</button><button class="btn" id="clickEdge">Click the edge</button></div>
       <label class="tog" title="Follow the edge when you zoom in EVE (off: the size stays where it was found)"><input type="checkbox" id="autoZoom"> Follow zoom</label>
       </div>
@@ -505,7 +505,8 @@
     const pose = s.pose, own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed, base = s.base_map || {};
     // 1, 2
     setState(1, planet ? planet.name : "pick one", planet ? "ok" : "warn", !!planet && !!s.client);
-    setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : "zoom all the way out", s.edge ? "ok" : "warn", !!s.edge);
+    const seek = s.edge_seek;
+    setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : seek && seek.missing_ms > 1500 ? "zoom all the way out" : `finding it… ${seek ? seek.agree : 0}/4`, s.edge ? "ok" : "warn", !!s.edge);
     // 3: the sky
     const skyCov = own ? own.coverage : 0;
     let s3 = "", c3 = "warn";
@@ -555,7 +556,11 @@
     if (cap.trouble) also.push(cap.trouble);
     if (cap.fps && cap.fps < 40) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second: for 60, keep EVE in front and lift any frame-rate limit in EVE's settings.`);
     if (!planet) return ["Pick the planet you have open in EVE (1).", also];
-    if (!s.edge) return [`Open ${planet.name} in EVE and zoom all the way out: the app finds the planet's edge by itself.`, also];
+    if (!s.edge) {
+      const seek = s.edge_seek;
+      if (seek && seek.missing_ms > 1500) return [`Zoom all the way out in EVE (mouse wheel, as far as it goes): ${planet.name} looks bigger than a zoomed-out planet.`, also];
+      return ["Finding the planet's edge: keep EVE zoomed all the way out and hold still a moment.", also];
+    }
     if (s.rim_ok === false) return ["Zoom all the way out in EVE: the planet's edge isn't where it was.", also];
     if (s.ui && !s.ui.ready) return ["Turn the planet a little: the app learns where EVE's windows are.", also];
     const pose = s.pose, own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed;
