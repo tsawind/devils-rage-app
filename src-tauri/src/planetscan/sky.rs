@@ -559,6 +559,57 @@ impl Sky {
     pub fn coverage(&self) -> f64 {
         self.levels[COARSE].coverage()
     }
+    /// Where the biggest part of the sky not recorded yet is, seen from the camera at facing Q
+    /// (the medium level: the stars): a few words for the pilot.
+    pub fn missing_hint(&self, q: &M3) -> Option<String> {
+        let m = &self.levels[MEDIUM];
+        let (mut sx, mut sy, mut sz, mut n) = (0.0, 0.0, 0.0, 0.0);
+        for row in (0..m.h).step_by(6) {
+            let lat = (row as f64 + 0.5) / m.h as f64 * PI;
+            let wgt = lat.sin();
+            for col in (0..m.w).step_by(6) {
+                if m.n[row * m.w + col] > 0 {
+                    continue;
+                }
+                let lon = (col as f64 + 0.5) / m.w as f64 * 2.0 * PI;
+                // Sky direction → camera (s = Qᵀ·d, so d = Q·s); the camera looks along −z.
+                let d = apply(q, &[lat.sin() * lon.cos(), lat.sin() * lon.sin(), lat.cos()]);
+                sx += d[0] * wgt;
+                sy += d[1] * wgt;
+                sz += d[2] * wgt;
+                n += wgt;
+            }
+        }
+        if n == 0.0 {
+            return None;
+        }
+        let l = (sx * sx + sy * sy + sz * sz).sqrt();
+        if l < n * 0.15 {
+            return Some("in patches all round: keep turning every way".into());
+        }
+        let v = [sx / l, sy / l, sz / l];
+        if v[2] < -0.6 {
+            return Some("straight behind the planet: turn a little either way to see past it".into());
+        }
+        if v[2] > 0.6 {
+            return Some("behind you: turn the planet right round, to the opposite side".into());
+        }
+        let mut parts = Vec::new();
+        if v[1] > 0.3 {
+            parts.push("up");
+        } else if v[1] < -0.3 {
+            parts.push("down");
+        }
+        if v[0] > 0.3 {
+            parts.push("right");
+        } else if v[0] < -0.3 {
+            parts.push("left");
+        }
+        if parts.is_empty() {
+            return Some("in patches all round: keep turning every way".into());
+        }
+        Some(format!("{}: turn the view that way", parts.join(" and ")))
+    }
     /// Paint a picture's sky at facing Q. Which levels: all by default.
     pub fn paint(&mut self, view: &View, q: &M3, levels: &[usize]) -> usize {
         let qt = transpose(q);

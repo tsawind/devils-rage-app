@@ -133,13 +133,14 @@
       <div class="small muted">The stars and nebula behind the planet never move, so the sky tells which way the camera looks. No sky in the system yet: turn the planet slowly <b>sideways</b> and the app starts one from what it sees. Then keep turning every way, over the poles too, and it records.</div>
       <div class="meter sky"><i id="skyMeter"></i></div>
       <div class="kv" id="skyFacts"></div>
+      <label class="tog" title="Every planet starts its own sky from what it sees; other planets' skies are only compared with it"><input type="checkbox" id="ownSkyEach" checked> Each planet starts its own sky (compare them)</label>
       <div class="row"><button class="btn" id="newSky" title="Don't use another planet's sky: start this planet's own from what it sees">Start its own sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button></div>
       </div>
     </div></div>
 
     <div class="step"><div class="n" id="n4">4</div><div>
       <h3>The planet map <span class="state" id="s4"></span></h3>
-      <div class="small muted">EVE on <b>No filter</b>, zoomed all the way out. Spin the planet until 99 %: every side, over both poles. It records along with the sky.</div>
+      <div class="small muted">EVE on <b>No filter</b>, zoomed all the way out. Spin the planet every side, over both poles: saved for the corp at 99 %, keep going to 99.9 % (missed spots show purple on the map).</div>
       <div class="row" style="align-items: baseline"><span class="big" id="basePct">–</span><span class="small muted" id="baseSaid"></span></div>
       <div class="meter"><i id="baseMeter"></i></div>
       <label class="tog"><input type="checkbox" id="baseOn" checked> Record the planet's colours</label>
@@ -187,7 +188,7 @@
     temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Microorganisms"],
   };
   const FRESH_DAYS = 7;
-  let planets = [], planet = null, me = null, status = null, seq = 0, alive = true;
+  let planets = [], planet = null, me = null, status = null, seq = 0, alive = true, switchError = null;
   let picture = null, clickMode = null, listClicks = [];
   const settings = (() => { try { return JSON.parse(localStorage.getItem("planetscan") || "{}"); } catch { return {}; } })();
   const keep = () => { try { localStorage.setItem("planetscan", JSON.stringify(settings)); } catch {} };
@@ -302,14 +303,18 @@
     if (changed) { mapImg = null; mapVersion = -1; drawMap(); }
     const info = (q) => {
       const sky = mapInfo(q, "sky"), base = mapInfo(q, "bare");
-      return { id: q.planet_id, name: q.name, type: q.type || "", sky_at: sky ? sky.at : null, bare_at: base ? base.at : null, sky_coverage: sky ? sky.coverage : null };
+      const at = (m) => (m && m.at ? Math.floor(m.at) : null);
+      return { id: q.planet_id, name: q.name, type: q.type || "", sky_at: at(sky), bare_at: at(base), sky_coverage: sky ? sky.coverage : null };
     };
     if (changed && !quiet) log(`Planet: ${p.name}`);
-    await invoke("planetscan_planet", { planet: info(p), system: systemOf(p).map(info) }).catch((e) => log("Couldn't load the planet's maps: " + e, "bad"));
+    switchError = null;
+    await invoke("planetscan_planet", { planet: info(p), system: systemOf(p).map(info) }).catch((e) => { switchError = String(e); log(`Couldn't switch to ${p.name}: ${e}`, "bad"); });
   }
   function nextPlanet() {
     if (!planet) return null;
-    return systemOf(planet).find((p) => p.planet_id !== planet.planet_id && !mapInfo(p, "bare")) || null;
+    const list = systemOf(planet), at = list.findIndex((p) => p.planet_id === planet.planet_id);
+    const after = list.slice(at + 1).concat(list.slice(0, Math.max(0, at)));
+    return after.find((p) => !mapInfo(p, "bare") || (mapInfo(p, "bare").coverage || 0) < 0.99) || null;
   }
 
   // ---------- zoom: wheel zooms where the mouse is, drag moves, double-click shows it all ----------
@@ -482,7 +487,7 @@
     $("n" + n).closest(".step").classList.toggle("done", !!done);
   }
   for (const h of document.querySelectorAll(".step.fold h3")) h.addEventListener("click", () => h.closest(".step").classList.toggle("open"));
-  let firstStatus = true, lastEvent = 0, lookingSince = null;
+  let firstStatus = true, lastEvent = 0, lookingSince = null, reloadSoon = 0;
   // Asked once each time a planet is picked: is EVE zoomed all the way out on it?
   let zoomedOutOn = null;
   function onEvents(s) {
@@ -490,16 +495,18 @@
     for (const ev of s.events || []) {
       if (ev.id <= lastEvent) continue;
       lastEvent = ev.id;
-      const cls = ev.kind === "error" ? "bad" : ev.kind === "warn" ? "warn" : ["base-done", "map-saved", "locked", "saved"].includes(ev.kind) ? "ok" : "";
+      const cls = ev.kind === "error" ? "bad" : ev.kind === "warn" ? "warn" : ["base-done", "base-full", "map-saved", "locked", "saved"].includes(ev.kind) ? "ok" : "";
       log(ev.text, cls);
       if (ev.kind === "map-saved") {
         const p = planets.find((q) => q.planet_id === ev.planet_id);
-        if (p && ev.map) { p.maps = (p.maps || []).filter((x) => x.kind !== ev.map); p.maps.push({ kind: ev.map, coverage: 1, at: Date.now() / 1000, by: me }); renderPlanets(); }
+        if (p && ev.map) { p.maps = (p.maps || []).filter((x) => x.kind !== ev.map); p.maps.push({ kind: ev.map, coverage: ev.coverage || 1, at: Math.floor(Date.now() / 1000), by: me }); renderPlanets(); }
+        // SeAT's own list after a moment (who saved what, when).
+        clearTimeout(reloadSoon); reloadSoon = setTimeout(loadPlanets, 4000);
       }
       if (ev.kind === "base-done") {
         const next = nextPlanet();
-        popup(ev.saving ? "Done and saved for the corp" : "Planet map done", ev.text,
-          (ev.saving ? "" : "Autosave is off: press Save now to give it to the corp. ") + (next ? `Next: open ${next.name} in EVE, zoomed all the way out, and pick it on the left.` : "Every planet in this system has a map."));
+        popup(ev.saving ? "99 %: saved for the corp" : "Planet map at 99 %", ev.text,
+          (ev.saving ? "" : "Autosave is off: press Save now to give it to the corp. ") + "Keep turning to fill the last spots and the sky; the top right says where.");
       }
       if (ev.kind === "error" && ev.map) popup("Not saved", ev.text, "Press Save now to try again.", true);
     }
@@ -515,23 +522,24 @@
     const seek = s.edge_seek;
     setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : seek && seek.missing_ms > 1500 ? "zoom all the way out" : `finding it… ${seek ? seek.agree : 0}/4`, s.edge ? "ok" : "warn", !!s.edge);
     // 3: the sky
-    const skyCov = own ? own.coverage : 0;
+    const skyCov = own ? own.done || 0 : 0;
     let s3 = "", c3 = "warn";
     if (pose && pose.placed) { s3 = own && pose.sky_of === (planet && planet.planet_id) ? `on its own sky · ${pct(skyCov)}` : `on ${pose.sky_name || "the"} sky`; c3 = "ok"; }
     else if (pose) s3 = "lost: turn back a little";
     else if (s.boot && s.boot.working) s3 = "working out which way is up…";
     else if (s.boot && s.boot.pictures) s3 = `watching ${s.boot.pictures}/${s.boot.of}`;
     else s3 = own || (bor && bor.loaded) ? "looking for it…" : "turn it sideways";
-    setState(3, s3, c3, !!(pose && pose.placed) && skyCov >= 0.95);
+    setState(3, s3, c3, !!(pose && pose.placed) && skyCov >= 0.99);
     $("skyMeter").style.width = `${Math.round(skyCov * 100)}%`;
     const facts = [];
     facts.push(["Sky", own ? `nebula ${pct(own.levels[0])} · stars ${pct(own.levels[1])} · fine ${pct(own.levels[2])}${s.sky.recording ? " · recording" : ""}` : "none of its own yet"]);
-    if (bor) facts.push(["Borrowing", `${bor.name}'s sky`]);
-    if (s.sky && s.sky.compare) facts.push(["Same sky?", `own vs ${s.sky.compare.with}: ${s.sky.compare.deg.toFixed(2)}° apart`]);
+    if (bor && !(s.sky && s.sky.own_each)) facts.push(["Borrowing", `${bor.name}'s sky`]);
+    if (s.sky && s.sky.compare) facts.push(["Same sky?", `vs ${s.sky.compare.with}: tilt ${s.sky.compare.tilt.toFixed(2)}° (0 = same), longitude shift ${s.sky.compare.shift.toFixed(1)}°`]);
+    else if (bor && s.sky && s.sky.own_each) facts.push(["Compare", `with ${bor.name}'s sky once this one has 10 %`]);
     if (pose) facts.push(["Match", `nebula ${pct(pose.coarse)} · stars ${pct(pose.stars)}`]);
     if (s.sky && s.sky.rings != null) facts.push(["Rings", s.sky.rings ? "cut out of the sky" : "none"]);
     $("skyFacts").innerHTML = facts.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
-    $("newSky").hidden = !(bor || (!own && pose));
+    $("newSky").hidden = !!(s.sky && s.sky.own_each) || !(bor || (!own && pose));
     $("forgetSky").hidden = !own;
     $("forgetBase").hidden = !((s.base_map || {}).coverage > 0);
     // 4: the planet map
@@ -564,6 +572,10 @@
     if (cap.trouble) also.push(cap.trouble);
     if (cap.fps && cap.fps < 40) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second. If that's NVIDIA's Background Application Max Frame Rate, set it Off for exefile.exe while scanning (NVIDIA Control Panel → Manage 3D settings → Program settings).`);
     if (!planet) return ["Pick the planet you have open in EVE (1).", also];
+    if (!s.planet || s.planet.id !== planet.planet_id) {
+      if (switchError) return [`Couldn't switch to ${planet.name}: ${switchError}. Press ↻ (1) to try again.`, also];
+      return [`Switching to ${planet.name}… loading its maps.`, also];
+    }
     if (zoomedOutOn !== planet.planet_id) return [`Open ${planet.name} in EVE. Is it zoomed all the way out (mouse wheel back as far as it goes)?`, also, false, true];
     if (!s.edge) {
       const seek = s.edge_seek;
@@ -587,17 +599,22 @@
     }
     if (!pose.placed) return ["Lost the sky: turn back a little, a bit slower.", also];
     if (s.fast_turn) also.push("Turning fast: fine, but slow down if it loses the sky.");
-    const skyCov = own ? own.coverage : 0;
-    if (pose.sky_of === planet.planet_id && skyCov < 0.95) also.push(`The sky is ${pct(skyCov)} recorded: it grows as you turn every way.`);
-    if (base.done) {
-      const next = nextPlanet();
-      return [`${planet.name} is mapped.${next ? ` Next: open ${next.name} in EVE and pick it on the left.` : ""}`, also, true];
+    const skyDone = own ? own.done || 0 : 0, mapDone = base.coverage || 0;
+    const skyMiss = s.sky && s.sky.missing ? `; the rest is ${s.sky.missing.split(":")[0]}` : "";
+    const mapMiss = base.missing ? `; the rest is ${base.missing.split(":")[0]}` : "";
+    if (!base.on) also.push("Planet map recording is off (4).");
+    else if (base.paused === "EVE shows a resource: set it to No filter") return ["Set EVE's scan to No filter: the planet map records its own colours.", also];
+    else if (base.paused) return [`Planet map paused: ${base.paused}.`, also];
+    // First both to 99 %, then the last spots to 99.9 %.
+    if (base.on && mapDone < 0.99) {
+      if (skyDone < 0.99) also.push(`The sky: ${pct(skyDone)} (it records as you turn).`);
+      return [`Spin the planet, every side and over both poles: its map is ${pct(mapDone)}${mapMiss}.`, also];
     }
-    if (!base.on) return ["Planet map recording is off (4). Tick Record the planet's colours to map it.", also];
-    if (base.paused === "EVE shows a resource: set it to No filter") return ["Set EVE's scan to No filter: the planet map records its own colours.", also];
-    if (base.paused) return [`Planet map paused: ${base.paused}.`, also];
-    const miss = base.missing ? `; the rest is ${base.missing.split(":")[0]}` : "";
-    return [`Spin the planet: its map is ${pct(base.coverage || 0)} done${miss}.`, also];
+    if (skyDone < 0.99) return [`Map saved. Now the sky: ${pct(skyDone)} recorded${skyMiss}. Keep turning every way, over the poles too.`, also];
+    if (base.on && mapDone < 0.999) return [`Nearly perfect: fill the last spots on the map (purple), ${pct(mapDone)}${mapMiss}.`, also];
+    if (skyDone < 0.999) return [`Nearly perfect: the last bits of sky, ${pct(skyDone)}${skyMiss}.`, also];
+    const next = nextPlanet();
+    return [`${planet.name} is complete: map and sky saved.${next ? ` Next: open ${next.name} in EVE and pick it on the left.` : ""}`, also, true];
   }
 
   // ---------- commands ----------
@@ -628,8 +645,8 @@
   twice("forgetBase", "Start over", () => { invoke("planetscan_forget_base", { planetId: planet.planet_id }); mapImg = null; drawMap(); log(`${planet.name}: its planet map starts over.`, "warn"); });
   $("baseOn").addEventListener("change", () => invoke("planetscan_base", { on: $("baseOn").checked }));
   $("saveMaps").addEventListener("click", () => invoke("planetscan_save_maps").then(() => log("Saving this planet's sky and map for the corp…")).catch((e) => log(String(e), "bad")));
-  const options = () => invoke("planetscan_options", { options: { autosave: $("autosave").checked, auto_zoom: $("autoZoom").checked, auto_planet: false } });
-  for (const id of ["autosave", "autoZoom"]) {
+  const options = () => invoke("planetscan_options", { options: { autosave: $("autosave").checked, auto_zoom: $("autoZoom").checked, auto_planet: false, own_sky_each: $("ownSkyEach").checked } });
+  for (const id of ["autosave", "autoZoom", "ownSkyEach"]) {
     if (settings[id] !== undefined) $(id).checked = settings[id];
     $(id).addEventListener("change", () => { settings[id] = $(id).checked; keep(); options(); });
   }
