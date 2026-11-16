@@ -292,6 +292,7 @@ pub async fn group_setup_update(app: AppHandle, profile: String, setup: NewGroup
             color: old.color,
             remember_windows: old.remember_windows,
             hidden: old.hidden,
+            order: old.order,
         },
     )?;
     let _ = crate::launch::seat_refresh(app.clone()).await;

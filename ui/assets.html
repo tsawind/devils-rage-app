@@ -207,8 +207,16 @@
   async function loadHd() {
     hd = new Map(); order = new Map();
     try {
+      // Each entry is { group, prefs }: the group from Your accounts and this PC's settings
+      // (its dragged order). Main / Second / Third first, so a character's place in its own
+      // slot group decides its order.
       const seat = await invoke("seat_launch_groups");
-      ((seat && seat.groups) || []).forEach((g, gi) => (g.members || []).forEach((m, mi) => { const n = m.name || m; if (!order.has(n)) order.set(n, gi * 1000 + mi); }));
+      const list = ((seat && seat.groups) || []).map(e => e.group ? e : { group: e, prefs: {} });
+      const rank = (e) => { const i = ["main", "second", "third"].indexOf(String(e.group.name || "").toLowerCase()); return i < 0 ? 9 : i; };
+      list.sort((a, b) => rank(a) - rank(b)).forEach((e, gi) => {
+        const names = (e.group.members || []).map(m => m.name || m), want = (e.prefs && e.prefs.order) || [];
+        [...want.filter(n => names.includes(n)), ...names.filter(n => !want.includes(n))].forEach((n, mi) => { if (!order.has(n)) order.set(n, gi * 1000 + mi); });
+      });
     } catch (e) {}
     try {
       for (const g of await invoke("launch_groups")) if (HD_GROUP.test(g.name)) for (const m of g.members || []) if (!(g.hidden || []).includes(m)) hd.set(m, g.name);
@@ -697,11 +705,11 @@
       if (rep.length) acts.push(`Repackage ${rep.length} ship${rep.length === 1 ? "" : "s"} <span class="note">(rigs lost: ${isk(rep.reduce((a, d) => a + ((f.repackage.find(r => r.item_id === d.item_id) || {}).rig || 0), 0))})</span>: ${rep.map(label).join(", ")}`);
       if (mine.length) acts.push(`Pack your freight containers, named ${mine.map(u => `“${esc(u.name)}”`).join(", ")}: <b>${countSizes(mine.map(u => [u.size, u.cap]))}</b> · ${isk(boxIsk)} · ${Math.round(boxM3).toLocaleString()} m³
           <details><summary class="note">what goes in each</summary><ul class="list">${mine.map(u => `<li><b>“${esc(u.name)}”</b> ${u.size} · ${isk(u.value)} · ${Math.round(u.m3).toLocaleString()} of ${(u.cap / 1000)}k m³<small> ${u.items.slice(0, 12).map(d => (d.qty > 1 ? d.qty + "× " : "") + esc(d.type)).join(", ")}${u.items.length > 12 ? " …" : ""}</small></li>`).join("")}</ul></details>`);
-      const toHangar = [...otherBay.map(d => `${label(d)} <small>for ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}</small>`), ...(mine.length ? [`your ${mine.length} container${mine.length === 1 ? "" : "s"}`] : [])];
-      if (toHangar.length) acts.push(`Put in the division hangar: ${toHangar.join(", ")}`);
+      const toHangar = [...otherBay.map(d => `${label(d)} <small>→ ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}</small>`), ...(mine.length ? [`your ${mine.length} container${mine.length === 1 ? "" : "s"}`] : [])];
+      if (toHangar.length) acts.push(`Put in the division hangar:<ul class="list">${toHangar.map(t => `<li>${t}</li>`).join("")}</ul>`);
       if (stay.length) acts.push(`<span class="short">No room for ${stay.map(label).join(", ")}</span>`);
       if (cheap.length && mode === "vacation") acts.push(`<span class="note">Leave ${cheap.length} cheap thing${cheap.length === 1 ? "" : "s"} (${isk(cheap.reduce((a, d) => a + d.value, 0))})</span>`);
-      acts.push(h ? "Log out docked in the hull: you're its coffin now." : "Log out docked.");
+      acts.push("Stay docked, log out.");
       return `<li class="${i < n ? "" : "off"}"><details><summary><b>${esc(p.name)}</b> ${tag(p)} <span class="note">${acct(p)}</span> · <span class="enough">${isk(x.saves)}</span>
         <span class="note">${h ? "→ " + esc(h.h.type) + (h.own ? " (own)" : " (coffin)") : x.sit ? (x.already ? "in " : "→ ") + esc(x.sit.type) : "pod"}${mine.length ? ` · ${mine.length} container${mine.length === 1 ? "" : "s"}` : ""}${x.clone ? " · clone" : ""}</span></summary><ol class="list">${acts.map(a => `<li>${a}</li>`).join("")}</ol></details></li>`;
     };
@@ -729,7 +737,7 @@
       `<ul class="list">${hand.map(r => `<li>${esc(r.h.owner)} → ${jump(r.pilot)}: ${label(r.h)}</li>`).join("")}</ul>`);
     if (mode === "war") add("hd", "HD: dreads / FAX to the HD Caps pilots; the subcap fleet logs in on HD.", "Capital pilots can join the subcaps; subcap pilots usually can't take a capital. Each in their HD clone.",
       combat.length ? `<table class="t"><tr><th>Dread / FAX</th><th>Pilot</th></tr>${combat.map(r => `<tr><td>${label(r.h)} <span class="note">${esc(r.h.owner)}</span></td><td>${pilotCell(r)} ${othersLine(r)}</td></tr>`).join("")}</table>` : "");
-    add("logins", "Logins: open each character for exactly what to do.", `Clone, ship, ${mode === "vacation" ? `skip anything under ${isk(vacCut())}, ` : "repackage, "}pack your own named freight containers, put them in the division hangar, log out docked.`, loginHtml);
+    add("logins", "Logins: open each character for exactly what to do.", `Clone, ship, ${mode === "vacation" ? `skip anything under ${isk(vacCut())}, ` : "repackage, "}pack your own named freight containers, put them in the division hangar, stay docked, log out.`, loginHtml);
     if (bays.length) add("bays", `Ship bays: ${bays.length} Bowhead${bays.some(r => r.tier > 0) ? " / carrier / capital" : ""} pilot${bays.length === 1 ? "" : "s"} board and load these ships from the division hangar.`, "Sort the hangar by name in-game. Bowheads first, carriers after (they're rollers), other capitals last.",
       bays.map(r => `<details style="margin:4px 0"${r.load.length ? " open" : ""}><summary><b>${label(r.h)}</b> <span class="note">${esc(r.h.owner)}</span> · ${pilotCell(r)} · <span class="note">${r.load.length} ships · ${isk(r.loadValue)} · ${m3(r.loadM3)} of ${m3(r.cap)}</span></summary>
         <div class="note">${othersLine(r)} ${injectLine(r)}</div>
@@ -738,7 +746,7 @@
     const divRepack = f.repackage.filter(x => x.division);
     if (divUnits.length || divRepack.length) add("division", `Division hangar: ${divRepack.length ? `repackage ${divRepack.length} ships, ` : ""}pack ${divUnits.length} containers named after the division.`, "The loose things in the division hangar go in containers too, so the Charons load whole containers.",
       `<ul class="list">${divRepack.length ? `<li>Repackage: ${divRepack.map(label).join(", ")}</li>` : ""}${divUnits.map(u => `<li><b>“${esc(u.name)}”</b> ${u.size} · ${isk(u.value)} · ${Math.round(u.m3).toLocaleString()} m³</li>`).join("")}</ul>`);
-    if (cargo.length) add("cargo", `Charons: ${cargo.length} pilot${cargo.length === 1 ? "" : "s"} board and load these containers from the division hangar.`, "Each container is named after its owner. Log out docked; don't log them in while the threat lasts.",
+    if (cargo.length) add("cargo", `Charons: ${cargo.length} pilot${cargo.length === 1 ? "" : "s"} board and load these containers from the division hangar.`, "Each container is named after its owner. Stay docked, log out; don't log them in while the threat lasts.",
       cargo.map(r => `<details style="margin:4px 0"${r.load.length ? " open" : ""}><summary><b>${label(r.h)}</b> <span class="note">${esc(r.h.owner)}</span> · ${pilotCell(r)} · <span class="note">${r.load.length} containers · ${isk(r.loadValue)} · ${m3(r.loadM3)} of ${m3(r.cap)}</span></summary>
         <div class="note">${othersLine(r)} ${injectLine(r)}</div>
         ${r.load.length ? `<ul class="list">${r.load.map(u => `<li><b>“${esc(u.name)}”</b> ${esc(u.size)} <small>${isk(u.value)}</small></li>`).join("")}</ul>` : '<span class="note">empty</span>'}</details>`).join(""));

@@ -38,6 +38,17 @@ pub struct Group {
     /// on its preview. Shown again from the Launch groups page.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden: Vec<String>,
+    /// Patch 153: this PC's cycle order for a SeAT group (dragged on the Launch groups page);
+    /// characters not listed keep Your accounts' order after the listed ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
+}
+
+/// Members in this PC's dragged order: listed ones first, in that order, then the rest as they were.
+pub fn in_order(members: Vec<String>, order: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = order.iter().filter(|n| members.contains(n)).cloned().collect();
+    out.extend(members.into_iter().filter(|m| !order.contains(m)));
+    out
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -278,7 +289,7 @@ pub fn all_groups(app: &AppHandle) -> Vec<Group> {
         .into_iter()
         .map(|g| {
             let p = prefs.get(&g.id.to_string()).cloned().unwrap_or_default();
-            let mut members: Vec<String> = g.members.into_iter().map(|m| m.name).collect();
+            let mut members: Vec<String> = in_order(g.members.into_iter().map(|m| m.name).collect(), &p.order);
             if p.login_screens {
                 members.push(crate::cycle::LOGIN_SCREENS.to_string());
             }
@@ -605,6 +616,7 @@ pub fn save_seat_group_prefs(app: AppHandle, id: u64, prefs: GroupPrefs) -> Resu
         color: clean_color(prefs.color),
         remember_windows: prefs.remember_windows,
         hidden: prefs.hidden.into_iter().take(150).collect(),
+        order: prefs.order.into_iter().take(150).collect(),
     };
     crate::cycle::forget(&format!("seat-{id}"));
     all.groups.insert(id.to_string(), clean);
@@ -888,6 +900,16 @@ pub fn resume_cycle_hotkeys(app: AppHandle) {
 #[cfg(desktop)]
 pub fn cycle_shortcut_fired(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) {
     hotkeys::fired(app, shortcut);
+}
+
+#[cfg(test)]
+mod order_tests {
+    #[test]
+    fn dragged_order_first_then_the_rest() {
+        let members = vec!["A".to_string(), "B".to_string(), "C".to_string(), "D".to_string()];
+        let order = vec!["C".to_string(), "X".to_string(), "A".to_string()];
+        assert_eq!(super::in_order(members, &order), vec!["C", "A", "B", "D"]);
+    }
 }
 
 #[cfg(test)]

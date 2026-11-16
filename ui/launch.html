@@ -199,6 +199,7 @@
     return eye;
   }
 
+  const openChecks = new Set();
   function renderSeat() {
     const host = document.getElementById("seatGroups");
     host.innerHTML = "";
@@ -217,7 +218,29 @@
       const toggle = (m) => () => { prefs.skipped = prefs.skipped.includes(m) ? prefs.skipped.filter(v => v !== m) : [...prefs.skipped, m]; save(); render(); };
       prefs.hidden = prefs.hidden || [];
       const hide = (m) => () => { prefs.hidden = prefs.hidden.includes(m) ? prefs.hidden.filter(v => v !== m) : [...prefs.hidden, m]; save(); render(); };
-      g.members.forEach(m => members.append(chipFor(m.name, prefs.skipped.includes(m.name), toggle(m.name), prefs.hidden.includes(m.name), hide(m.name))));
+      // Patch 153: drag to change this PC's cycle order (Your accounts' order until you do).
+      prefs.order = prefs.order || [];
+      const names = g.members.map(m => m.name);
+      const ordered = [...prefs.order.filter(n => names.includes(n)), ...names.filter(n => !prefs.order.includes(n))];
+      ordered.forEach(name => {
+        const chip = chipFor(name, prefs.skipped.includes(name), toggle(name), prefs.hidden.includes(name), hide(name));
+        chip.draggable = true;
+        chip.title = (chip.title ? chip.title + " · " : "") + "drag to change the order";
+        chip.addEventListener("dragstart", (e) => { e.dataTransfer.setData("text/plain", name); chip.classList.add("dragging"); });
+        chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+        chip.addEventListener("dragover", (e) => { e.preventDefault(); chip.classList.add("over"); });
+        chip.addEventListener("dragleave", () => chip.classList.remove("over"));
+        chip.addEventListener("drop", (e) => {
+          e.preventDefault();
+          const moved = e.dataTransfer.getData("text/plain");
+          if (!moved || moved === name || !names.includes(moved)) return;
+          const rest = ordered.filter(v => v !== moved);
+          const at = rest.indexOf(name), before = e.offsetX < chip.offsetWidth / 2;
+          rest.splice(before ? at : at + 1, 0, moved);
+          prefs.order = rest; save(); render();
+        });
+        members.append(chip);
+      });
       if (prefs.login_screens) members.append(chipFor(LOGIN, prefs.skipped.includes(LOGIN), toggle(LOGIN)));
       const opts = el("div", "add");
       const ls = el("label"); ls.style.fontSize = "13px"; ls.style.color = "var(--muted)";
@@ -233,8 +256,11 @@
       );
       // The EVE launcher can't be set from here (its groups sit in its encrypted file), so a checklist.
       const accounts = [];
-      g.members.forEach(m => { if (!accounts.includes(m.account)) accounts.push(m.account); });
+      ordered.forEach(n => { const m = g.members.find(x => x.name === n); if (m && !accounts.includes(m.account)) accounts.push(m.account); });
       const check = el("details", "check");
+      // Stays open while the page redraws (it redraws whenever a client opens or closes).
+      check.open = openChecks.has(g.id);
+      check.addEventListener("toggle", () => { check.open ? openChecks.add(g.id) : openChecks.delete(g.id); });
       const running = g.members.length > 0 && g.members.every(m => openClients.includes(m.name));
       check.append(el("summary", null, running ? "✓ All running now · EVE launcher setup" : `Set this group up in the EVE launcher (${accounts.length} account${accounts.length === 1 ? "" : "s"})`));
       const ol = el("ol");
