@@ -23,6 +23,7 @@ mod location;
 mod mainwindow;
 mod parsec;
 mod piscan;
+mod planetscan;
 mod previews;
 mod profiles;
 mod scanner;
@@ -285,6 +286,7 @@ pub fn bar_action(app: &AppHandle, action: &str) {
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
+        .manage(planetscan::Engine::default())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
@@ -398,6 +400,22 @@ pub fn run() {
             piscan::piscan_record_note,
             piscan::piscan_frame,
             piscan::piscan_delete,
+            planetscan::planetscan_start,
+            planetscan::planetscan_stop,
+            planetscan::planetscan_poll,
+            planetscan::planetscan_planet,
+            planetscan::planetscan_load_bares,
+            planetscan::planetscan_edge,
+            planetscan::planetscan_options,
+            planetscan::planetscan_pose,
+            planetscan::planetscan_find,
+            planetscan::planetscan_scan,
+            planetscan::planetscan_save,
+            planetscan::planetscan_list,
+            planetscan::planetscan_skymap,
+            planetscan::planetscan_map,
+            planetscan::planetscan_import_sky,
+            planetscan::planetscan_forget_sky,
             groupsetup::group_setups,
             groupsetup::group_setup_delete,
             launch::pause_cycle_hotkeys,

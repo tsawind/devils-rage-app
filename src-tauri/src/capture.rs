@@ -145,6 +145,12 @@ pub fn client_rgba(name: &str, width: u32) -> Result<(u32, u32, Vec<u8>), String
     Ok((picture.width, picture.height, picture.bgra))
 }
 
+/// The planet scan's fallback picture (when Windows' own capture can't start): one EVE window's
+/// inside, BGRA, at most `max_width` wide.
+pub fn window_picture(handle: isize, max_width: u32) -> Result<Picture, String> {
+    grab::picture(handle, max_width).map_err(str::to_string)
+}
+
 /// Swap blue and red and make every pixel opaque, in place.
 pub fn bgra_to_rgba(pixels: &mut [u8]) {
     for px in pixels.chunks_exact_mut(4) {
