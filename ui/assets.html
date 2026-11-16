@@ -45,6 +45,8 @@
   .todo-list li.did .what ul, .todo-list li.did .what details, .todo-list li.did .what select { text-decoration: none; }
   .todo-list select { background: #121216; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 1px 4px; max-width: 420px; }
   ul.plain { list-style: none; padding-left: 4px; }
+  .todo-list li > input.todo { vertical-align: top; margin-top: 4px; }
+  .todo-list .what { display: inline-block; width: calc(100% - 26px); vertical-align: top; }
   details.mine { margin: 4px 0 6px 18px; }
   li.batch { list-style: none; margin: 10px 0 2px -18px; border-bottom: 1px solid var(--line); }
   .bar input[type=range] { width: 100%; margin: 0; accent-color: var(--warn); }
@@ -174,6 +176,17 @@
   const inDiv = (x) => !!x.division && divs().has(x.division);
   const divName = (d) => d === 0 ? "personal" : d === 1 ? "corp" : ((data.people || []).find(p => p.division === d) || {}).main || (d === data.my_division ? "yours" : "");
   const pk = (x) => x.packaged_m3 ?? x.m3;
+  // A ship's worth with everything fitted to and carried in it (the hull price alone is a
+  // fraction of a fitted Broadsword or Devoter).
+  let kids = null, kidsFor = null, fitCache = new Map();
+  const fitted = (x) => {
+    if (!x || !x.item_id || !(x.ship && x.assembled)) return x ? x.value || 0 : 0;
+    if (kidsFor !== data) { kids = new Map(); fitCache = new Map(); for (const y of data.items || []) { if (!kids.has(y.holder)) kids.set(y.holder, []); kids.get(y.holder).push(y); } kidsFor = data; }
+    if (fitCache.has(x.item_id)) return fitCache.get(x.item_id);
+    let v = x.value || 0; const stack = [...(kids.get(x.item_id) || [])];
+    while (stack.length) { const y = stack.pop(); v += y.value || 0; stack.push(...(kids.get(y.item_id) || [])); }
+    fitCache.set(x.item_id, v); return v;
+  };
   const m3 = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M m³" : Math.round(n).toLocaleString() + " m³";
   const jump = (p) => `<a class="jump" data-who="${p.id}" title="${esc(p.ship)} · ${p.home ? HOME() : esc(p.system)}">${esc(p.name)}</a>`;
   // Alpha is certain when a trained skill runs below its level. Otherwise SeAT can't tell (ESI
@@ -638,7 +651,7 @@
     for (const p of pilots().filter(p => p.home)) {
       const own = items.filter(x => x.owner === p.name);
       const inShip = (ship) => own.filter(x => x.holder === ship.item_id).reduce((a, x) => a + x.value, 0);
-      const worthOf = (x) => (x.value || 0) + (x.item_id ? inShip(x) : 0);
+      const worthOf = (x) => x.ship && x.assembled ? fitted(x) : (x.value || 0) + (x.item_id ? inShip(x) : 0);
       let sit = (data.hulls || []).find(h => p.ship_item_id && h.item_id === p.ship_item_id) || own.find(x => x.item_id === p.ship_item_id)
         || (p.ship ? own.find(x => x.ship && x.assembled && x.type === p.ship) : null) || null, already = !!sit, hull = null, was = null;
       if (sit && !BIG.includes(sit.group) && (worthOf(sit) < SIT_MIN || CHEAP_GROUPS.test(sit.group || ""))) { was = sit.type; sit = null; already = false; }
@@ -665,7 +678,7 @@
       const dump = !personalOn() ? [] : own.filter(x => top(x) && (!sit || (x.item_id !== sit.item_id && x.holder !== sit.item_id)) && x.value > 0 && !(x.ship && x.assembled && store.get("leave." + x.item_id, false)));
       const ships = own.filter(x => x.ship && x.assembled && top(x) && (!sit || x.item_id !== sit.item_id));
       const c = clone.get(p.name);
-      const saves = (already ? 0 : sitValue) + dump.reduce((a, x) => a + x.value, 0) + (c ? c.gain : 0);
+      const saves = (already ? 0 : sitValue) + dump.reduce((a, x) => a + fitted(x), 0) + (c ? c.gain : 0);
       if (saves > 0 || hull || want !== null) out.push({ p, sit, hull, already, was, sitValue, dump, ships, seats, auto, want, dumpValue: dump.reduce((a, x) => a + x.value, 0), clone: c, saves, batch: isAlpha(p) ? 4 : prio() === "isk" ? 3 : batchOf(p) });
     }
     // Main, Second, Third (your corp launch groups, in their order), the rest, then the Alphas
@@ -745,7 +758,7 @@
       // 2. Ship: the suggestion, a pod, or any ship / capital they own and fly.
       const h = x.hull;
       const seatSel = `<select class="sitsel" data-who="${who}"><option value=""${x.want === null ? " selected" : ""}>suggested: ${esc(x.auto)}</option><option value="pod"${x.want === "pod" ? " selected" : ""}>pod</option>
-        ${x.seats.map(d => `<option value="${d.item_id}"${x.want === d.item_id ? " selected" : ""}>${d.name ? esc(d.name) + " · " : ""}${esc(d.type)} · ${isk(d.value || 0)}</option>`).join("")}</select>`;
+        ${x.seats.map(d => `<option value="${d.item_id}"${x.want === d.item_id ? " selected" : ""}>${d.name ? esc(d.name) + " · " : ""}${esc(d.type)} · ${isk(fitted(d))}</option>`).join("")}</select>`;
       const how = h && !h.own && x.want === null ? (h.h.division ? `Take ${label(h.h)} from the division hangar and board it` : `Get ${label(h.h)} from ${esc(h.h.owner)} (see Handoffs) and board it`) : null;
       acts.push({ k: "ship", html: `Sit in: ${seatSel} ${how ? `<br><span class="note">${how}${h.status === "needs Omega" ? " · needs Omega first" : ""}</span>` : x.sit ? `<span class="note">${x.already ? "already in it" : "board it"} · ${isk(x.sitValue)}</span>` : x.was ? `<span class="note">(leave the ${esc(x.was)}: not worth sitting in)</span>` : ""}` });
       if (mineBay.length) acts.push({ k: "bay", html: `Load your ${esc((bayOf.get(mineBay[0].item_id) || {}).h.type)}'s ship bay: ${mineBay.map(label).join(", ")}` });
@@ -756,18 +769,18 @@
           : store.get("leave." + d.item_id, false) ? '<span class="note">stays in your hangar</span>'
           : !keptIds.has(d.item_id) ? '<span class="note">leave (cheap)</span>' : bayOf.has(d.item_id) ? `→ ${bayOf.get(d.item_id).pilot === p ? "your " + esc(bayOf.get(d.item_id).h.type) + "'s bay" : `division hangar for the ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}`}`
           : repacked.has(d.item_id) ? "→ repackage into your containers" : '<span class="short">no room</span>';
-        acts.push({ k: "ships", html: `Your ships <span class="note">(untick to keep one in your own hangar)</span><ul class="list plain">${[...x.ships].sort((a, b) => b.value - a.value).map(d => `<li>${hullRow(d) ? `<span class="tick">⛴</span> ${label(d)}` : `<label class="tick"><input type="checkbox" class="shipmove" data-item="${d.item_id}"${store.get("leave." + d.item_id, false) ? "" : " checked"}> ${label(d)}</label>`} <small>${isk(d.value)} ${fateOf(d)}</small></li>`).join("")}</ul>` });
+        acts.push({ k: "ships", html: `Your ships <span class="note">(untick to keep one in your own hangar · ISK with fittings)</span><ul class="list plain">${[...x.ships].sort((a, b) => fitted(b) - fitted(a)).map(d => `<li>${hullRow(d) ? `<span class="tick">⛴</span> ${label(d)}` : `<label class="tick"><input type="checkbox" class="shipmove" data-item="${d.item_id}"${store.get("leave." + d.item_id, false) ? "" : " checked"}> ${label(d)}</label>`} <small>${isk(fitted(d))} ${fateOf(d)}</small></li>`).join("")}</ul>` });
       }
       if (rep.length) acts.push({ k: "repack", html: `Repackage ${rep.map(label).join(", ")} <span class="note">(rigs lost: ${isk(rep.reduce((a, d) => a + ((f.repackage.find(r => r.item_id === d.item_id) || {}).rig || 0), 0))})</span>` });
       if (mine.length) acts.push({ k: "pack", html: `Pack your freight containers, named ${mine.map(u => `“${esc(u.name)}”`).join(", ")}: <b>${countSizes(mine.map(u => [u.size, u.cap]))}</b> · ${isk(boxIsk)} · ${Math.round(boxM3).toLocaleString()} m³
           <details><summary class="note">what goes in each</summary><ul class="list">${mine.map(u => `<li><b>“${esc(u.name)}”</b> ${u.size} · ${isk(u.value)} · ${Math.round(u.m3).toLocaleString()} of ${(u.cap / 1000)}k m³<small> ${u.items.slice(0, 12).map(d => (d.qty > 1 ? d.qty + "× " : "") + esc(d.type)).join(", ")}${u.items.length > 12 ? " …" : ""}</small></li>`).join("")}</ul></details>` });
       const forOthers = moving.filter(d => bayOf.has(d.item_id) && bayOf.get(d.item_id).pilot !== p);
       if (forOthers.length || mine.length) acts.push({ k: "hangar", html: `Put in the division hangar: ${[forOthers.length ? `${forOthers.length} ship${forOthers.length === 1 ? "" : "s"} for the Bowheads (marked above)` : "", mine.length ? `your ${mine.length} container${mine.length === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")}` });
-      if (cheap.length && mode === "vacation") acts.push({ k: "cheap", html: `<details><summary class="note">Leave ${cheap.length} cheap thing${cheap.length === 1 ? "" : "s"} (${isk(cheap.reduce((a, d) => a + d.value, 0))}, under ${isk(vacCut())})</summary><ul class="list">${[...cheap].sort((a, b) => b.value - a.value).map(d => `<li>${d.qty > 1 ? d.qty + " × " : ""}${label(d)} <small>${isk(d.value)}</small></li>`).join("")}</ul></details>` });
+      if (cheap.length && mode === "vacation") acts.push({ k: "cheap", html: `<details><summary class="note">Leave ${cheap.length} cheap thing${cheap.length === 1 ? "" : "s"} (${isk(cheap.reduce((a, d) => a + fitted(d), 0))}, under ${isk(vacCut())})</summary><ul class="list">${[...cheap].sort((a, b) => fitted(b) - fitted(a)).map(d => `<li>${d.qty > 1 ? d.qty + " × " : ""}${label(d)} <small>${isk(fitted(d))}</small></li>`).join("")}</ul></details>` });
       acts.push({ k: "logout", html: "Stay docked, log out." });
       // A to-do list: tick each step as you do it (saved on this PC); the choices re-plan everything below.
       const doneKey = (k) => `todo.${p.name}.${k}`;
-      const todo = acts.map(a => { const on = store.get(doneKey(a.k), false); return `<li class="${on ? "did" : ""}"><input type="checkbox" class="todo" title="done" data-k="${esc(doneKey(a.k))}"${on ? " checked" : ""}> <span class="what">${a.html}</span></li>`; });
+      const todo = acts.map(a => { const on = store.get(doneKey(a.k), false); return `<li class="${on ? "did" : ""}"><input type="checkbox" class="todo" title="done" data-k="${esc(doneKey(a.k))}"${on ? " checked" : ""}> <div class="what">${a.html}</div></li>`; });
       const allDone = acts.every(a => store.get(doneKey(a.k), false));
       const changed = x.want !== null || want || x.ships.some(d => store.get("leave." + d.item_id, false));
       return `<li class="${i < n ? "" : "off"}"><details class="login" data-login="${who}"${openLogins.has(p.name) ? " open" : ""}><summary><b>${esc(p.name)}</b> ${tag(p)} <span class="note">${acct(p)}</span> · <span class="enough">${isk(x.saves)}</span>
@@ -807,7 +820,7 @@
     if (bays.length) add("bays", `Ship bays: ${bays.length} Bowhead${bays.some(r => r.tier > 0) ? " / carrier / capital" : ""} pilot${bays.length === 1 ? "" : "s"} board and load these ships from the division hangar.`, "Sort the hangar by name in-game. Bowheads first, carriers after (they're rollers), other capitals last.",
       bays.map(r => `<details style="margin:4px 0"${r.load.length ? " open" : ""}><summary><b>${label(r.h)}</b> <span class="note">${esc(r.h.owner)}</span> · ${pilotCell(r)} · <span class="note">${r.load.length} ships · ${isk(r.loadValue)} · ${m3(r.loadM3)} of ${m3(r.cap)}</span></summary>
         <div class="note">${othersLine(r)} ${injectLine(r)}</div>
-        ${r.load.length ? `<ul class="list">${[...r.load].sort((x, y) => (x.name || x.type).localeCompare(y.name || y.type)).map(x => `<li>${label(x)} <small>${esc(x.owner)} · ${isk(x.value)}</small></li>`).join("")}</ul>` : '<span class="note">nothing to load</span>'}</details>`).join(""));
+        ${r.load.length ? `<ul class="list">${[...r.load].sort((x, y) => (x.name || x.type).localeCompare(y.name || y.type)).map(x => `<li>${label(x)} <small>${esc(x.owner)} · ${isk(fitted(x))}</small></li>`).join("")}</ul>` : '<span class="note">nothing to load</span>'}</details>`).join(""));
     const divUnits = f.units.filter(u => /^Division /.test(u.owner) && !u.packed);
     const divRepack = f.repackage.filter(x => x.division);
     if (divUnits.length || divRepack.length) add("division", `Division hangar: ${divRepack.length ? `repackage ${divRepack.length} ships, ` : ""}pack ${divUnits.length} containers named after the division.`, "The loose things in the division hangar go in containers too, so the Charons load whole containers.",
@@ -848,7 +861,7 @@
   }
   // Vacation leaves cheap things behind (Ventures, Epithals…): slider 0–500 m, 150 m to start.
   const vacCut = () => mode === "vacation" ? store.get("vacCut", 150e6) : 0;
-  const worth = (x) => x.value;
+  const worth = (x) => fitted(x);
   const keepVac = (l) => l.filter(x => worth(x) >= vacCut() || /Freight Container/.test(x.in || ""));
   // The stricter of your own mode and the corp's applies: Being evicted > War > Vacation.
   const RANK = { vacation: 1, war: 2, eviction: 3 };
