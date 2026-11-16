@@ -652,22 +652,29 @@
     const ownerKey = (x) => x.division ? `Division ${x.division}` : x.owner;
     // Ships into bays, the pilot's own ships first.
     const put = (r, x) => { const v = x.value + inside(x).value; r.load.push(x); r.loadM3 += x.m3; r.loadValue += v; left -= v; };
-    const placed = new Map();
-    const bayFor = (x) => {
-      const ok = (r) => r.kind === "ships" && r.cap - r.loadM3 >= x.m3, own = (r) => r.pilot && r.pilot.name === x.owner, d = destOf(x);
-      if (d === "bay") return rows.find(r => ok(r) && own(r)) || (x.tooBig = true, rows.find(ok));
-      if (d === "hangar") return rows.find(r => ok(r) && !own(r));
-      // A ship in a battleship's escape bay rides in the same bay as its battleship when it fits.
-      const parent = placed.get(x.holder);
-      return (parent && ok(parent) ? parent : null) || rows.find(r => ok(r) && own(r)) || rows.find(ok);
-    };
+    const placed = new Map(), fits = (r, x) => r.kind === "ships" && r.cap - r.loadM3 >= x.m3;
     const nested = new Set(top.filter(x => x.ship && x.assembled).map(x => x.item_id));
-    const ships = top.filter(x => x.ship && x.assembled).map(x => ({ x, rig: (rigs.get(x.item_id) || {}).value || 0 }))
-      .sort((a, b) => (destOf(b.x) === "bay") - (destOf(a.x) === "bay") || (nested.has(a.x.holder) ? 1 : 0) - (nested.has(b.x.holder) ? 1 : 0)
-        || (repack ? b.rig / b.x.m3 - a.rig / a.x.m3 : (b.x.value + inside(b.x).value) / b.x.m3 - (a.x.value + inside(a.x).value) / a.x.m3));
+    const density = (x) => (x.value + inside(x).value) / Math.max(1, x.m3);
+    const all = top.filter(x => x.ship && x.assembled).map(x => ({ x, rig: (rigs.get(x.item_id) || {}).value || 0 }));
+    // 1. Each pilot fills their own bay with their own ships first: the ones they picked, then
+    //    the most ISK per m³, battleships before the ships in their escape bays. Whole ships
+    //    lose nothing, so their own unrigged ships ride too when there's room.
+    for (const r of rows.filter(r => r.kind === "ships" && r.pilot)) {
+      const own = all.filter(({ x }) => x.owner === r.pilot.name && !["hangar", "keep"].includes(destOf(x)))
+        .sort((a, b) => (destOf(b.x) === "bay") - (destOf(a.x) === "bay") || (nested.has(a.x.holder) ? 1 : 0) - (nested.has(b.x.holder) ? 1 : 0) || density(b.x) - density(a.x));
+      for (const { x } of own) {
+        if (placed.has(x.item_id)) continue;
+        if (fits(r, x)) { put(r, x); placed.set(x.item_id, r); } else if (destOf(x) === "bay") x.tooBig = true;
+      }
+    }
+    // 2. Everything else into whatever bay has room (Bowheads first, carriers after): rigged
+    //    ships first (vacation: the most ISK per m³); escape-bay ships follow their battleship.
+    const rest = all.filter(({ x }) => !placed.has(x.item_id))
+      .sort((a, b) => (nested.has(a.x.holder) ? 1 : 0) - (nested.has(b.x.holder) ? 1 : 0) || (repack ? b.rig / b.x.m3 - a.rig / a.x.m3 : density(b.x) - density(a.x)));
     const loose = [];
-    for (const { x, rig } of ships) {
-      const r = (rig > 0 || !repack || destOf(x) === "bay" || placed.has(x.holder)) && bayFor(x);
+    for (const { x, rig } of rest) {
+      const own = (r) => r.pilot && r.pilot.name === x.owner, parent = placed.get(x.holder);
+      const r = (rig > 0 || !repack || parent) && ((parent && fits(parent, x) ? parent : null) || rows.find(r => fits(r, x) && !(destOf(x) === "hangar" && own(r))));
       if (r) { put(r, x); placed.set(x.item_id, r); }
       else if (!repack) unplaced.push(x);
       else { repackage.push({ ...x, rig }); rigLost += rig; const k = inside(x); loose.push({ ...x, m3: pk(x) + k.m3, value: x.value + k.value, assembled: false, repacked: true }); }
@@ -834,15 +841,15 @@
         const myBay = rows.find(r => r.pilot === p && r.kind === "ships");
         const parentOf = (d) => x.ships.find(s2 => s2.item_id === d.holder);
         const where = (d) => hullRow(d) ? "hull" : destOf(d) === "keep" ? "keep" : !keptIds.has(d.item_id) ? "cheap" : bayOf.has(d.item_id) ? (bayOf.get(d.item_id).pilot === p ? "bay" : "other") : repacked.has(d.item_id) ? "repack" : "noroom";
-        const seg = (d) => hullRow(d) ? "" : `<span class="seg" data-item="${d.item_id}">${myBay ? `<button type="button" data-dest="bay" class="${where(d) === "bay" ? "on" : ""}">Bay</button>` : ""}<button type="button" data-dest="hangar" class="${["other", "repack", "noroom"].includes(where(d)) ? "on" : ""}">Hangar</button><button type="button" data-dest="keep" class="${["keep", "cheap"].includes(where(d)) ? "on" : ""}">Keep</button>${destOf(d) ? `<button type="button" data-dest="" title="back to the plan's choice">↺</button>` : ""}</span>`;
+        const seg = (d) => hullRow(d) ? "" : `<span class="seg" data-item="${d.item_id}" data-where="${where(d)}" data-m3="${d.m3}" data-name="${esc(d.name || d.type)}">${myBay ? `<button type="button" data-dest="bay" class="${where(d) === "bay" ? "on" : ""}">Bay</button>` : ""}<button type="button" data-dest="hangar" class="${["other", "repack", "noroom"].includes(where(d)) ? "on" : ""}">Hangar</button><button type="button" data-dest="keep" class="${["keep", "cheap"].includes(where(d)) ? "on" : ""}">Keep</button>${destOf(d) ? `<button type="button" data-dest="" title="back to the plan's choice">↺</button>` : ""}</span>`;
         const row = (d) => `<li class="ship ${where(d)}">${seg(d)} ${label(d)} <small>${isk(fitted(d))} · ${m3(d.m3)}${hullRow(d) ? (hullRow(d).pilot ? ` · coffin hull: ${esc(hullRow(d).pilot.name)} already boarded` : ' · <span class="short">coffin hull: needs a pilot</span>') : ""}${where(d) === "other" ? ` → ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}` : where(d) === "repack" ? " → repackage into your containers" : where(d) === "cheap" ? " · cheap" : where(d) === "noroom" ? ' · <span class="short">no room anywhere</span>' : ""}${parentOf(d) ? ` · <span class="amber">in ${esc(parentOf(d).name || parentOf(d).type)}'s escape bay: take it out first</span>` : ""}${d.tooBig && where(d) !== "bay" ? ' · <span class="short">doesn\'t fit your bay</span>' : ""}</small></li>`;
         const by = (w) => [...x.ships].filter(d => w.includes(where(d))).sort((a, b) => fitted(b) - fitted(a));
         const bayList = by(["bay"]), hangarList = by(["other", "repack", "noroom"]), stayList = by(["keep", "cheap", "hull"]);
         const used = bayList.reduce((a, d) => a + d.m3, 0);
-        acts.push({ k: "ships", html: `Your ships <span class="note">(ISK with fittings · pick Bay / Hangar / Keep for any of them)</span>
+        acts.push({ k: "ships", html: `<div class="shipsbox" data-free="${myBay ? myBay.cap - used : 0}">Your ships <span class="note">(ISK with fittings · pick Bay / Hangar / Keep for any of them; the others stay put)</span><div class="baywarn"></div>
           ${myBay ? `<div class="shipsec bay"><b>Into your ${esc(myBay.h.type)}'s bay</b> <span class="note">${m3(used)} of ${m3(myBay.cap)}</span>${bayList.length ? `<ul class="list plain">${bayList.map(row).join("")}</ul>` : '<div class="note">nothing yet</div>'}</div>` : ""}
           ${hangarList.length ? `<div class="shipsec hangar"><b>To the division hangar</b><ul class="list plain">${hangarList.map(row).join("")}</ul></div>` : ""}
-          ${stayList.length ? `<div class="shipsec stay"><b>Stays here</b><ul class="list plain">${stayList.map(row).join("")}</ul></div>` : ""}` });
+          ${stayList.length ? `<div class="shipsec stay"><b>Stays here</b><ul class="list plain">${stayList.map(row).join("")}</ul></div>` : ""}</div>` });
       }
       if (mineBay.length) acts.push({ k: "bay", html: `Load your ${esc((bayOf.get(mineBay[0].item_id) || {}).h.type)}'s ship bay: ${mineBay.map(label).join(", ")}${mineBay.some(d => x.ships.some(s2 => s2.item_id === d.holder)) ? ' <span class="note">(escape-bay ships out of their battleship first)</span>' : ""}` });
       if (rep.length) acts.push({ k: "repack", html: `Repackage ${rep.map(label).join(", ")} <span class="note">(rigs lost: ${isk(rep.reduce((a, d) => a + ((f.repackage.find(r => r.item_id === d.item_id) || {}).rig || 0), 0))})</span>` });
@@ -877,7 +884,19 @@
     document.querySelectorAll("#steps select.sitsel").forEach(b => b.addEventListener("change", () => { store.set("sitPick." + b.dataset.who, b.value === "" ? null : b.value === "pod" ? "pod" : Number(b.value)); render(); }));
     document.querySelectorAll("#steps input.todo").forEach(b => b.addEventListener("change", () => { store.set(b.dataset.k, b.checked); render(); }));
     document.querySelectorAll("#steps input.clonepick").forEach(b => b.addEventListener("change", () => { store.set("clonePick." + b.dataset.who, b.value || null); render(); }));
-    document.querySelectorAll("#steps .seg button").forEach(b => b.addEventListener("click", () => { const id = b.closest(".seg").dataset.item; store.set("dest." + id, b.dataset.dest || null); store.set("leave." + id, null); render(); }));
+    // Bay / Hangar / Keep: everything of this character stays where it is now (nothing else
+    // moves in or out on its own), then the one you clicked changes. Bay only when it fits.
+    document.querySelectorAll("#steps .seg button").forEach(b => b.addEventListener("click", () => {
+      const seg = b.closest(".seg"), box = b.closest(".shipsbox"), want = b.dataset.dest || null;
+      if (want === "bay" && seg.dataset.where !== "bay") {
+        const free = Number(box.dataset.free || 0), need = Number(seg.dataset.m3 || 0);
+        if (need > free) { box.querySelector(".baywarn").innerHTML = `<span class="short">Not enough room in your bay: ${esc(seg.dataset.name)} needs ${m3(need)}, ${m3(Math.max(0, free))} free.</span> Move something to Hangar or Keep first.`; return; }
+      }
+      const as = { bay: "bay", other: "hangar", repack: "hangar", noroom: "hangar", keep: "keep" };
+      box.querySelectorAll(".seg").forEach(o => { if (!destOf({ item_id: o.dataset.item }) && as[o.dataset.where]) store.set("dest." + o.dataset.item, as[o.dataset.where]); });
+      store.set("dest." + seg.dataset.item, want); store.set("leave." + seg.dataset.item, null);
+      render();
+    }));
 
     const sl = $("loginSlider");
     if (sl) sl.addEventListener("change", () => { store.set("logins", Number(sl.value)); render(); });
