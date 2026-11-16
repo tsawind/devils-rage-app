@@ -6,129 +6,185 @@
 <title>PI planet scan</title>
 <style>
   :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
-          --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --warn:#f0c040; }
+          --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --warn:#f0c040; --bad:#f08a8a; --sky:#7fb4ff; }
   * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; user-select: none; }
-  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
-  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
-  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
-  header em { font-style: normal; font-size: 11px; color: var(--warn); border: 1px solid var(--warn); border-radius: 999px; padding: 0 7px; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.45 "Segoe UI", system-ui, sans-serif; display: grid; grid-template-rows: 40px 1fr; user-select: none; }
+  header { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 7px; padding: 0 7px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header em { font-style: normal; font-size: 10.5px; color: var(--warn); border: 1px solid var(--warn); border-radius: 999px; padding: 0 7px; }
   header .grow { flex: 1; }
+  header .rates { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  header .rates b { color: var(--text); font-weight: 600; }
   button { font: inherit; cursor: pointer; }
   .back { background: none; border: 0; color: var(--muted); }
   .back:hover { color: var(--text); }
-  main { flex: 1; overflow: auto; padding: 14px 20px 30px; display: grid; grid-template-columns: 360px 1fr; gap: 14px; align-items: start; }
-  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 12px 14px; margin-bottom: 12px; }
-  .step { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 10px 0; border-top: 1px solid #23232a; }
-  .step:first-child { border-top: 0; padding-top: 0; }
-  .step .n { width: 22px; height: 22px; border-radius: 50%; background: var(--red); text-align: center; line-height: 22px; font-size: 12px; font-weight: 700; }
-  .step h3 { margin: 0 0 4px; font-size: 14px; }
-  .muted { color: var(--muted); } .small { font-size: 12px; }
-  select, input[type=text] { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 5px 8px; font: inherit; max-width: 100%; }
-  .btn { border: 1px solid var(--line); border-radius: 8px; background: #121216; color: var(--text); padding: 5px 11px; }
+  main { display: grid; grid-template-columns: 340px 1fr; min-height: 0; }
+  #left { overflow-y: auto; border-right: 1px solid var(--line); padding: 8px 10px 20px; }
+  .step { display: grid; grid-template-columns: 22px 1fr; gap: 7px; padding: 8px 0; border-top: 1px solid #23232a; }
+  .step:first-child { border-top: 0; }
+  .step .n { width: 20px; height: 20px; border-radius: 50%; background: var(--red); text-align: center; line-height: 20px; font-size: 11px; font-weight: 700; }
+  .step .n.done { background: #3b5f0f; }
+  .step h3 { margin: 0 0 3px; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+  .step h3 .state { margin-left: auto; font-weight: 400; font-size: 11.5px; }
+  .muted { color: var(--muted); } .small { font-size: 12px; } .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  select { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 4px 7px; font: inherit; max-width: 100%; }
+  .btn { border: 1px solid var(--line); border-radius: 7px; background: #121216; color: var(--text); padding: 4px 10px; }
   .btn:hover { border-color: var(--red-hi); }
   .btn.red { border-color: var(--red); background: #1c0d0e; color: #f3c6c6; font-weight: 600; }
+  .btn.go { border-color: #4e7f12; background: #13200a; color: var(--ok); font-weight: 600; }
+  .btn.big { font-size: 15px; padding: 7px 14px; width: 100%; }
   .btn.on { border-color: var(--ok); color: var(--ok); }
-  .btn:disabled { opacity: .5; cursor: default; }
-  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
-  .anchors { max-height: 190px; overflow: auto; margin-top: 6px; border: 1px solid var(--line); border-radius: 8px; }
-  .anchor { display: flex; gap: 6px; align-items: center; padding: 3px 8px; font-size: 12.5px; cursor: pointer; border-top: 1px solid #202026; }
-  .anchor:first-child { border-top: 0; }
-  .anchor.sel { background: #2a1a0a; color: var(--warn); }
-  .anchor .got { margin-left: auto; color: var(--ok); }
-  .status { min-height: 1.4em; margin-top: 6px; color: var(--muted); font-size: 13px; }
-  .status.ok { color: var(--ok); } .status.bad { color: #f08a8a; } .status.warn { color: var(--warn); }
-  .view { position: relative; background: #000; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .view canvas { display: block; width: 100%; height: auto; }
-  #shot { cursor: crosshair; }
-  .maps { display: grid; grid-template-columns: 1fr; gap: 6px; }
-  #flat { image-rendering: pixelated; background: #0a0a0d; }
-  .meter { height: 8px; border-radius: 4px; background: #23232a; overflow: hidden; }
-  .meter i { display: block; height: 100%; background: var(--ok); width: 0; }
-  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
-  .legend b { font-weight: 600; color: var(--text); }
-  .sky { border: 1px solid #2f3a52; background: #10141d; border-radius: 8px; padding: 7px 9px; margin-bottom: 8px; }
-  .sky h4 { margin: 0 0 3px; font-size: 13px; }
-  .sky h4 em { font-style: normal; font-size: 10.5px; color: var(--ok); border: 1px solid var(--ok); border-radius: 999px; padding: 0 6px; margin-left: 4px; }
-  kbd { background: #0d0d10; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 5px; }
+  label.tog { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 4px; cursor: pointer; }
+  label.tog input { margin: 0; }
+  .meter { height: 7px; border-radius: 4px; background: #23232a; overflow: hidden; flex: 1; }
+  .meter i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .15s; }
+  /* planets: one row each, with the corp's scans as squares (EVE's list order) */
+  #planets { margin-top: 5px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .pl { display: grid; grid-template-columns: 1fr 16px 16px repeat(5, 18px); gap: 3px; align-items: center; padding: 3px 7px; border-top: 1px solid #202026; cursor: pointer; font-size: 12px; }
+  .pl:first-child { border-top: 0; }
+  .pl:hover { background: #1a1a20; }
+  .pl.sel { background: #26150e; outline: 1px solid var(--red); }
+  .pl .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pl .nm small { color: var(--muted); }
+  .sq { width: 15px; height: 15px; border-radius: 3px; background: #26262c; border: 1px solid #33333a; font-size: 9px; line-height: 13px; text-align: center; color: #0d0d10; font-weight: 700; }
+  .sq.fresh { background: #6aa51b; border-color: #8fd12b; }
+  .sq.old { background: #b88a1a; border-color: #e0ae2c; }
+  .sq.stale { background: #7a2a2a; border-color: #a33; }
+  .sq.part { background: repeating-linear-gradient(45deg, #6aa51b 0 3px, #26262c 3px 6px); }
+  .sq.me { outline: 2px solid #fff; outline-offset: 0; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; background: #2a2a30; border: 1px solid #3a3a42; justify-self: center; }
+  .dot.on { background: var(--sky); border-color: #a8ccff; }
+  .dot.bare.on { background: #c98a52; border-color: #e5ad79; }
+  .plhead { display: grid; grid-template-columns: 1fr 16px 16px repeat(5, 18px); gap: 3px; padding: 2px 7px; font-size: 10px; color: var(--muted); background: #121216; }
+  .plhead span { text-align: center; }
+  .status { min-height: 1.3em; margin-top: 4px; color: var(--muted); font-size: 12px; }
+  .status.ok { color: var(--ok); } .status.bad { color: var(--bad); } .status.warn { color: var(--warn); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; font-size: 12px; margin-top: 4px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .pins { max-height: 150px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; margin-top: 4px; }
+  .pin { padding: 2px 7px; font-size: 12px; cursor: pointer; border-top: 1px solid #202026; }
+  .pin:first-child { border-top: 0; }
+  .pin.sel { background: #2a1a0a; color: var(--warn); }
+  .pin .got { float: right; color: var(--ok); }
+  /* right side */
+  #right { display: grid; grid-template-columns: 1fr 380px; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; padding: 8px; min-height: 0; min-width: 0; }
+  .view { position: relative; background: #000; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; min-height: 0; }
+  #shot { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  .badge { position: absolute; left: 8px; top: 8px; padding: 2px 9px; border-radius: 999px; font-size: 12px; background: rgba(0,0,0,.65); border: 1px solid var(--line); pointer-events: none; }
+  .badge.ok { color: var(--ok); border-color: #4e7f12; } .badge.warn { color: var(--warn); border-color: #7a6416; }
+  .clickhint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: rgba(40,20,5,.9); border: 1px solid var(--warn); color: var(--warn); padding: 4px 12px; border-radius: 8px; font-size: 13px; pointer-events: none; display: none; }
+  #panel { grid-row: 1 / span 2; grid-column: 2; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .card { border: 1px solid var(--line); border-radius: 9px; background: var(--card); padding: 9px 11px; }
+  .now { border-color: #6a5310; background: #191408; }
+  .now h2 { margin: 0 0 4px; font-size: 13px; color: var(--warn); text-transform: uppercase; letter-spacing: .04em; }
+  .now .say { font-size: 15.5px; line-height: 1.4; }
+  .now .say.ok { color: var(--ok); }
+  .now ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+  #log { flex: 1; overflow-y: auto; min-height: 60px; font-size: 12px; }
+  #log div { padding: 2px 0; border-top: 1px solid #202026; }
+  #log div:first-child { border-top: 0; }
+  #log .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+  .mapbox { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; min-width: 0; }
+  #flat { display: block; width: 720px; height: 360px; image-rendering: pixelated; background: #0a0a0d; border: 1px solid var(--line); border-radius: 7px; }
+  .maptext { font-size: 12px; min-width: 0; }
+  .maptext h4 { margin: 0 0 2px; font-size: 14px; }
+  .bigpct { font-size: 34px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .scale { height: 10px; border-radius: 3px; background: linear-gradient(90deg, #14102a, #152a50, #12452f, #2c6f0a, #8a7d05, #a85a08, #b0180c, #c7c0bf); margin: 4px 0 2px; }
+  /* the done pop-up */
+  #pop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
+  #pop .box { width: 480px; border: 2px solid #4e7f12; background: #10180a; border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 40px #000; }
+  #pop.err .box { border-color: var(--red); background: #1c0d0e; }
+  #pop h2 { margin: 0 0 6px; font-size: 19px; color: var(--ok); }
+  #pop.err h2 { color: var(--bad); }
+  #pop .next { margin-top: 10px; font-size: 15px; color: var(--warn); }
 </style>
 </head>
 <body>
 <header>
   <span class="logo">DR</span>
   <h1>PI planet scan</h1><em>BETA</em>
+  <span class="rates" id="rates"></span>
   <span class="grow"></span>
   <button class="back" id="home">← Home</button>
 </header>
 <main>
-  <div>
-    <div class="card">
-      <div class="step"><div class="n">1</div><div>
-        <h3>Client and planet</h3>
-        <div class="muted small">In EVE: open the planet, turn on the scan for a resource. This page only watches the picture; it never clicks or types in EVE.</div>
-        <div class="row"><select id="client"></select><button class="btn" id="reload" title="Look for clients and your planets again">↻</button></div>
-        <div class="row"><select id="planet" style="width: 100%"></select></div>
-        <div class="row"><button class="btn" id="record" title="Saves this client's picture 3 times a second (up to 2 minutes) on this PC, so the scan can be tuned on real pictures">● Record for tuning</button><span class="small muted" id="recordSaid"></span></div>
-        <label class="small muted"><input type="checkbox" id="others"> Show the other planets here (scan them using a corp mate's buildings)</label>
-        <label class="small muted" title="The picture at the client's own size instead of 1280 wide: sharper stars for the sky lock, a little slower. Changing it keeps the edge and the lock."><input type="checkbox" id="fullSize"> Full-size pictures (sharper sky, a little slower)</label>
-      </div></div>
-      <div class="step"><div class="n">2</div><div>
-        <h3>The planet's edge</h3>
-        <div class="muted small">EVE always puts the planet in the middle of the window, so only its size is needed: <b>Click the edge</b>, then click once anywhere on the planet's edge. Mouse wheel over the picture fine-tunes it. Zoomed in EVE after locking on? Click the edge again: it keeps the lock and works out the new distance. With this system's sky recorded, the edge is found by itself.</div>
-        <div class="row"><button class="btn red" id="rim3">Click the edge</button><button class="btn" id="fit">Find edge</button><span class="small muted" id="discInfo"></span></div>
-        <label class="small muted" title="Off: if you zoom in EVE, press Click 3 on the edge again (it keeps the lock). On: the app looks for the edge itself, which can latch onto a lava glow."><input type="checkbox" id="follow" checked> Follow zoom by itself</label>
-      </div></div>
-      <div class="step"><div class="n">3</div><div>
-        <h3>Lock on</h3>
-        <div class="sky" id="skyBox">
-          <h4>Sky lock<em>NEW</em></h4>
-          <div class="small">The stars and nebula behind the planet never move (David's idea), so the sky shows which way the camera faces, on <b>every planet in the system</b>, under any filter. <b>Once per system:</b> lock on below (any way), zoomed all the way out, then turn the planet slowly all the way round, a bit from above and below too: the sky is recorded as you turn (Scan doesn't need to be on). <b>After that:</b> open any planet in this system and it locks on by itself; scans stay on it.</div>
-          <div class="row"><span class="small" id="skyState">No sky recorded for this system yet.</span></div>
-          <div class="row"><button class="btn" id="skyFindBtn" title="Drop the current lock and find the facing from the sky alone (to compare with a lock from buildings)">Find by the sky</button><button class="btn" id="skyForget" title="Delete this system's sky from this PC (for example if it was recorded under a wrong lock). Lock on again and turn round to record it again.">Forget this system's sky</button><label class="small muted"><input type="checkbox" id="skyShow"> Show the sky map</label></div>
-          <div class="status" id="skyStatus"></div>
-        </div>
-        <div class="small" style="margin-bottom: 6px"><b>Most exact:</b> in EVE double-click the planet (your command center jumps to the middle), press <button class="btn red" id="followCc">Follow my command center</button>, then zoom all the way out slowly: the cross follows it and it locks by itself.</div>
-        <div class="small" style="margin-bottom: 6px"><b>Quick:</b> double-click the planet, zoom <b>all the way out</b>, then <button class="btn red" id="dcLock">Lock on: double-clicked</button></div>
-        <label class="small"><input type="checkbox" id="auto" checked> <b>By itself:</b> turn and zoom in EVE, and click command centers so their networks show; it finds the buildings in the picture and matches them to every corp colony SeAT knows.</label>
-        <div class="status" id="autoStatus"></div>
-        <details open style="margin-top: 6px"><summary class="small muted" style="cursor: pointer">Or point out buildings yourself</summary>
-        <div class="small" style="margin-bottom: 4px"><b>Quickest:</b> zoomed all the way out with the edge set, click one of your buildings in EVE so your network shows. <b>Freeze</b>, pick one of your buildings that's listed <b>×1</b> (your <b>Launchpad</b>, the rocket icon, is easy to spot), click it on the picture, <b>Lock on</b>. Rings on the wrong side? <b>Flip</b> (it remembers).</div>
-        <div class="muted small">Not your colony? Anyone's buildings work: in EVE right-click the planet → <b>Show other characters' networks</b>. <b>Freeze</b>, pick a kind of building below, click one of those on the picture (a magnifier helps). Look-alikes (two storage facilities) don't matter: the app works out which is which. Three or more spread out (extractor heads are good) tells which way the planet faces; afterwards green rings sit on every building.</div>
-        <div class="row"><button class="btn" id="freeze">Freeze</button><button class="btn red" id="lock" disabled>Lock on</button><button class="btn" id="clearAnchors">Clear</button><button class="btn" id="flip" hidden title="Locked from one building: if the green rings sit wrong, try the other way round">Flip</button></div>
-        <label class="small muted"><input type="checkbox" id="othersPins"> Other people's buildings too</label>
-        <div class="anchors" id="anchors"></div>
-        </details>
-        <div class="status" id="lockStatus"></div>
-      </div></div>
-      <div class="step"><div class="n">4</div><div>
-        <h3>Scan</h3>
-        <div class="muted small"><b>Once per planet:</b> zoomed all the way out, EVE on <b>No filter</b>, pick <b>Bare planet</b> below, press Scan and turn the planet all the way round (top and bottom too): the app learns the planet's own colours, so they don't read as resource. <b>Then for each resource:</b> in EVE's Scan panel drag both ends of the colour band right out (and leave them), pick the same resource here, press <b>Scan</b>, turn the planet round once, <b>Save to SeAT</b>. With this system's sky recorded, every picture is placed on the sky, so nothing slides (and without it, on the bare map).</div>
-        <div class="row"><select id="resource"></select><button class="btn red" id="scan" disabled>Scan</button><button class="btn" id="recentre" title="In EVE double-click the planet, zoom all the way out, then press this. A scan keeps going.">Re-centre on command center</button><label class="small"><input type="checkbox" id="showHeat"> Show what it reads</label></div>
-        <div class="row" style="display: block"><div class="meter"><i id="cover"></i></div></div>
-        <div class="status" id="scanStatus"></div>
-      </div></div>
-      <div class="step"><div class="n">5</div><div>
-        <h3>Save for the corp</h3>
-        <div class="muted small">Adds to what the corp already has for this planet and resource (the Corp map tab on the PI screen shows it, with the best places to put two extractors).</div>
-        <div class="row"><button class="btn red" id="save" disabled>Save to SeAT</button> <button class="btn" id="rebare" title="Delete the bare map version in use on this PC and record it again">Record bare map again</button> <button class="btn" id="wipe" hidden title="Delete every scan the corp has of this planet (made with older versions that slid while scanning)">Delete this planet's old scans</button></div>
-        <div class="status" id="saveStatus"></div>
-      </div></div>
+  <div id="left">
+    <div class="step"><div class="n" id="n1">1</div><div>
+      <h3>Client and planet <span class="state" id="s1"></span></h3>
+      <div class="row"><select id="client" style="flex: 1"></select><button class="btn" id="reload" title="Look for clients and planets again">↻</button></div>
+      <div class="small muted" style="margin-top: 4px">Open the planet in EVE and pick it here. This page only watches the picture; it never clicks or types in EVE.</div>
+      <div id="planets"></div>
+      <label class="tog" title="Once a planet's own colours are mapped, the app can tell which planet EVE shows and switch to it"><input type="checkbox" id="autoPlanet"> Switch planet by itself (mapped planets)</label>
+    </div></div>
+
+    <div class="step"><div class="n" id="n2">2</div><div>
+      <h3>The planet's edge <span class="state" id="s2"></span></h3>
+      <div class="small muted">Zoomed all the way out in EVE (every planet is then about the same size). Found by itself; set once, it stays.</div>
+      <div class="row"><button class="btn" id="findEdge">Find edge</button><button class="btn" id="clickEdge">Click the edge</button></div>
+      <label class="tog" title="Follow the edge when you zoom in EVE (off: the size stays where it was set)"><input type="checkbox" id="autoZoom"> Follow zoom</label>
+    </div></div>
+
+    <div class="step"><div class="n" id="n3">3</div><div>
+      <h3>Sky lock <span class="state" id="s3"></span></h3>
+      <div class="small muted">The stars and nebula behind the planet never move, so the sky tells which way the camera faces. Each planet records its own sky as you turn it (until then it borrows another planet's).</div>
+      <div class="kv" id="skyFacts"></div>
+      <div class="row"><button class="btn" id="findSky" title="Drop the lock and find the facing from the sky alone">Find by the sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button><label class="tog" style="margin: 0"><input type="checkbox" id="showSky"> Show the sky map</label></div>
+      <div class="row" id="importRow" hidden><button class="btn" id="importSky">Use the old scanner's sky for this planet</button></div>
+      <details id="pointOut"><summary>No sky in this system yet? Point out buildings</summary>
+        <div class="small muted">Click one of your buildings in EVE so its network shows. Pick a building below, click it on the picture; three spread out lock on, then turn the planet slowly to record its sky.</div>
+        <div class="pins" id="pins"></div>
+        <div class="row"><button class="btn" id="lockPins" disabled>Lock on</button><button class="btn" id="clearPins">Clear</button></div>
+      </details>
+    </div></div>
+
+    <div class="step"><div class="n" id="n4">4</div><div>
+      <h3>Scan <span class="state" id="s4"></span></h3>
+      <div class="small muted">Zoomed all the way out. In EVE's Scan panel, drag both ends of the colour band right out (once). Pick a resource in EVE, press Scan, spin the planet (over the poles too) until 99 %.</div>
+      <div class="row"><button class="btn go big" id="scan">Scan</button></div>
+      <div class="row"><button class="btn" id="stop" disabled>Stop</button><button class="btn" id="saveNow" disabled title="Save what's scanned so far (under 99 %)">Save now</button><select id="resource" title="Used when the app can't see EVE's list"></select></div>
+      <label class="tog"><input type="checkbox" id="autoNext" checked> Start the next scan when EVE switches resource</label>
+      <div class="small muted" style="margin-top: 4px">EVE's resource list: <span id="listSaid"></span> <button class="btn" id="pointList" style="padding: 1px 7px">Point it out</button></div>
+    </div></div>
+
+    <div class="step"><div class="n" id="n5">5</div><div>
+      <h3>Save for the corp <span class="state" id="s5"></span></h3>
+      <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (and each planet's own colours and sky)</label>
+      <div class="small muted" style="margin-top: 4px">The squares in 1 are the corp's scans: <span class="ok">green</span> under 7 days old, <span class="warn">amber</span> older, <span class="bad">red</span> over 14 days or none, white ring = yours. Hover for who and when.</div>
+    </div></div>
+  </div>
+
+  <div id="right">
+    <div class="view" id="viewBox"><canvas id="shot"></canvas><div class="badge" id="badge"></div><div class="clickhint" id="clickHint"></div></div>
+    <div id="panel">
+      <div class="card now"><h2>Do now</h2><div class="say" id="say">Starting…</div><ul id="also"></ul></div>
+      <div class="card" style="flex: 1; display: flex; flex-direction: column; min-height: 0"><div class="small muted" style="margin-bottom: 4px">What happened</div><div id="log"></div></div>
+    </div>
+    <div class="mapbox">
+      <canvas id="flat" width="720" height="360"></canvas>
+      <div class="maptext">
+        <h4 id="mapTitle">Map</h4>
+        <div class="bigpct" id="mapPct">–</div>
+        <div class="muted" id="mapSub"></div>
+        <div class="scale" id="scale"></div><div class="small muted" id="scaleSaid">low → high</div>
+        <div class="small" id="missing" style="margin-top: 6px"></div>
+      </div>
     </div>
   </div>
-  <div class="maps">
-    <div class="view"><canvas id="shot" width="1280" height="720"></canvas></div>
-    <div class="legend"><span><b style="color:#ff5a4a">○</b> planet edge</span><span><b style="color:var(--warn)">✚</b> buildings you pointed out</span><span><b style="color:var(--ok)">○</b> where the scan thinks your buildings are</span></div>
-    <div class="view"><canvas id="flat" width="720" height="360"></canvas></div>
-    <div class="legend" id="flatLegend"><span>Whole planet, north at the top. Dark = not seen yet.</span></div>
-  </div>
 </main>
+<div id="pop"><div class="box"><h2 id="popTitle"></h2><div id="popText"></div><div class="next" id="popNext"></div><div class="row" style="justify-content: flex-end; margin-top: 12px"><button class="btn" id="popOk">OK</button></div></div></div>
 <script src="piscan-engine.js"></script>
 <script>
 (() => {
-  const E = window.PiScanEngine;
-  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  "use strict";
   const $ = (id) => document.getElementById(id);
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+  const E = window.PiScanEngine;
+  const DEG = Math.PI / 180;
   const RESOURCES = {
     barren: ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Microorganisms", "Noble Metals"],
     gas: ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Reactive Gas"],
@@ -139,1095 +195,522 @@
     storm: ["Aqueous Liquids", "Base Metals", "Ionic Solutions", "Noble Gas", "Suspended Plasma"],
     temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Microorganisms"],
   };
-  const say = (id, text, kind) => { const el = $(id); el.textContent = text || ""; el.className = "status" + (kind ? " " + kind : ""); };
-  $("home").addEventListener("click", () => { location.href = "index.html#pi"; });
+  const FRESH_DAYS = 7;
+  let planets = [], planet = null, me = null, status = null, seq = 0, alive = true;
+  let picture = null, clickMode = null, listClicks = [], pinPick = null, anchors = [];
+  let mapVersion = -1, mapAt = 0, lastEvent = 0, lastPicked = null, skyDrawnAt = 0;
+  const settings = (() => { try { return JSON.parse(localStorage.getItem("planetscan") || "{}"); } catch { return {}; } })();
+  const keep = () => { try { localStorage.setItem("planetscan", JSON.stringify(settings)); } catch {} };
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const pct = (x) => (x == null ? "–" : `${Math.floor(x * 1000) / 10} %`);
+  const ago = (at) => { if (!at) return ""; const d = (Date.now() / 1000 - at) / 86400; return d < 1 ? `${Math.max(1, Math.round(d * 24))} h ago` : `${Math.round(d)} d ago`; };
+  const systemName = (p) => (p ? String(p.name).replace(/\s+[IVXLCDM]+$/i, "") : "");
+  const resourcesOf = (p) => RESOURCES[p ? p.type : ""] || [];
 
-  const shot = $("shot"), sctx = shot.getContext("2d", { willReadFrequently: true });
-  const flat = $("flat"), fctx = flat.getContext("2d");
-  let planets = [], frame = null, frozen = false, disc = null, anchors = [], selected = null, facing = null;
-  const maps = new Map(); // resource → engine map
-  let running = false, prevGrey = null, lostRun = 0, painting = false;
-  // Tracking memory: the last step's turn (to look ahead when turning steadily), pictures kept
-  // every ~11° with where the planet faced (to pick up again after losing the grip), and the
-  // picture right after a loss (to tell a filter switch from a fast spin).
-  let lastStep = null, keys = [], lost = null, keyTry = 0;
-  // The bare map as the reference every picture is placed on (refreshed while it's still being recorded).
-  const DEG = Math.PI / 180;
-  let refCache = null, refAt = 0, lastFind = 0, mapMisses = 0;
-  function mapRef() {
-    if (!bare || E.bareCoverage(bare) < 0.15) return null;
-    const recording = $("resource").value === BARE;
-    if (!refCache || refCache.bare !== bare || (recording && Date.now() - refAt > 1500)) {
-      refCache = { bare, fine: E.bareGrey(bare), coarse: E.bareGrey(bare, true) }; refAt = Date.now();
-    }
-    return refCache;
-  }
-  /** After a lock: use the bare map version that fits this client's look; none fits → a new one gets recorded. */
-  function checkMapAgainstLock() {
-    const said = fitVersionsToLock();
-    if (said) say("scanStatus", said, /No bare map/.test(said) ? "warn" : "ok");
-  }
-  function forgetTrack() { prevGrey = null; lastStep = null; keys = []; lost = null; lostRun = 0; }
-  const BARE = "__bare";
-  let bare = null, focal = null, autoBusy = false, autoAsked = 0, worker = null, workerId = 0;
-  try { worker = new Worker("piscan-worker.js"); } catch (e) { worker = null; }
-
-  // ---------- the sky ----------
-  // EVE's planet view moves the camera round the planet; the planet and the sky behind it (stars,
-  // nebula) stay put, and every planet in a system shares the same sky (checked on recordings:
-  // planet I found from planet VI's sky within about 1° of its own lock). So one sky map per
-  // system, recorded once while locked, tells which way the camera faces on any planet there.
-  // Kept on this PC in IndexedDB (about 1 MB a system).
-  const SKY_LENS_AT_1280 = 750; // EVE's lens, measured from the stars' own motion on three recordings (0.1–0.3 px)
-  const skyLens = () => SKY_LENS_AT_1280 * (shot.width || 1280) / 1280;
-  let sky = null, skySystem = null, skyDirty = false, skySavedAt = 0, skyPaintedAt = null, skyFindAt = 0, skySaidAt = 0;
-  let uiMask = null, uiMaskKey = null, uiSavedAt = 0, uiTick = 0, skyLast = null, skyRimAt = 0, skyRimOk = false;
-  const systemOf = (p) => (p && p.name ? String(p.name).replace(/\s+[IVXLCDM]+$/i, "") : "");
-  const pct = (x) => Math.round((x || 0) * 100) + "%";
-  const poseApart = (a, b) => { const M = E.mul(E.poseQ(a.yaw, a.pitch), E.transpose(E.poseQ(b.yaw, b.pitch))); return Math.acos(Math.max(-1, Math.min(1, (M[0] + M[4] + M[8] - 1) / 2))); };
-  const kv = (() => {
-    let opening = null;
-    const open = () => opening || (opening = new Promise((ok, bad) => {
-      const req = indexedDB.open("piscan", 1);
-      req.onupgradeneeded = () => req.result.createObjectStore("kv");
-      req.onsuccess = () => ok(req.result); req.onerror = () => bad(req.error);
-    }));
-    const run = (mode, fn) => open().then((db) => new Promise((ok, bad) => { const req = fn(db.transaction("kv", mode).objectStore("kv")); req.onsuccess = () => ok(req.result); req.onerror = () => bad(req.error); }));
-    return { get: (k) => run("readonly", (st) => st.get(k)), put: (k, v) => run("readwrite", (st) => st.put(v, k)), del: (k) => run("readwrite", (st) => st.delete(k)) };
-  })();
-  const skyCover = () => (sky ? E.skyCoverage(sky) : 0);
-  function showSkyState() {
-    const sys = skySystem || systemOf(currentPlanet()) || "this system";
-    $("skyState").textContent = sky ? `Sky of ${sys}: ${pct(skyCover())} of the sky recorded${sky.mirrored ? "" : " (longitude counted EVE's other way)"}.` : `No sky recorded for ${sys} yet.`;
-    $("skyForget").disabled = !sky;
-  }
-  async function loadSky() {
-    const sys = systemOf(currentPlanet());
-    if (sys === skySystem) { showSkyState(); return; }
-    if (sky && skyDirty) await saveSky(true);
-    skySystem = sys; sky = null; skyDirty = false; skyPaintedAt = null;
-    if (sys) {
-      try { const got = await kv.get("sky-" + sys); if (got && skySystem === sys) sky = E.skyFromBytes(new Uint8Array(got)); } catch (e) { say("skyStatus", "Couldn't read the sky kept on this PC: " + e, "warn"); }
-    }
-    showSkyState();
-  }
-  async function saveSky(now) {
-    if (!sky || !skyDirty || !skySystem) return;
-    if (!now && Date.now() - skySavedAt < 5000) return;
-    skySavedAt = Date.now(); skyDirty = false;
-    try { await kv.put("sky-" + skySystem, E.skyToBytes(sky).buffer); } catch (e) { say("skyStatus", "Couldn't keep the sky on this PC: " + e, "bad"); }
-  }
-  // EVE's own windows (screen-fixed) per client and picture size, learnt as the planet turns.
-  function uiMaskFor(f) {
-    const key = "piscan-ui-" + ($("client").value || "?") + "-" + f.w + "x" + f.h;
-    if (uiMaskKey !== key) {
-      uiMaskKey = key; uiMask = null;
-      try { const t = localStorage.getItem(key); if (t) uiMask = E.uiMaskFromBytes(Uint8Array.from(atob(t), (c) => c.charCodeAt(0)), f.w, f.h); } catch { uiMask = null; }
-      if (!uiMask) uiMask = E.newUiMask(f.w, f.h, 8);
-    }
-    return uiMask;
-  }
-  function learnUi(f) {
-    const m = uiMaskFor(f);
-    if ((uiTick++ & 1) !== 0) return;
-    if (E.updateUiMask(m, f.data.data, f.w, f.h, disc) && E.uiMaskReady(m) && Date.now() - uiSavedAt > 10000) {
-      uiSavedAt = Date.now();
-      try { const b = E.uiMaskToBytes(m); let bin = ""; for (let i = 0; i < b.length; i += 4096) bin += String.fromCharCode.apply(null, b.subarray(i, i + 4096)); localStorage.setItem(uiMaskKey, btoa(bin)); } catch {}
-    }
-  }
-  function skyViewOf(f) {
-    const m = uiMaskFor(f);
-    return E.skyView(f.data.data, f.w, f.h, disc, skyLens(), E.uiMaskReady(m) ? m : null);
-  }
-  const SKY_SURE = (found) => found && found.coarse >= 0.5 && found.score >= 0.4 && found.margin >= 0.3;
-  /** Not locked: look for this view on the system's sky (needs the edge; found by itself if not set). */
-  function skyFind(f) {
-    if (!sky || skyCover() < 0.02 || Date.now() - skyFindAt < 900) return false;
-    skyFindAt = Date.now();
-    // The planet's edge, found by itself (EVE puts the planet in the middle): from the picture, else
-    // the size it last had on this client if the picture agrees, else the edge set by hand.
-    const rim = E.rimRadius(f.data.data, f.w, f.h, null);
-    const lastR = Number(localStorage.getItem("piscan-lastr-" + f.w) || 0);
-    if (rim && rim.r >= 40) { if (!disc || Math.abs(rim.r - disc.r) > disc.r * 0.04) { disc = { cx: rim.cx, cy: rim.cy, r: rim.r }; updateButtons(); } }
-    else if (!disc && lastR >= 40 && E.rimStillThere(f.data.data, f.w, f.h, { cx: f.w / 2, cy: f.h / 2, r: lastR })) { disc = { cx: f.w / 2, cy: f.h / 2, r: lastR }; updateButtons(); }
-    if (!disc) { say("skyStatus", "Looking for the planet's edge… (or set it in step 2)", ""); return false; }
-    const found = E.findOnSky(skyViewOf(f), sky);
-    skyLast = found ? { how: "find", coarse: found.coarse, fine: found.score, margin: found.margin, yaw: found.yaw, pitch: found.pitch } : { how: "find", none: true };
-    if (!SKY_SURE(found)) {
-      say("skyStatus", found && found.coarse > 0.3 ? `Looking at the sky… not sure yet (match ${pct(found.coarse)}, stars ${pct(found.score)}). Turn the planet a little toward sky you've recorded.` : "Looking at the sky… this part isn't recorded yet: turn toward sky you recorded, or lock on below to record more.", "");
-      return false;
-    }
-    disc = { cx: disc.cx, cy: disc.cy, r: disc.r, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
-    focal = lensPx();
-    const me = $("client").value, p = currentPlanet();
-    const mine = !!(p && p.pins.some((pin) => pin.owner === me));
-    facing = { Q: E.poseQ(found.yaw, found.pitch), mirrored: sky.mirrored, misses: [], owners: mine ? [me] : [], sky: true, skyChecked: true };
-    anchors = []; forgetTrack(); mapMisses = 0; frozen = false;
-    const fixed = fitVersionsToLock();
-    say("lockStatus", `Locked on by the sky: no buildings needed.${fixed ? " " + fixed : ""}`, "ok");
-    say("skyStatus", `Found on the sky (match ${pct(found.coarse)}, stars ${pct(found.score)}). The green rings should sit on ${mine ? "your" : "the corp's"} buildings.`, "ok");
-    renderAnchors(); updateButtons(); drawShot();
-    return true;
-  }
-  /**
-   * Locked: place this picture on the sky (exact, no drift) and record more sky as the camera
-   * turns. trusted = the facing is fresh or the planet tracker just followed it (safe to record
-   * from while looking at sky that isn't recorded yet). Returns "placed", "conflict" or "none".
-   */
-  function skyStep(f, trusted) {
-    const m = uiMaskFor(f);
-    if (!E.uiMaskReady(m) && !sky) {
-      if (Date.now() - skySaidAt > 2000) { skySaidAt = Date.now(); say("skyStatus", "Learning where EVE's windows are: turn the planet a little.", ""); }
-      return "none";
-    }
-    if (sky && sky.mirrored !== facing.mirrored) {
-      if (Date.now() - skySaidAt > 4000) { skySaidAt = Date.now(); say("skyStatus", "This lock counts longitude the other way round from the recorded sky: the sky is left alone. Flip the lock, or Forget this system's sky.", "warn"); }
-      return "conflict";
-    }
-    if (facing.skyConflict) return "conflict";
-    const view = skyViewOf(f);
-    let result = "none";
-    if (sky && skyCover() > 0.005) {
-      const now = E.poseOf(facing.Q);
-      // A lock from buildings (or a bare map): check it against the sky once.
-      if (!facing.skyChecked) {
-        facing.skyChecked = true;
-        const found = E.findOnSky(view, sky);
-        if (SKY_SURE(found)) {
-          const apart = poseApart(found, now) / DEG;
-          if (apart > 3) {
-            facing.skyConflict = true;
-            say("skyStatus", `The recorded sky puts the planet ${apart.toFixed(1)}° from this lock. Your lock is kept (the sky isn't used or recorded while they disagree). Green rings sit right? Then the sky is off: Forget this system's sky and turn round to record it again. Rings off? Press Find by the sky.`, "warn");
-            return "conflict";
-          }
-          say("skyStatus", `Sky check: the sky agrees with this lock within ${apart.toFixed(1)}°. The sky keeps it exact from here.`, "ok");
-        } else say("skyStatus", "Sky check: this part of the sky isn't recorded yet; it gets recorded as you turn.", "");
-      }
-      const coarsePts = E.skyPoints(view, "coarse");
-      // Near where it was (the planet tracker's guess), wider if that misses (a fast turn).
-      let c = E.alignSky(coarsePts, sky.coarse, now, 3 * DEG, 1 * DEG, 0.3);
-      if (!(c && c.score >= 0.45)) { const wide = E.alignSky(coarsePts, sky.coarse, now, 10 * DEG, 1 * DEG, 0.3); if (wide && wide.score >= 0.5) c = wide; }
-      let at = null;
-      if (c && c.score >= 0.45) {
-        const fz = E.alignSky(E.skyPoints(view, "fine"), sky.fine, c, 0.5 * DEG, 0.25 * DEG, 0.3);
-        at = fz && fz.score >= 0.25 ? fz : c;
-        result = "placed";
-      } else if (c && c.seen >= 0.5) result = "conflict";
-      // Still not (lost the grip, or back from zooming in): look on the whole sky.
-      if (!at && Date.now() - skyFindAt > 900) {
-        skyFindAt = Date.now();
-        const found = E.findOnSky(view, sky);
-        if (SKY_SURE(found)) { at = found; result = "placed"; }
-      }
-      skyLast = { how: "track", coarse: c ? c.score : null, fine: at && at !== c ? at.score : null, seen: c ? c.seen : null, result };
-      if (at) facing.Q = E.poseQ(at.yaw, at.pitch);
-    }
-    // Record: placed on the sky, or looking at sky that isn't recorded yet from a trusted facing.
-    // Only with the planet's edge where the app thinks it is (zoomed in past it, the "sky" would be planet).
-    if (Date.now() - skyRimAt > 500) {
-      skyRimAt = Date.now();
-      skyRimOk = E.rimStillThere(f.data.data, f.w, f.h, disc);
-    }
-    if (E.uiMaskReady(m) && skyRimOk && (result === "placed" || (result === "none" && trusted))) {
-      const p = E.poseOf(facing.Q);
-      if (!skyPaintedAt || poseApart(p, skyPaintedAt) > 0.6 * DEG) {
-        if (!sky) { sky = E.newSky(facing.mirrored); skySystem = systemOf(currentPlanet()); facing.skyChecked = true; }
-        E.paintSky(sky, view, facing.Q); skyPaintedAt = p; skyDirty = true;
-        if (Date.now() - skySaidAt > 1500) { skySaidAt = Date.now(); showSkyState(); if (result !== "placed") say("skyStatus", `Recording the sky: ${pct(skyCover())} so far. Keep turning slowly (a bit from above and below too).`, "ok"); else say("skyStatus", `On the sky (match ${pct(skyLast && skyLast.coarse)}); ${pct(skyCover())} of the sky recorded.`, "ok"); }
-      }
-    }
-    saveSky(false);
-    return result;
+  function log(text, cls) {
+    const div = document.createElement("div");
+    const t = document.createElement("span"); t.className = "t"; t.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const m = document.createElement("span"); if (cls) m.className = cls; m.textContent = text;
+    div.append(t, m); $("log").prepend(div);
+    while ($("log").children.length > 60) $("log").lastChild.remove();
   }
 
-  // ---------- clients and planets ----------
+  // ---------- 1: client and planets ----------
   async function loadClients() {
-    const list = await invoke("preview_clients").catch(() => []);
-    const sel = $("client"), was = sel.value;
+    const [list, front] = await Promise.all([invoke("preview_clients").catch(() => []), invoke("last_eve_client").catch(() => null)]);
+    const names = (list || []).map((c) => c.name || c).filter((n) => n && !/^Login/.test(n));
+    const sel = $("client"), was = sel.value || settings.client;
     sel.innerHTML = "";
-    if (!list.length) sel.append(new Option("No EVE clients open", ""));
-    list.forEach((c) => sel.append(new Option(c.name + (c.minimized ? " (minimised)" : ""), c.name)));
-    if (list.some((c) => c.name === was)) sel.value = was;
-    else {
-      // The EVE client you were last in (before switching to this page).
-      const last = await invoke("last_eve_client").catch(() => null);
-      if (last && list.some((c) => c.name === last)) sel.value = last;
+    names.forEach((n) => sel.append(new Option(n, n)));
+    if (!names.length) sel.append(new Option("No EVE client open", ""));
+    sel.value = names.includes(front) ? front : names.includes(was) ? was : names[0] || "";
+    startClient();
+  }
+  function characterIdOf(name) {
+    for (const p of planets) for (const c of p.characters || []) if (c.name === name) return c.id;
+    return null;
+  }
+  let startedWith = null;
+  function startClient() {
+    me = $("client").value || null;
+    if (!me) return;
+    settings.client = me; keep();
+    const key = me + ":" + characterIdOf(me);
+    if (key !== startedWith) {
+      startedWith = key;
+      invoke("planetscan_start", { client: me, characterId: characterIdOf(me) }).catch((e) => log("Couldn't start watching: " + e, "bad"));
     }
+    renderPlanets();
   }
   async function loadPlanets() {
-    try {
-      const data = await invoke("piscan_planets");
-      planets = (data && data.planets) || [];
-    } catch (e) { planets = []; say("lockStatus", String(e), "bad"); }
-    fillPlanets();
+    const data = await invoke("piscan_planets").catch((e) => { log("SeAT: " + e, "bad"); return null; });
+    planets = (data && data.planets) || [];
+    renderPlanets();
+    if (!planet) {
+      const wanted = planets.find((p) => p.planet_id === settings.planet) || planets.find((p) => (p.characters || []).some((c) => c.name === me)) || planets[0];
+      if (wanted) selectPlanet(wanted.planet_id);
+    } else selectPlanet(planet.planet_id, true);
+    startClient();
   }
-  function fillPlanets() {
-    const sel = $("planet"), client = $("client").value, was = sel.value;
-    sel.innerHTML = "";
-    const has = (p) => (p.characters || []).some((c) => c.name === client);
-    const mine = planets.filter(has), rest = planets.filter((p) => !has(p));
-    if (!planets.length) sel.append(new Option("No colonies found in SeAT (open the PI tab once?)", ""));
-    const group = (label, list) => { if (!list.length) return; const g = document.createElement("optgroup"); g.label = label; list.forEach((p) => g.append(new Option(`${p.name} · ${cap(p.type)} · ${(p.characters || []).map((c) => c.name).join(", ")}`, String(p.planet_id)))); sel.append(g); };
-    group(client ? client + "'s planets" : "Your planets", mine);
-    if ($("others").checked || !mine.length) group("Other planets here (anyone's buildings can anchor)", rest);
-    if ([...sel.options].some((o) => o.value === was)) sel.value = was;
-    planetChanged();
+  function systemOf(p) { return planets.filter((q) => systemName(q) === systemName(p)); }
+  function mapInfo(p, kind) { return (p.maps || []).find((m) => m.kind === kind); }
+  function scanInfo(p, resource) { return (p.scans || []).find((s) => s.resource === resource); }
+  function scanClass(s) {
+    if (!s || !s.at) return "stale";
+    const days = (Date.now() / 1000 - s.at) / 86400;
+    if (s.coverage < 0.95) return days < FRESH_DAYS ? "part" : "stale";
+    return days < FRESH_DAYS ? "fresh" : days < 14 ? "old" : "stale";
   }
-  const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : "";
-  const currentPlanet = () => planets.find((p) => String(p.planet_id) === $("planet").value) || null;
-  // The bare planet's colours, kept on this PC per planet (only the scanner needs them).
-  // v2: maps from before every picture was placed on the map slid while recording; not reused.
-  // A planet's bare map comes in versions, one per graphics look (Low settings draw lava as
-  // bright yellow blobs, High as fine glowing veins). The CEO records each look once; any client
-  // then uses the version its picture matches best. Kept on this PC: piscan-bare4-<planet>-list
-  // lists them, each map under piscan-bare4-<planet>-v<id>.
-  const listKey = (p) => "piscan-bare4-" + p.planet_id + "-list";
-  const versionKey = (p, id) => "piscan-bare4-" + p.planet_id + "-v" + id;
-  // freshVersion: the bare map being recorded right now (never dropped for not matching itself).
-  let versions = [], bareVersion = null, bareMirrored = false, freshVersion = null;
-  function readVersions(p) {
-    if (!p) return [];
-    let list = [];
-    try { list = JSON.parse(localStorage.getItem(listKey(p)) || "[]"); } catch { list = []; }
-    // Maps from before versions (one per planet, or per client): bring them in once.
-    try {
-      for (let n = 0; n < localStorage.length; n++) {
-        const key = localStorage.key(n);
-        if (!key || !key.startsWith("piscan-bare3-" + p.planet_id) || key.endsWith("-mirrored")) continue;
-        const id = Date.now() + n, who = key.includes("@") ? key.split("@")[1] : "";
-        localStorage.setItem(versionKey(p, id), localStorage.getItem(key));
-        list.push({ id, mirrored: localStorage.getItem(key + "-mirrored") === "1", label: who ? `recorded on ${who}` : "recorded earlier" });
-        localStorage.removeItem(key); localStorage.removeItem(key + "-mirrored"); n = -1;
-      }
-      localStorage.setItem(listKey(p), JSON.stringify(list));
-    } catch {}
-    return list.map((v) => {
-      try { const t = localStorage.getItem(versionKey(p, v.id)); return t ? { ...v, bare: E.bareFromBytes(Uint8Array.from(atob(t), (c) => c.charCodeAt(0))) } : null; } catch { return null; }
-    }).filter(Boolean);
-  }
-  function loadBare(p) {
-    versions = readVersions(p);
-    // Until a lock or a picture says which look this client has, the newest version is shown.
-    const v = versions[versions.length - 1] || null;
-    bareVersion = v ? v.id : null; bareMirrored = v ? v.mirrored : false;
-    return v ? v.bare : null;
-  }
-  function useVersion(v) { bare = v ? v.bare : null; bareVersion = v ? v.id : null; bareMirrored = v ? v.mirrored : false; refCache = null; }
-  /** Stop using the current version for this client (it doesn't fit); the next bare scan makes a new one. */
-  function dropVersion() { useVersion(null); }
-  /** A finished bare map to search on when lost (only on a resource pass: the map being recorded is half done). */
-  const mapDone = () => !!bare && E.bareCoverage(bare) > 0.6 && $("resource").value !== BARE;
-  /** Delete every version of this planet's bare map from this PC ("Record bare map again"). */
-  function forgetBare() {
-    const p = currentPlanet(); useVersion(null);
-    if (!p) return;
-    try { for (const v of versions) localStorage.removeItem(versionKey(p, v.id)); localStorage.setItem(listKey(p), "[]"); } catch {}
-    versions = [];
-  }
-  /** The version a picture fits best at a known facing (null if none fits). */
-  function bestVersionAt(Q, mirroredNow) {
-    if (!frame || !versions.length) return null;
-    const pts = E.samplePoints(frame.data.data, frame.w, frame.h, disc, 600);
-    let best = null;
-    for (const v of versions) {
-      if (v.mirrored !== mirroredNow) continue;
-      const near = E.alignToMap(pts, E.bareGrey(v.bare), v.mirrored, E.poseOf(Q), 2 * DEG, 0.5 * DEG);
-      if (near && (!best || near.score > best.score)) best = { v, score: near.score };
-    }
-    return best;
-  }
-  function storeBare() {
-    const p = currentPlanet();
-    if (!p || !bare) return;
-    const bytes = E.bareToBytes(bare);
-    let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
-    if (bareVersion === null) {
-      bareVersion = Date.now(); bareMirrored = !!(facing && facing.mirrored); freshVersion = bareVersion;
-      versions.push({ id: bareVersion, mirrored: bareMirrored, label: `recorded on ${$("client").value || "?"}`, bare });
-    }
-    try {
-      localStorage.setItem(versionKey(p, bareVersion), btoa(bin));
-      localStorage.setItem(listKey(p), JSON.stringify(versions.map(({ bare: _b, ...v }) => v)));
-    } catch (e) { /* kept for this visit */ }
-  }
-
-  /** Every colony on the planet as a layout to look for (buildings and heads). */
-  function colonies() {
-    const p = currentPlanet();
-    if (!p) return [];
-    const by = new Map();
-    p.pins.forEach((pin) => {
-      const owner = pin.owner || "colony";
-      if (!by.has(owner)) by.set(owner, []);
-      by.get(owner).push({ lat: pin.lat, lon: pin.lon });
-      (pin.heads || []).forEach((h) => by.get(owner).push({ lat: h.lat, lon: h.lon }));
-    });
-    return [...by.entries()].map(([owner, points]) => ({ owner, points }));
-  }
-  function planetChanged() {
-    const p = currentPlanet();
-    anchors = []; facing = null; selected = null; maps.clear(); forgetTrack(); focal = null;
-    const res = $("resource"); res.innerHTML = "";
-    bare = loadBare(p);
-    res.append(new Option(`Bare planet (EVE on No filter)${bare ? ` · ${Math.round(E.bareCoverage(bare) * 100)}% recorded` : ""}`, BARE));
-    (RESOURCES[p ? p.type : ""] || Object.values(RESOURCES).flat().filter((v, i, a) => a.indexOf(v) === i)).forEach((r) => {
-      const had = p && (p.scans || []).find((s) => s.resource === r);
-      res.append(new Option(r + (had ? ` (corp has ${Math.round(had.coverage * 100)}%)` : ""), r));
-    });
-    renderAnchors(); updateButtons(); drawFlat(); drawShot();
-    if (bare && E.bareCoverage(bare) > 0.9 && res.options.length > 1) res.selectedIndex = 1;
-    if (res.value && res.value !== BARE) loadCorpScan(res.value);
-    say("lockStatus", p ? `${p.pins.length} buildings known on ${p.name}.` : "");
-    loadSky();
-  }
-  function anchorList() {
-    const p = currentPlanet();
-    if (!p) return [];
-    const out = [];
-    // Several people's colonies here: say whose, so look-alikes stay apart (EVE shows them with "Show other characters' networks").
-    const owners = new Set(p.pins.map((pin) => pin.owner || ""));
-    const whose = (pin) => (owners.size > 1 && pin.owner ? pin.owner + " · " : "");
-    p.pins.forEach((pin) => {
-      out.push({ key: "p" + pin.id, owner: pin.owner || "", kind: whose(pin) + pin.name.replace(/^(Barren|Gas|Ice|Lava|Oceanic|Plasma|Storm|Temperate) /, ""), lat: pin.lat, lon: pin.lon });
-      (pin.heads || []).forEach((h) => out.push({ key: "h" + pin.id + ":" + h.id, owner: pin.owner || "", kind: whose(pin) + "Extractor head", lat: h.lat, lon: h.lon }));
-    });
-    return out;
-  }
-  /** Kinds of building on this planet, with how many of each. */
-  function kinds() {
-    const by = new Map();
-    anchorList().forEach((a) => { if (!by.has(a.kind)) by.set(a.kind, []); by.get(a.kind).push(a); });
-    const p = currentPlanet();
-    // Only the character in this EVE client: that's whose buildings EVE draws.
-    const me = $("client").value;
-    const isMine = (items) => items.some((a) => a.owner === me);
-    let list = [...by.entries()].map(([kind, items]) => ({ kind, items, mine: isMine(items) }))
-      .sort((a, b) => Number(b.mine) - Number(a.mine) || a.items.length - b.items.length || a.kind.localeCompare(b.kind));
-    const others = $("othersPins") && $("othersPins").checked;
-    if (!others) list = list.filter((k) => k.mine);
-    // Other people's command centers (EVE shows those with "Show other characters' networks").
-    const centers = anchorList().filter((a) => /Command Center$/.test(a.kind));
-    if (others && centers.length > 1) list.unshift({ kind: "Any command center", items: centers });
-    return list;
-  }
-  function renderAnchors() {
-    const host = $("anchors"); host.innerHTML = "";
-    kinds().forEach(({ kind, items }) => {
+  function renderPlanets() {
+    const box = $("planets");
+    box.innerHTML = "";
+    if (!planets.length) { box.innerHTML = '<div class="small muted" style="padding: 6px">No planets yet (SeAT signed in? ↻)</div>'; return; }
+    const head = document.createElement("div"); head.className = "plhead";
+    head.innerHTML = "<span style='text-align: left'>Planet</span><span title='Its own sky recorded'>sky</span><span title='Its own colours mapped'>own</span><span style='grid-column: span 5'>resources (EVE's order)</span>";
+    box.append(head);
+    const shown = planet ? systemOf(planet) : planets;
+    for (const p of shown) {
       const row = document.createElement("div");
-      row.className = "anchor" + (selected === kind ? " sel" : "");
-      const placed = anchors.filter((x) => x.kind === kind).length;
-      row.innerHTML = `<span></span><span class="muted small">×${items.length}</span>${placed ? `<span class="got">✓ ${placed} clicked</span>` : ""}`;
-      row.firstChild.textContent = kind;
-      row.addEventListener("click", () => { selected = selected === kind ? null : kind; renderAnchors(); });
-      host.append(row);
-    });
+      row.className = "pl" + (planet && planet.planet_id === p.planet_id ? " sel" : "");
+      const mine = (p.characters || []).some((c) => c.name === me);
+      const nm = document.createElement("span"); nm.className = "nm";
+      nm.innerHTML = `${esc(p.name.replace(systemName(p) + " ", ""))} <small>${esc(p.type || "")}${mine ? " · yours" : p.no_colony ? " · no colony" : ""}</small>`;
+      nm.title = p.name;
+      row.append(nm);
+      const sky = mapInfo(p, "sky"), bare = mapInfo(p, "bare");
+      const d1 = document.createElement("span"); d1.className = "dot" + (sky ? " on" : ""); d1.title = sky ? `Own sky: ${pct(sky.coverage)}, ${ago(sky.at)} by ${sky.by}` : "No own sky yet";
+      const d2 = document.createElement("span"); d2.className = "dot bare" + (bare ? " on" : ""); d2.title = bare ? `Own colours: ${pct(bare.coverage)}, ${ago(bare.at)} by ${bare.by}` : "Own colours not mapped yet (a No filter pass, once)";
+      row.append(d1, d2);
+      resourcesOf(p).forEach((r, i) => {
+        const s = scanInfo(p, r), sq = document.createElement("span");
+        sq.className = "sq " + scanClass(s) + (s && s.by && planets.some((q) => (q.characters || []).some((c) => c.name === s.by && c.mine)) ? " me" : "");
+        sq.textContent = i + 1;
+        sq.title = `${r}: ` + (s ? `${pct(s.coverage)} by ${s.by || "?"}, ${ago(s.at)}` : "not scanned");
+        row.append(sq);
+      });
+      row.addEventListener("click", () => selectPlanet(p.planet_id));
+      box.append(row);
+    }
   }
-  function updateButtons() {
-    $("lock").disabled = !(disc && anchors.length >= 1);
-    $("flip").hidden = !(facing && facing.one);
-    $("scan").disabled = !facing || !!facing.needEdge;
-    $("scan").textContent = running ? "Pause" : "Scan";
-    $("scan").classList.toggle("on", running);
-    const m = maps.get($("resource").value);
-    $("save").disabled = $("resource").value === BARE || !(m && E.coverage(m) > 0);
-    const planetNow = currentPlanet();
-    $("wipe").hidden = !(planetNow && (planetNow.scans || []).length);
-    $("freeze").textContent = frozen ? "Unfreeze" : "Freeze";
-    $("freeze").classList.toggle("on", frozen);
-    $("discInfo").textContent = disc ? `centre ${Math.round(disc.cx)}, ${Math.round(disc.cy)} · radius ${Math.round(disc.r)} px` : "not set yet";
+  function nextToScan(p) {
+    if (!p) return null;
+    if (!mapInfo(p, "bare") && !(status && status.bare && status.bare.coverage > 0.9)) return { row: 0, resource: "" };
+    const list = resourcesOf(p);
+    for (let i = 0; i < list.length; i++) if (scanClass(scanInfo(p, list[i])) !== "fresh") return { row: i + 1, resource: list[i] };
+    return null;
+  }
+  async function selectPlanet(id, quiet) {
+    const p = planets.find((q) => q.planet_id === id);
+    if (!p) return;
+    const changed = !planet || planet.planet_id !== id;
+    planet = p; settings.planet = id; keep();
+    renderPlanets(); renderResources(); renderPins();
+    if (changed) { anchors = []; mapVersion = -1; }
+    const info = (q) => {
+      const sky = mapInfo(q, "sky"), bare = mapInfo(q, "bare");
+      return { id: q.planet_id, name: q.name, type: q.type || "", sky_at: sky ? sky.at : null, bare_at: bare ? bare.at : null, sky_coverage: sky ? sky.coverage : null };
+    };
+    if (changed && !quiet) log(`Planet: ${p.name}`);
+    await invoke("planetscan_planet", { planet: info(p), system: systemOf(p).map(info) }).catch((e) => log("Couldn't load the planet's maps: " + e, "bad"));
+    checkOldSky();
+  }
+  function renderResources() {
+    const sel = $("resource"); sel.innerHTML = "";
+    sel.append(new Option("Bare planet (No filter)", ""));
+    resourcesOf(planet).forEach((r) => sel.append(new Option(r, r)));
   }
 
-  // ---------- pictures ----------
-  async function grab() {
-    const name = $("client").value;
-    if (!name) return null;
-    // Raw pixels straight from the app (fast); the JPEG path is the fallback.
-    const raw = await invoke("piscan_frame", { name, width: $("fullSize").checked ? 3840 : 1280 }).catch(() => null);
-    if (raw && raw.byteLength > 8) {
-      const buf = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer, head = new DataView(buf);
-      const w = head.getUint32(0, true), h = head.getUint32(4, true);
-      const data = new ImageData(new Uint8ClampedArray(buf, 8, w * h * 4), w, h);
-      if (shot.width !== w || shot.height !== h) { rescaleTo(w); shot.width = w; shot.height = h; }
-      const c = document.createElement("canvas"); c.width = w; c.height = h; c.getContext("2d").putImageData(data, 0, 0);
-      return { img: c, data, w, h };
-    }
-    const url = await invoke("preview_frame", { name, width: $("fullSize").checked ? 3840 : 1280, quality: 88 });
-    const img = new Image();
-    await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = url; });
-    if (shot.width !== img.naturalWidth || shot.height !== img.naturalHeight) { rescaleTo(img.naturalWidth); shot.width = img.naturalWidth; shot.height = img.naturalHeight; }
-    const c = document.createElement("canvas"); c.width = img.naturalWidth; c.height = img.naturalHeight;
-    const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0);
-    return { img, data: x.getImageData(0, 0, c.width, c.height), w: c.width, h: c.height };
+  // The old scanner kept its sky in this page's own storage (IndexedDB "piscan", key sky-<system>).
+  let oldSky = null;
+  function checkOldSky() {
+    oldSky = null; $("importRow").hidden = true;
+    if (!planet || systemOf(planet).some((p) => mapInfo(p, "sky"))) return;
+    try {
+      const req = indexedDB.open("piscan", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("kv");
+      req.onsuccess = () => {
+        try {
+          const get = req.result.transaction("kv").objectStore("kv").get("sky-" + systemName(planet));
+          get.onsuccess = () => { if (get.result) { oldSky = new Uint8Array(get.result); $("importRow").hidden = false; } };
+        } catch {}
+      };
+    } catch {}
   }
-  /** The picture changed size (Full-size pictures on or off, or the EVE window resized): keep the edge, lock and clicks. */
-  function rescaleTo(w) {
-    const k = w / (shot.width || w);
-    if (!isFinite(k) || Math.abs(k - 1) < 1e-6) return;
-    if (disc) disc = { ...disc, cx: disc.cx * k, cy: disc.cy * k, r: disc.r * k };
-    if (focal) focal *= k;
-    anchors.forEach((a) => { a.px *= k; a.py *= k; });
-    rimClicks = []; frame = null; forgetTrack(); skyPaintedAt = null;
+  $("importSky").addEventListener("click", async () => {
+    if (!oldSky || !planet) return;
+    let bin = ""; for (let i = 0; i < oldSky.length; i += 8192) bin += String.fromCharCode.apply(null, oldSky.subarray(i, i + 8192));
+    const said = await invoke("planetscan_import_sky", { planetId: planet.planet_id, data: btoa(bin) }).catch((e) => "Couldn't: " + e);
+    log(`${planet.name}: ${said}`, "ok"); $("importRow").hidden = true;
+  });
+
+  // ---------- the picture ----------
+  const shot = $("shot"), sctx = shot.getContext("2d");
+  let fit = { x: 0, y: 0, k: 1 };
+  function sizeCanvas() {
+    const r = $("viewBox").getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const w = Math.round(r.width * dpr), h = Math.round(r.height * dpr);
+    if (shot.width !== w || shot.height !== h) { shot.width = w; shot.height = h; }
   }
   function drawShot() {
-    if (!frame) { sctx.fillStyle = "#000"; sctx.fillRect(0, 0, shot.width, shot.height); sctx.fillStyle = "#666"; sctx.font = "20px Segoe UI"; sctx.fillText("Pick a client: its picture shows here.", 30, 50); return; }
-    if ($("showHeat").checked) {
-      const view = sctx.createImageData(frame.w, frame.h), d = frame.data.data;
-      for (let i = 0; i < d.length; i += 4) { const h = E.heat(d[i], d[i + 1], d[i + 2]); view.data[i] = h ? 255 * h : d[i] * 0.25; view.data[i + 1] = h ? 255 * (1 - Math.abs(h - 0.6) * 2) : d[i + 1] * 0.25; view.data[i + 2] = h ? 255 * (1 - h) : d[i + 2] * 0.25; view.data[i + 3] = 255; }
-      sctx.putImageData(view, 0, 0);
-    } else sctx.drawImage(frame.img, 0, 0);
-    const lw = Math.max(2, frame.w / 640);
-    if (disc) { sctx.strokeStyle = "#ff5a4a"; sctx.lineWidth = lw; sctx.beginPath(); sctx.arc(disc.cx, disc.cy, disc.r, 0, Math.PI * 2); sctx.stroke(); sctx.beginPath(); sctx.arc(disc.cx, disc.cy, 4 * lw, 0, Math.PI * 2); sctx.stroke(); }
-    if (facing && disc) {
-      sctx.strokeStyle = "#adff2f"; sctx.lineWidth = lw;
-      // Only the colony it locked on with (every corp colony at once is a cloud of rings).
-      const shown = facing.owners && facing.owners.length ? anchorList().filter((a) => facing.owners.includes(a.owner)) : anchorList();
-      shown.forEach((a) => { const p = E.toPicture(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), disc); if (!p.front) return; sctx.beginPath(); sctx.arc(p.x, p.y, 7 * lw, 0, Math.PI * 2); sctx.stroke(); });
-    }
-    anchors.forEach((a, i) => {
-      const bad = facing && facing.misses && facing.misses[i] > 0.05;
-      sctx.strokeStyle = bad ? "#ff5a4a" : "#f0c040"; sctx.lineWidth = lw;
-      sctx.beginPath(); sctx.moveTo(a.px - 9 * lw, a.py); sctx.lineTo(a.px + 9 * lw, a.py); sctx.moveTo(a.px, a.py - 9 * lw); sctx.lineTo(a.px, a.py + 9 * lw); sctx.stroke();
-    });
-    rimClicks.forEach(([x, y]) => { sctx.fillStyle = "#ff5a4a"; sctx.beginPath(); sctx.arc(x, y, 4 * lw, 0, Math.PI * 2); sctx.fill(); });
-    // Magnifier while the picture is frozen (or picking rim points): 3× around the pointer.
-    if (mouse && (frozen || rimClicks.length || rimMode)) {
-      const R = Math.round(frame.w / 12), Z = 3, src = R / Z;
-      const mx = mouse.x + R * 1.3 + R > frame.w ? mouse.x - R * 1.3 : mouse.x + R * 1.3, my = Math.max(R, Math.min(frame.h - R, mouse.y));
-      sctx.save(); sctx.beginPath(); sctx.arc(mx, my, R, 0, Math.PI * 2); sctx.clip();
-      sctx.imageSmoothingEnabled = false;
-      sctx.drawImage(frame.img, mouse.x - src, mouse.y - src, src * 2, src * 2, mx - R, my - R, R * 2, R * 2);
-      sctx.strokeStyle = "#fff"; sctx.lineWidth = 1; sctx.beginPath(); sctx.moveTo(mx - 8, my); sctx.lineTo(mx + 8, my); sctx.moveTo(mx, my - 8); sctx.lineTo(mx, my + 8); sctx.stroke();
-      sctx.restore();
-      sctx.strokeStyle = "#f0c040"; sctx.lineWidth = lw; sctx.beginPath(); sctx.arc(mx, my, R, 0, Math.PI * 2); sctx.stroke();
-    }
-  }
-  let skyDrawnAt = 0;
-  /** The sky map unrolled like the planet map (grey = recorded, blue = not yet); red cross = where the camera looks now. */
-  function drawSkyMap() {
-    if (Date.now() - skyDrawnAt < 600) return;
-    skyDrawnAt = Date.now();
-    const W = flat.width, H = flat.height, img = fctx.createImageData(W, H);
-    const m = sky && sky.fine;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const k = (y * W + x) * 4;
-      let v = NaN;
-      if (m) {
-        const r0 = Math.floor(y * m.h / H), c0 = Math.floor(x * m.w / W);
-        let sum = 0, n = 0;
-        for (let dr = 0; dr < m.h / H; dr++) for (let dc = 0; dc < m.w / W; dc++) { const i = (r0 + dr) * m.w + c0 + dc; if (m.weight[i] > 0) { sum += m.sum[i] / m.weight[i]; n++; } }
-        if (n) v = sum / n;
-      }
-      if (v === v) { const g = Math.max(0, Math.min(255, 70 + 9 * v)); img.data.set([g, g, g, 255], k); } else img.data.set([10, 14, 40, 255], k);
-    }
-    fctx.putImageData(img, 0, 0);
-    if (facing) {
-      const Qt = E.transpose(facing.Q);
-      const mark = (d, colour, size) => {
-        const v = E.apply(Qt, d), lat = Math.acos(Math.max(-1, Math.min(1, v[2]))); let lon = Math.atan2(v[1], v[0]); if (lon < 0) lon += 2 * Math.PI;
-        const x = lon / (2 * Math.PI) * W, y = lat / Math.PI * H;
-        fctx.strokeStyle = colour; fctx.lineWidth = 2; fctx.beginPath(); fctx.moveTo(x - size, y); fctx.lineTo(x + size, y); fctx.moveTo(x, y - size); fctx.lineTo(x, y + size); fctx.stroke();
-      };
-      mark([0, 0, -1], "#ff5a4a", 9);
-    }
-    $("cover").style.width = pct(skyCover());
-    $("flatLegend").innerHTML = "";
-    const a = document.createElement("span"); a.textContent = "The sky all round, unrolled like the planet map (grey = recorded, blue = not yet). Red cross: behind the planet, where the camera looks now.";
-    const b = document.createElement("span"); b.innerHTML = "<b>Sky</b> "; b.append(`${pct(skyCover())} recorded${skySystem ? " for " + skySystem : ""}`);
-    $("flatLegend").append(a, b);
-  }
-  function drawFlat() {
-    if ($("skyShow").checked) { drawSkyMap(); return; }
-    const recordingBare = $("resource").value === BARE;
-    const m = recordingBare ? null : maps.get($("resource").value);
-    const img = fctx.createImageData(E.GRID_W, E.GRID_H);
-    if (recordingBare && bare) {
-      const bytes = E.bareToBytes(bare);
-      for (let i = 0; i < E.GRID_W * E.GRID_H; i++) img.data.set([bytes[i * 3], bytes[i * 3 + 1], bytes[i * 3 + 2], 255], i * 4);
-    } else if (m) {
-      const bytes = E.cells(m);
-      for (let i = 0; i < bytes.length; i++) {
-        const v = bytes[i];
-        if (!v) { img.data[i * 4 + 3] = 255; continue; }
-        const h = (v - 1) / 250;
-        // Same scale as EVE: blue → green → yellow → red → white.
-        const rgb = h > 0.85 ? [255, 255, 255] : h > 0.7 ? [255, 60, 40] : h > 0.5 ? [255, 220, 40] : h > 0.3 ? [60, 210, 60] : h > 0.1 ? [50, 90, 230] : [40, 40, 48];
-        img.data.set([...rgb, 255], i * 4);
-      }
-    } else for (let i = 0; i < E.GRID_W * E.GRID_H; i++) img.data[i * 4 + 3] = 255;
-    const tmp = document.createElement("canvas"); tmp.width = E.GRID_W; tmp.height = E.GRID_H; tmp.getContext("2d").putImageData(img, 0, 0);
-    fctx.imageSmoothingEnabled = false;
-    fctx.drawImage(tmp, 0, 0, flat.width, flat.height);
-    fctx.strokeStyle = "#2a2a33"; fctx.lineWidth = 1;
-    for (let i = 1; i < 6; i++) { fctx.beginPath(); fctx.moveTo(0, i * 60); fctx.lineTo(720, i * 60); fctx.stroke(); }
-    for (let i = 1; i < 12; i++) { fctx.beginPath(); fctx.moveTo(i * 60, 0); fctx.lineTo(i * 60, 360); fctx.stroke(); }
-    const p = currentPlanet();
-    if (p) {
-      fctx.fillStyle = "#f0c040";
-      p.pins.forEach((pin) => { const x = ((pin.lon % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) / (2 * Math.PI) * 720, y = pin.lat / Math.PI * 360; fctx.fillRect(x - 2, y - 2, 4, 4); });
-    }
-    const cover = recordingBare ? (bare ? E.bareCoverage(bare) : 0) : m ? E.coverage(m) : 0;
-    $("cover").style.width = Math.round(cover * 100) + "%";
-    $("flatLegend").innerHTML = `<span>Whole planet, north at the top. Dark = not seen yet. Yellow dots: your buildings.</span><span><b>${recordingBare ? "Bare planet" : $("resource").value || ""}</b> ${Math.round(cover * 100)}% seen${!recordingBare && !(bare && E.bareCoverage(bare) > 0.5) ? " · no bare-planet recording yet (planet colours may read as resource)" : ""}</span>`;
-  }
-
-  // ---------- the planet's edge ----------
-  // Three clicks on the rim make an exact circle.
-  let rimMode = false, rimClicks = [], mouse = null;
-  $("rim3").addEventListener("click", async () => {
-    if (!frame) frame = await grab().catch(() => null);
-    rimMode = true; rimClicks = []; frozen = true;
-    say("lockStatus", "Click once on the planet's edge.", "warn");
-    updateButtons(); drawShot();
-  });
-  $("fit").addEventListener("click", async () => {
-    if (!frame) frame = await grab().catch(() => null);
-    if (!frame) return say("lockStatus", "No picture from that client.", "bad");
-    const c = E.rimRadius(frame.data.data, frame.w, frame.h, null);
-    if (!c) return say("lockStatus", "Couldn't find the edge: use Click the edge.", "warn");
-    setEdge(c);
-  });
-
-  /** A new edge: keeps the lock after a zoom (same facing, new distance), else starts over. */
-  function setEdge(c) {
-    if (!c || c.r < 40) { say("lockStatus", "That's too close to the middle: click on the planet's edge.", "bad"); return; }
-    try { localStorage.setItem("piscan-lastr-" + shot.width, String(c.r)); } catch {}
-    if (facing && !focal) {
-      // Locked in the double-click view (no edge there): the lens comes from an earlier lock, else a usual value.
-      focal = lensPx();
-    }
-    if (facing && focal) {
-      facing.needEdge = false;
-      disc = { cx: c.cx, cy: c.cy, r: c.r, D: Math.sqrt((focal / c.r) ** 2 + 1) };
-      forgetTrack();
-      say("lockStatus", "Edge set again; still locked on.", "ok");
-    } else {
-      disc = { cx: c.cx, cy: c.cy, r: c.r }; facing = null; anchors = []; renderAnchors();
-      say("lockStatus", "Edge set. Now lock on.", "ok");
-    }
-    updateButtons(); drawShot();
-  }
-
-  // ---------- clicks on the picture ----------
-  const toImage = (e) => { const r = shot.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * shot.width, y: (e.clientY - r.top) / r.height * shot.height }; };
-  let dragging = null;
-  shot.addEventListener("mousedown", (e) => {
-    const p = toImage(e);
-    if (rimMode) {
-      rimMode = false; rimClicks = []; frozen = false;
-      const cx = shot.width / 2, cy = shot.height / 2;
-      setEdge({ cx, cy, r: Math.hypot(p.x - cx, p.y - cy) });
-      return;
-    }
-    if (disc && !facing && Math.hypot(p.x - disc.cx, p.y - disc.cy) < disc.r * 0.08 && !selected) { dragging = { dx: p.x - disc.cx, dy: p.y - disc.cy }; return; }
-    if (!selected) { if (!disc) { disc = { cx: p.x, cy: p.y, r: Math.min(shot.width, shot.height) / 3 }; updateButtons(); drawShot(); } return; }
-    const group = kinds().find((k) => k.kind === selected);
-    if (!group || !disc) return;
-    if (!E.toSphere(p.x, p.y, disc)) return say("lockStatus", "That's outside the planet's circle: fix the edge first.", "warn");
-    if (facing) {
-      // While scanning: a click on any building of that kind is a drift fix (the nearest one).
-      const cam = E.toSphere(p.x, p.y, disc);
-      let best = null, miss = Infinity;
-      group.items.forEach((a) => { const m = E.angle(E.apply(facing.Q, E.planetVector(a.lat, a.lon, facing.mirrored)), cam); if (m < miss) { miss = m; best = a; } });
-      if (best) {
-        // A building that's only there once: lock again from it with north kept straight up (EVE never rolls). Otherwise nudge.
-        const upright = group.items.length === 1 && E.lockOne({ px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored, E.northUp(facing.Q));
-        facing.Q = upright || E.correctWithAnchor(facing.Q, { px: p.x, py: p.y, lat: best.lat, lon: best.lon }, disc, facing.mirrored);
-        prevGrey = null; lastStep = null; lost = null; lostRun = 0;
-      }
-      say("scanStatus", `Pulled back onto a ${selected.toLowerCase()}.`, "ok");
-    } else {
-      if (anchors.filter((x) => x.kind === selected).length >= group.items.length) return say("lockStatus", `There ${group.items.length === 1 ? "is only one" : "are only " + group.items.length} ${selected.toLowerCase()}: pick another kind.`, "warn");
-      anchors.push({ kind: selected, px: p.x, py: p.y });
-    }
-    renderAnchors(); updateButtons(); drawShot();
-  });
-  shot.addEventListener("mousemove", (e) => { mouse = toImage(e); if (frozen || rimMode) drawShot(); });
-  shot.addEventListener("mouseleave", () => { mouse = null; if (frozen || rimMode) drawShot(); });
-  window.addEventListener("mousemove", (e) => { if (!dragging || !disc) return; const p = toImage(e); disc.cx = p.x - dragging.dx; disc.cy = p.y - dragging.dy; facing = null; updateButtons(); drawShot(); });
-  window.addEventListener("mouseup", () => { dragging = null; });
-  shot.addEventListener("wheel", (e) => { if (!disc) return; e.preventDefault(); const r = Math.max(40, disc.r * (e.deltaY < 0 ? 1.01 : 0.99)); if (facing) setEdge({ cx: disc.cx, cy: disc.cy, r }); else { disc.r = r; updateButtons(); drawShot(); } }, { passive: false });
-
-  $("freeze").addEventListener("click", async () => { frozen = !frozen; if (frozen && !frame) frame = await grab().catch(() => null); updateButtons(); drawShot(); });
-  $("clearAnchors").addEventListener("click", () => { if (disc) disc = { cx: disc.cx, cy: disc.cy, r: disc.r }; anchors = []; facing = null; focal = null; running = false; renderAnchors(); updateButtons(); drawShot(); say("lockStatus", ""); });
-  $("lock").addEventListener("click", () => {
-    const groups = new Map(kinds().map((k) => [k.kind, k.items]));
-    if (anchors.length === 1) return lockFromOne(groups);
-    const solved = E.solveMatching(anchors.map((a) => ({ px: a.px, py: a.py, candidates: groups.get(a.kind) || [] })), disc);
-    if (!solved) return say("lockStatus", "Need two or more buildings inside the circle.", "bad");
-    facing = solved; forgetTrack(); frozen = false; mapMisses = 0;
-    disc = { ...disc, D: solved.D };
-    const byKey = new Map(anchorList().map((a) => [a.key, a]));
-    facing.owners = [...new Set(solved.matched.map((k) => byKey.get(k)?.owner).filter(Boolean))];
-    say("autoStatus", "");
-    focal = isFinite(solved.D) ? disc.r * Math.sqrt(solved.D * solved.D - 1) : null;
-    const miss = solved.error * 180 / Math.PI;
-    const kind = miss < 1.5 ? "ok" : miss < 4 ? "warn" : "bad";
-    const worst = solved.misses.indexOf(Math.max(...solved.misses));
-    if (solved.spread < 0.15) {
-      facing = null; disc = { cx: disc.cx, cy: disc.cy, r: disc.r };
-      updateButtons(); drawShot();
-      return say("lockStatus", `Those buildings are too close together to tell which way the planet faces (${(solved.spread * 180 / Math.PI).toFixed(0)}° apart). Add some far away: "Any command center" on other colonies works well.`, "bad");
-    }
-    if (anchors.length >= 3) savePole({ up: E.northUp(solved.Q), mirrored: solved.mirrored });
-    checkMapAgainstLock();
-    say("lockStatus", `Locked on (buildings fit within ${miss.toFixed(1)}°${anchors.length >= 3 ? (solved.mirrored ? ", longitude counted the other way round" : "") : "; three buildings would be surer"}). Green rings should sit on your buildings.` + (solved.misses[worst] > 0.05 ? ` The red cross (${anchors[worst].kind.toLowerCase()}) doesn't fit: Clear and click that one again, right on the building.` : ""), kind);
-    updateButtons(); drawShot();
-  });
-
-  // One building is enough: EVE's planet camera never rolls, so the planet's axis always stands
-  // upright on screen. Which way up (and which way longitude counts) is remembered once known;
-  // Flip tries the other ways if the green rings sit wrong.
-  // First: what EVE does (checked against SeAT positions: north up, longitude counted the other way round).
-  const POLE_WAYS = [{ up: true, mirrored: true }, { up: false, mirrored: true }, { up: true, mirrored: false }, { up: false, mirrored: false }];
-  // EVE's lens, measured on two recordings (tracking fits best there): focal length 829 px in a
-  // 1280-px-wide picture, the same at every zoom. The distance follows from the planet's size.
-  const LENS_AT_1280 = 829;
-  function lensPx() { return LENS_AT_1280 * (shot.width || 1280) / 1280; }
-  function loadPole() { try { return JSON.parse(localStorage.getItem("piscan-pole")) || POLE_WAYS[0]; } catch { return POLE_WAYS[0]; } }
-  function savePole(way) { try { localStorage.setItem("piscan-pole", JSON.stringify(way)); } catch {} }
-  function lockFromOne(groups, way) {
-    const a = anchors[0], items = groups.get(a.kind) || [];
-    if (items.length !== 1) return say("lockStatus", `There are ${items.length} of "${a.kind}": for a one-click lock pick one that's only there once (your own command center), or click a second building.`, "warn");
-    way = way || loadPole();
-    const Q = E.lockOne({ px: a.px, py: a.py, lat: items[0].lat, lon: items[0].lon }, disc, way.mirrored, way.up);
-    if (!Q) return say("lockStatus", "Couldn't lock from that click: is it inside the circle?", "bad");
-    // EVE's lens is the same at every zoom: use what an earlier lock measured, else a usual value.
-    disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
-    facing = { Q, mirrored: way.mirrored, misses: [], owners: [items[0].owner].filter(Boolean), one: { groups, way } };
-    focal = disc.r * Math.sqrt(disc.D * disc.D - 1);
-    forgetTrack(); frozen = false; say("autoStatus", ""); mapMisses = 0;
-    checkMapAgainstLock();
-    say("lockStatus", "Locked on from one building. With your network showing in EVE, the green rings should sit on your buildings. If they're off, press Flip (it tries the other way round, and remembers what works).", "ok");
-    updateButtons(); drawShot();
-  }
-  // EVE's double-click puts your command center in the middle; zooming all the way out from there
-  // tilts the camera only, so the command center ends up straight below the planet's middle,
-  // 7.4% of the planet's radius down (seen on four recordings). Its blue icon is looked for near
-  // there, so a slightly different zoom still locks right.
-  const HOME_DOWN = 0.074;
-  /** The command center's blue icon in a strip straight above and below the middle (the biggest blue-cyan blob there). */
-  function findCcIcon(f) {
-    const d = f.data.data, half = Math.max(6, Math.round(disc.r * 0.05)), reach = Math.round(disc.r * 0.16);
-    const bins = new Map();
-    for (let y = Math.round(disc.cy - reach); y <= disc.cy + reach; y++) for (let x = Math.round(disc.cx - half); x <= disc.cx + half; x++) {
-      if (x < 0 || y < 0 || x >= f.w || y >= f.h) continue;
-      const k = (y * f.w + x) * 4;
-      if (!(d[k + 1] >= 100 && d[k + 2] >= 100 && d[k] <= d[k + 1] - 20)) continue;
-      const key = Math.floor(y / 8);
-      const bin = bins.get(key) || { sx: 0, sy: 0, n: 0 };
-      bin.sx += x; bin.sy += y; bin.n++; bins.set(key, bin);
-    }
-    // Neighbouring rows of 8 px belong together (an icon is about 10 px tall).
-    let best = null;
-    for (const [key, bin] of bins) {
-      const next = bins.get(key + 1), blob = next ? { sx: bin.sx + next.sx, sy: bin.sy + next.sy, n: bin.n + next.n } : bin;
-      if (blob.n >= 3 && blob.n <= 150 && (!best || blob.n > best.n)) best = blob;
-    }
-    return best ? { x: best.sx / best.n, y: best.sy / best.n } : null;
-  }
-  /**
-   * One button: EVE double-clicked (command center in the middle), then zoomed all the way out.
-   * Finds the edge and the command center's icon and locks on. A bare map recorded under an older,
-   * sideways-off lock is turned to fit (and saved that way). Keeps any scan going.
-   */
-  async function lockHome() {
-    const me = $("client").value;
-    const cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
-    if (!cc) return say("lockStatus", `${me || "This character"} has no command center on this planet.`, "warn");
-    const f = await grab().catch(() => null);
-    if (f) frame = f;
-    if (!frame) return say("lockStatus", "No picture from that client.", "bad");
-    const rim = E.rimRadius(frame.data.data, frame.w, frame.h, null);
-    if (rim && rim.r >= 40) disc = { cx: rim.cx, cy: rim.cy, r: rim.r };
-    if (!disc) return say("lockStatus", "Couldn't find the planet's edge: use Click the edge.", "warn");
-    disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) };
-    focal = lensPx();
-    // Zooming out tilts the camera toward the equator: a command center in the south half ends up below the middle, in the north half above it.
-    const guess = { x: disc.cx, y: disc.cy + (cc.lat > Math.PI / 2 ? 1 : -1) * HOME_DOWN * disc.r };
-    const icon = findCcIcon(frame), at = icon || guess, way = loadPole();
-    const Q = E.lockOne({ px: at.x, py: at.y, lat: cc.lat, lon: cc.lon }, disc, way.mirrored, way.up);
-    if (!Q) return say("lockStatus", "Couldn't lock: is the edge set?", "bad");
-    facing = { Q, mirrored: way.mirrored, misses: [], owners: [me], one: { groups: new Map([[cc.kind, [cc]]]), way } };
-    anchors = [{ kind: cc.kind, px: at.x, py: at.y }];
-    forgetTrack(); frozen = false; mapMisses = 0; say("autoStatus", "");
-    const fixed = fitVersionsToLock();
-    // EVE doesn't always leave the command center in the same spot: one click on it in the picture fixes the lock exactly.
-    selected = cc.kind;
-    say("lockStatus", `Locked on your command center (${icon ? "found its icon" : "icon not seen: used where it usually sits"}). If the cross isn't exactly on it in EVE, click your command center in the picture: that sets it exactly.${fixed ? " " + fixed : ""}`, "ok");
-    renderAnchors(); updateButtons(); drawShot(); drawFlat();
-  }
-  /**
-   * Follow the command center out (Tsa's way): EVE's double-click puts it in the middle of the
-   * screen; the app then follows that spot picture by picture while you zoom all the way out
-   * (zooming tilts the camera, so it drifts up or down), and locks from it once the planet's edge
-   * shows and the picture holds still.
-   */
-  let follow = null;
-  function startFollow() {
-    const me = $("client").value;
-    const cc = anchorList().find((a) => a.owner === me && /Command Center$/.test(a.kind));
-    if (!cc) return say("lockStatus", `${me || "This character"} has no command center on this planet.`, "warn");
-    if (!frame) return say("lockStatus", "No picture from that client.", "bad");
-    // Its icon near the middle if it shows, else the very middle (where the double-click put it).
-    const d = frame.data.data, W = frame.w, H = frame.h;
-    let sx = 0, sy = 0, n = 0;
-    for (let y = Math.round(H * 0.3); y < H * 0.7; y++) for (let x = Math.round(W * 0.4); x < W * 0.6; x++) {
-      const k = (y * W + x) * 4;
-      if (d[k + 1] >= 100 && d[k + 2] >= 110 && d[k] <= d[k + 1] - 25) { sx += x; sy += y; n++; }
-    }
-    const at = n >= 5 ? { x: sx / n, y: sy / n } : { x: W / 2, y: H / 2 };
-    follow = { cc, x: at.x, y: at.y, prev: E.halfGrey(d, W, H), still: 0, lastR: null, zoom: 1 };
-    facing = null; anchors = [{ kind: cc.kind, px: at.x, py: at.y }];
-    say("lockStatus", "Following your command center: now zoom all the way out, slowly (the cross should stay on it). It locks by itself when the planet's edge shows and the picture holds still.", "ok");
-    renderAnchors(); updateButtons(); drawShot();
-  }
-  function followStep(f) {
-    const g = E.halfGrey(f.data.data, f.w, f.h);
-    const t = E.followSpot(follow.prev, g, follow.x, follow.y, { reach: 24, min: 0.5 });
-    const moved = t ? Math.hypot(t.x - follow.x, t.y - follow.y) : 0;
-    if (t) { follow.x = t.x; follow.y = t.y; follow.zoom *= t.scale; }
-    follow.prev = g;
-    anchors = [{ kind: follow.cc.kind, px: follow.x, py: follow.y }];
-    const rim = E.rimRadius(f.data.data, f.w, f.h, null);
-    const steady = rim && follow.lastR && Math.abs(rim.r - follow.lastR) < rim.r * 0.005 && moved < 1.5 && rim.r < f.h * 0.4 && follow.zoom < 0.6;
-    follow.lastR = rim ? rim.r : null;
-    follow.still = steady ? follow.still + 1 : 0;
-    if (follow.still >= 6) {
-      disc = { cx: rim.cx, cy: rim.cy, r: rim.r, D: Math.sqrt((lensPx() / rim.r) ** 2 + 1) };
-      focal = lensPx();
-      const way = loadPole(), cc = follow.cc;
-      const Q = E.lockOne({ px: follow.x, py: follow.y, lat: cc.lat, lon: cc.lon }, disc, way.mirrored, way.up);
-      follow = null;
-      if (!Q) return say("lockStatus", "Couldn't lock: the planet's edge wasn't clear. Try again.", "bad");
-      facing = { Q, mirrored: way.mirrored, misses: [], owners: [$("client").value], one: { groups: new Map([[cc.kind, [cc]]]), way } };
-      forgetTrack(); frozen = false; mapMisses = 0;
-      const fixed = fitVersionsToLock();
-      say("lockStatus", `Locked: followed your command center all the way out.${fixed ? " " + fixed : ""}`, "ok");
-      renderAnchors(); updateButtons();
-    }
-    drawShot();
-  }
-  $("followCc").addEventListener("click", startFollow);
-
-  /** Bare map versions that are off sideways (recorded under an older lock): turn them to fit this lock, and keep them that way. */
-  function fitVersionsToLock() {
-    const p = currentPlanet();
-    if (!p || !frame || !facing || !versions.length) return "";
-    const pose = E.poseOf(facing.Q), enough = $("resource").value === BARE ? 0.55 : 0.35;
-    const coarse = E.samplePoints(frame.data.data, frame.w, frame.h, disc, 300, true), fine = E.samplePoints(frame.data.data, frame.w, frame.h, disc, 600);
-    let best = null;
-    for (const v of versions) {
-      if (v.mirrored !== facing.mirrored) continue;
-      const here = E.poseScore(fine, E.bareGrey(v.bare), facing.Q, v.mirrored);
-      if (here !== null && here >= enough && (!best || here > best.score)) best = { v, score: here, bare: v.bare, shift: 0 };
-      const r = E.alignToMap(coarse, E.bareGrey(v.bare, true), v.mirrored, pose, 15 * DEG, 1 * DEG);
-      const rf = r && E.alignToMap(fine, E.bareGrey(v.bare), v.mirrored, r, 1 * DEG, 0.25 * DEG);
-      if (!rf || Math.abs(rf.pitch - pose.pitch) > 1.5 * DEG) continue;
-      const dy = (rf.yaw - pose.yaw) / DEG;
-      if (Math.abs(dy) < 0.3) continue;
-      for (const sh of [dy, -dy]) {
-        const turned = E.shiftBare(v.bare, sh), sc = E.poseScore(fine, E.bareGrey(turned), facing.Q, v.mirrored);
-        if (sc !== null && sc >= enough && (!best || sc > best.score)) best = { v, score: sc, bare: turned, shift: sh };
+    sizeCanvas();
+    sctx.fillStyle = "#000"; sctx.fillRect(0, 0, shot.width, shot.height);
+    const s = status;
+    const fw = s && s.size ? s.size[0] : 1920, fh = s && s.size ? s.size[1] : 1024;
+    const k = Math.min(shot.width / fw, shot.height / fh);
+    fit = { k, x: (shot.width - fw * k) / 2, y: (shot.height - fh * k) / 2 };
+    if (picture) sctx.drawImage(picture, fit.x, fit.y, fw * k, fh * k);
+    if (!s) return;
+    const P = (x, y) => [fit.x + x * k, fit.y + y * k];
+    const dpr = window.devicePixelRatio || 1;
+    if (s.disc) {
+      const [cx, cy] = P(s.disc.cx, s.disc.cy);
+      sctx.strokeStyle = "rgba(214,36,44,.85)"; sctx.lineWidth = 1.5 * dpr;
+      sctx.beginPath(); sctx.arc(cx, cy, s.disc.r * k, 0, 2 * Math.PI); sctx.stroke();
+      // Buildings where the facing says they are.
+      if (s.pose && planet && planet.pins) {
+        const Q = s.pose.q, disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D };
+        sctx.strokeStyle = s.pose.placed ? "rgba(173,255,47,.9)" : "rgba(240,192,64,.7)"; sctx.lineWidth = 1.5 * dpr;
+        for (const pin of planet.pins) {
+          const v = E.apply(Q, E.planetVector(pin.lat, pin.lon, s.pose.mirrored));
+          const at = E.toPicture(v, disc);
+          if (!at.front) continue;
+          const [x, y] = P(at.x, at.y);
+          sctx.beginPath(); sctx.arc(x, y, 6 * dpr, 0, 2 * Math.PI); sctx.stroke();
+        }
       }
     }
-    if (!best) { dropVersion(); return "No bare map version fits this view: pick Bare planet and Scan once to record one for these graphics."; }
-    if (best.shift) { best.v.bare = best.bare; useVersion(best.v); storeBare(); }
-    else useVersion(best.v);
-    return best.shift ? `The bare map was ${Math.abs(best.shift).toFixed(1)}° off sideways (recorded under the old lock): turned to fit and saved.` : "";
+    // Pointing out buildings: the clicks so far.
+    sctx.fillStyle = "#f0c040";
+    for (const a of anchors) { const [x, y] = P(a.px, a.py); sctx.fillRect(x - 3 * dpr, y - 3 * dpr, 6 * dpr, 6 * dpr); }
+    // EVE's resource list rows (while pointing it out, or when the app can't see which is lit).
+    if (s.list && s.list.spot && (clickMode === "list" || s.list.picked == null)) {
+      const sp = s.list.spot, gap = (sp.y5 - sp.y0) / 5;
+      sctx.strokeStyle = "rgba(127,180,255,.8)"; sctx.lineWidth = 1 * dpr;
+      for (let i = 0; i < 6; i++) { const [x, y] = P(sp.x, sp.y0 + gap * i); sctx.strokeRect(x - gap * 2.4 * k, y - gap * 0.2 * k, gap * 4 * k, gap * 0.4 * k); }
+    }
+    if (s.list && s.list.picked != null && s.list.spot) {
+      const sp = s.list.spot, gap = (sp.y5 - sp.y0) / 5, [x, y] = P(sp.x, sp.y0 + gap * s.list.picked);
+      sctx.strokeStyle = "rgba(173,255,47,.9)"; sctx.lineWidth = 2 * dpr; sctx.strokeRect(x - gap * 2.6 * k, y - gap * 0.5 * k, gap * 4.4 * k, gap * k);
+    }
   }
-  $("dcLock").addEventListener("click", lockHome);
-  $("recentre").addEventListener("click", lockHome);
-  $("flip").addEventListener("click", () => {
-    if (!facing || !facing.one) return;
-    const now = facing.one.way, at = POLE_WAYS.findIndex((w) => w.up === now.up && w.mirrored === now.mirrored);
-    const next = POLE_WAYS[(at + 1) % POLE_WAYS.length];
-    savePole(next);
-    if (bare) dropVersion();
-    lockFromOne(facing.one.groups, next);
+  function toFrame(e) {
+    const r = shot.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    return { x: ((e.clientX - r.left) * dpr - fit.x) / fit.k, y: ((e.clientY - r.top) * dpr - fit.y) / fit.k };
+  }
+  shot.addEventListener("click", (e) => {
+    const p = toFrame(e), s = status;
+    if (!s || !s.size) return;
+    if (clickMode === "edge") {
+      const r = Math.hypot(p.x - s.size[0] / 2, p.y - s.size[1] / 2);
+      invoke("planetscan_edge", { r }).then(() => log(`Edge set: radius ${Math.round(r)} px`, "ok")).catch((e2) => log(String(e2), "bad"));
+      setClick(null);
+    } else if (clickMode === "list") {
+      listClicks.push(p);
+      if (listClicks.length === 1) setClick("list", "Now click the last resource in EVE's list (the fifth, under No filter)");
+      else {
+        const [a, b] = listClicks;
+        invoke("planetscan_list", { x: (a.x + b.x) / 2, y0: a.y, y5: b.y }).then(() => log("EVE's resource list pointed out.", "ok")).catch((e2) => log(String(e2), "bad"));
+        setClick(null);
+      }
+    } else if (clickMode === "pin" && pinPick && s.disc) {
+      anchors = anchors.filter((a) => a.id !== pinPick.id);
+      anchors.push({ id: pinPick.id, px: p.x, py: p.y, lat: pinPick.lat, lon: pinPick.lon });
+      renderPins();
+    }
+  });
+  function setClick(mode, hint) {
+    clickMode = mode;
+    if (mode !== "list") listClicks = [];
+    $("clickHint").style.display = mode ? "block" : "none";
+    $("clickHint").textContent = hint || "";
+    $("clickEdge").classList.toggle("on", mode === "edge");
+    $("pointList").classList.toggle("on", mode === "list");
+  }
+  $("clickEdge").addEventListener("click", () => setClick(clickMode === "edge" ? null : "edge", "Click once anywhere on the planet's edge"));
+  $("findEdge").addEventListener("click", () => invoke("planetscan_edge", { find: true }).then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok")).catch((e) => log(String(e), "bad")));
+  $("pointList").addEventListener("click", () => { listClicks = []; setClick(clickMode === "list" ? null : "list", "Click 'No filter' in EVE's resource list (on the picture)"); });
+
+  // ---------- 3: pointing out buildings (no sky in this system yet) ----------
+  function renderPins() {
+    const box = $("pins"); box.innerHTML = "";
+    const pins = (planet && planet.pins || []).filter((p) => p.owner === me);
+    if (!pins.length) { box.innerHTML = '<div class="small muted" style="padding: 4px 7px">No buildings of this character here.</div>'; }
+    const count = {};
+    for (const p of pins) {
+      count[p.name] = (count[p.name] || 0) + 1;
+      const div = document.createElement("div");
+      div.className = "pin" + (pinPick && pinPick.id === p.id ? " sel" : "");
+      div.innerHTML = `${esc(p.name)} #${count[p.name]}` + (anchors.some((a) => a.id === p.id) ? '<span class="got">✓</span>' : "");
+      div.addEventListener("click", () => { pinPick = p; setClick("pin", `Click ${p.name} #${count[p.name]} on the picture`); renderPins(); });
+      box.append(div);
+    }
+    $("lockPins").disabled = anchors.length < 3;
+  }
+  $("clearPins").addEventListener("click", () => { anchors = []; pinPick = null; setClick(null); renderPins(); });
+  $("lockPins").addEventListener("click", () => {
+    const s = status;
+    if (!s || !s.disc) return log("Set the edge first.", "bad");
+    const disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D };
+    const solved = E.solveAnchorsEitherWay(anchors, disc);
+    if (!solved) return log("Those don't solve: point out three spread-out buildings.", "bad");
+    const pose = E.poseOf(solved.Q);
+    invoke("planetscan_pose", { yaw: pose.yaw / DEG, pitch: pose.pitch / DEG, mirrored: solved.mirrored });
+    log(`Locked on from ${anchors.length} buildings (miss ${(solved.error / DEG).toFixed(1)}°). Turn slowly: this planet's sky records.`, "ok");
+    anchors = []; setClick(null); renderPins();
   });
 
-  // ---------- scanning ----------
-  const corpCoverage = new Map();
-  function mapFor(resource) { if (!maps.has(resource)) maps.set(resource, E.newMap()); return maps.get(resource); }
-  async function loadCorpScan(resource) {
-    const p = currentPlanet();
-    if (!p || maps.has(resource) || !(p.scans || []).some((s) => s.resource === resource)) return;
-    try {
-      const got = await invoke("piscan_cells", { planetId: p.planet_id, resource });
-      // A new scan starts on a blank map (SeAT merges it into the corp's on Save); the corp's is only for the coverage note.
-      if (got && got.cells) corpCoverage.set(resource, E.coverage(E.fromCells(Uint8Array.from(atob(got.cells), (c) => c.charCodeAt(0)))));
-    } catch (e) { /* start fresh */ }
-    drawFlat(); updateButtons();
-  }
-  $("resource").addEventListener("change", () => { keys = []; prevGrey = null; lastStep = null; lost = null; if ($("resource").value !== BARE) loadCorpScan($("resource").value); drawFlat(); updateButtons(); });
-  $("scan").addEventListener("click", () => { if (running && $("resource").value === BARE) storeBare(); running = !running; prevGrey = null; lastStep = null; lost = null; lostRun = 0; frozen = false; updateButtons(); if (running) say("scanStatus", "Scanning: turn the planet slowly.", "ok"); });
-  $("showHeat").addEventListener("change", drawShot);
-  $("skyShow").addEventListener("change", () => { skyDrawnAt = 0; drawFlat(); });
-  try { $("fullSize").checked = localStorage.getItem("piscan-fullsize") === "1"; } catch {}
-  $("fullSize").addEventListener("change", () => { try { localStorage.setItem("piscan-fullsize", $("fullSize").checked ? "1" : "0"); } catch {} });
-  $("skyFindBtn").addEventListener("click", () => {
-    if (!sky) return say("skyStatus", "No sky recorded for this system yet: lock on below, then turn the planet all the way round.", "warn");
-    facing = null; anchors = []; forgetTrack(); skyFindAt = 0; frozen = false;
-    say("lockStatus", ""); say("skyStatus", "Looking at the sky…", "");
-    renderAnchors(); updateButtons(); drawShot();
-  });
+  // ---------- 3/4/5: commands ----------
+  $("findSky").addEventListener("click", () => { invoke("planetscan_find"); log("Looking on the sky…"); });
   let forgetAsked = 0;
-  $("skyForget").addEventListener("click", async () => {
-    if (!sky || !skySystem) return;
-    if (Date.now() - forgetAsked > 4000) { forgetAsked = Date.now(); $("skyForget").textContent = "Click again to forget it"; setTimeout(() => { $("skyForget").textContent = "Forget this system's sky"; }, 4000); return; }
-    forgetAsked = 0; $("skyForget").textContent = "Forget this system's sky";
-    try { await kv.del("sky-" + skySystem); } catch {}
-    sky = null; skyDirty = false; skyPaintedAt = null;
-    if (facing) { facing.skyConflict = false; facing.skyChecked = true; }
-    showSkyState(); skyDrawnAt = 0; drawFlat();
-    say("skyStatus", `Forgot the sky of ${skySystem}. Lock on and turn the planet round to record it again.`, "ok");
+  $("forgetSky").addEventListener("click", () => {
+    if (!planet) return;
+    if (Date.now() - forgetAsked > 4000) { forgetAsked = Date.now(); $("forgetSky").textContent = "Click again"; setTimeout(() => { $("forgetSky").textContent = "Record again"; }, 4000); return; }
+    $("forgetSky").textContent = "Record again";
+    invoke("planetscan_forget_sky", { planetId: planet.planet_id });
+    log(`${planet.name}: its own sky is forgotten; it records again as you turn.`, "warn");
   });
-
-  // ---------- automatic lock-on ----------
-  function adoptPose(pose, how) {
-    facing = { Q: pose.Q, mirrored: pose.mirrored, misses: [], owners: [pose.owner] };
-    disc = { cx: disc.cx, cy: disc.cy, r: disc.r, D: pose.D };
-    focal = isFinite(pose.D) ? disc.r * Math.sqrt(pose.D * pose.D - 1) : null;
-    forgetTrack();
-    say("autoStatus", `${how}: ${pose.owner}'s colony, ${pose.inliers} buildings line up. Green rings should sit on the buildings; Scan when ready.`, "ok");
-    updateButtons();
+  function currentTarget() {
+    const picked = status && status.list ? status.list.picked : null;
+    if (picked != null && planet) return picked === 0 ? { row: 0, resource: "" } : { row: picked, resource: resourcesOf(planet)[picked - 1] };
+    const r = $("resource").value;
+    return { row: null, resource: r };
   }
-  function autoStep(f) {
-    const now = Date.now();
-    // Only the colony of the character in this EVE client: other people's buildings (and all of
-    // their extractor heads) aren't drawn unless you click their command center, so matching
-    // against them only finds look-alikes in lava specks.
-    const me = $("client").value;
-    const cols = colonies().filter((c) => c.owner === me || ($("othersPins") && $("othersPins").checked));
-    if (!cols.length) return say("autoStatus", `${me || "This character"} has no colony on this planet: point out a building yourself (Other people's buildings too), or pick another planet.`, "warn");
-    if (facing) {
-      // Locked: every few frames, pull back onto any network in view (no drift).
-      if (now - lastRefine < 350) return;
-      lastRefine = now;
-      const markers = E.findMarkers(f.data.data, f.w, f.h, disc);
-      if (markers.length < 4) return;
-      const mine = cols.filter((c) => (facing.owners || []).includes(c.owner)).flatMap((c) => c.points);
-      if (!mine.length) return;
-      const refined = E.refineWithMarkers(markers, mine, { Q: facing.Q, mirrored: facing.mirrored, D: disc.D }, disc, 6);
-      if (refined && refined.inliers >= 8 && refined.inliers >= mine.length * 0.6) {
-        const moved = E.angle(E.apply(refined.Q, [0, 0, 1]), E.apply(facing.Q, [0, 0, 1]));
-        if (moved < 0.05) facing.Q = refined.Q;
-      }
+  function startScan(target) {
+    const t = target || currentTarget();
+    if (!planet) return log("Pick the planet first.", "bad");
+    invoke("planetscan_scan", { resource: t.resource, row: t.row }).then(() => log(`Scanning ${t.resource || "the bare planet (its own colours)"} on ${planet.name}…`)).catch((e) => log(String(e), "bad"));
+    mapVersion = -1;
+  }
+  $("scan").addEventListener("click", () => startScan());
+  $("stop").addEventListener("click", () => { invoke("planetscan_scan", { resource: null }); log("Scan stopped (not saved)."); });
+  $("saveNow").addEventListener("click", () => invoke("planetscan_save").catch((e) => log(String(e), "bad")));
+  const options = () => invoke("planetscan_options", { options: { autosave: $("autosave").checked, auto_zoom: $("autoZoom").checked, auto_planet: $("autoPlanet").checked } });
+  for (const id of ["autosave", "autoZoom", "autoPlanet", "autoNext"]) {
+    if (settings[id] !== undefined) $(id).checked = settings[id];
+    $(id).addEventListener("change", () => { settings[id] = $(id).checked; keep(); options(); if (id === "autoPlanet" && $(id).checked) invoke("planetscan_load_bares").then((n) => log(`${n} planets' own colours loaded for telling them apart.`)); });
+  }
+  $("client").addEventListener("change", startClient);
+  $("reload").addEventListener("click", () => { loadClients(); loadPlanets(); });
+  $("showSky").addEventListener("change", () => { skyDrawnAt = 0; mapVersion = -1; });
+  $("home").addEventListener("click", () => { alive = false; invoke("planetscan_stop"); location.href = "index.html#pi"; });
+  window.addEventListener("beforeunload", () => invoke("planetscan_stop"));
+  $("popOk").addEventListener("click", () => { $("pop").style.display = "none"; });
+
+  // ---------- the map ----------
+  const flat = $("flat"), fctx = flat.getContext("2d");
+  const HEAT = [[20, 16, 42], [21, 42, 80], [18, 69, 47], [44, 111, 10], [138, 125, 5], [168, 90, 8], [176, 24, 12], [199, 192, 191]];
+  function heatColour(v) {
+    const t = Math.max(0, Math.min(1, v)) * (HEAT.length - 1), a = Math.floor(t), b = Math.min(HEAT.length - 1, a + 1), f = t - a;
+    return [0, 1, 2].map((c) => HEAT[a][c] * (1 - f) + HEAT[b][c] * f);
+  }
+  async function drawMap() {
+    const s = status;
+    if ($("showSky").checked) {
+      if (Date.now() - skyDrawnAt < 1500) return;
+      skyDrawnAt = Date.now();
+      const raw = await invoke("planetscan_skymap", { level: 2 }).catch(() => null);
+      if (!raw) return;
+      const bytes = new Uint8Array(raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer);
+      const img = fctx.createImageData(720, 360);
+      for (let i = 0; i < 720 * 360; i++) { const v = bytes[i]; img.data.set(v ? [v, v, v, 255] : [10, 14, 40, 255], i * 4); }
+      fctx.putImageData(img, 0, 0);
+      drawViewMark(s);
+      $("mapTitle").textContent = "This planet's own sky (fine stars)"; $("mapPct").textContent = s && s.sky && s.sky.own ? pct(s.sky.own.levels[2]) : "–";
+      $("mapSub").textContent = "Grey = recorded, blue = not yet. Red cross: where the camera looks."; $("scale").style.visibility = "hidden"; $("scaleSaid").textContent = "";
       return;
     }
-    if (autoBusy || now - autoAsked < 1500) return;
-    const markers = E.findMarkers(f.data.data, f.w, f.h, disc);
-    if (markers.length < 5) return say("autoStatus", "Looking for buildings… click a command center in EVE so its network shows (zooming in helps).", "");
-    autoBusy = true; autoAsked = now;
-    say("autoStatus", `Matching ${markers.length} marks against ${cols.length} colonies…`, "");
-    const done = (pose) => {
-      autoBusy = false;
-      // Strict: most of that colony has to show up, and it has to explain the marks (lava specks match anything).
-      if (pose && pose.inliers >= 8 && pose.inliers >= pose.of * 0.6 && pose.inliers >= markers.length * 0.5 && !facing) adoptPose(pose, "Locked on by itself");
-      else if (!facing) say("autoStatus", "No colony matched yet: click a command center in EVE so its network shows, or zoom in on one.", "warn");
-    };
-    const msg = { id: ++workerId, markers: markers.slice(0, 120).map((m) => ({ x: m.x, y: m.y })), colonies: cols, disc: { cx: disc.cx, cy: disc.cy, r: disc.r } };
-    if (worker) {
-      const id = msg.id;
-      const onMsg = (e) => { if (e.data.id !== id) return; worker.removeEventListener("message", onMsg); done(e.data.pose); };
-      worker.addEventListener("message", onMsg);
-      worker.postMessage(msg);
-    } else {
-      setTimeout(() => done(E.autoLock(msg.markers, cols, msg.disc)), 0);
+    $("scale").style.visibility = "";
+    const version = s && s.run ? s.run.version : -2;
+    if (version === mapVersion && Date.now() - mapAt < 2000) { drawViewMark(s); return; }
+    mapVersion = version; mapAt = Date.now();
+    const raw = await invoke("planetscan_map").catch(() => null);
+    if (!raw) return;
+    const bytes = new Uint8Array(raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer);
+    const kind = bytes[0], img = fctx.createImageData(360, 180);
+    for (let i = 0; i < 360 * 180; i++) {
+      let c = [8, 8, 12];
+      if (kind === 1 && bytes[1 + i]) c = heatColour((bytes[1 + i] - 1) / 250);
+      else if (kind === 2 && (bytes[1 + i * 3] || bytes[2 + i * 3] || bytes[3 + i * 3])) c = [bytes[1 + i * 3], bytes[2 + i * 3], bytes[3 + i * 3]];
+      img.data.set([c[0], c[1], c[2], 255], i * 4);
+    }
+    const tmp = document.createElement("canvas"); tmp.width = 360; tmp.height = 180; tmp.getContext("2d").putImageData(img, 0, 0);
+    fctx.imageSmoothingEnabled = false; fctx.drawImage(tmp, 0, 0, 720, 360);
+    // Grid and buildings.
+    fctx.strokeStyle = "rgba(255,255,255,.07)"; fctx.lineWidth = 1;
+    for (let x = 60; x < 720; x += 60) { fctx.beginPath(); fctx.moveTo(x + .5, 0); fctx.lineTo(x + .5, 360); fctx.stroke(); }
+    for (let y = 60; y < 360; y += 60) { fctx.beginPath(); fctx.moveTo(0, y + .5); fctx.lineTo(720, y + .5); fctx.stroke(); }
+    fctx.fillStyle = "#f0c040";
+    for (const pin of (planet && planet.pins) || []) fctx.fillRect(pin.lon / (2 * Math.PI) * 720 - 1.5, pin.lat / Math.PI * 360 - 1.5, 3, 3);
+    drawViewMark(s);
+    const run = s && s.run;
+    $("mapTitle").textContent = run ? (run.resource || "Bare planet (its own colours)") + " · " + (planet ? planet.name : "") : kind === 2 ? "This planet's own colours" : "Map";
+    $("mapPct").textContent = run ? pct(run.coverage) : kind === 2 && s.bare ? pct(s.bare.coverage) : "–";
+    $("mapSub").textContent = run ? (run.done ? "done" : run.paused ? "paused: " + run.paused : `${Math.round(run.secs)} s · ${run.frames} pictures painted`) : "Whole planet, north at the top. Yellow: buildings.";
+    $("scaleSaid").textContent = run && run.resource ? "low → high" : "";
+    $("scale").style.visibility = run && run.resource ? "" : "hidden";
+  }
+  // Red cross: the middle of the view on the map (the planet map), or behind the planet (the sky).
+  let markAt = null;
+  function drawViewMark(s) {
+    if (!s || !s.pose) return;
+    const Qt = E.transpose(s.pose.q), sky = $("showSky").checked;
+    const v = E.apply(Qt, sky ? [0, 0, -1] : [0, 0, 1]);
+    const ll = sky ? { lat: Math.acos(Math.max(-1, Math.min(1, v[2]))), lon: (Math.atan2(v[1], v[0]) + 2 * Math.PI) % (2 * Math.PI) } : E.latLon(v, s.pose.mirrored);
+    const x = ll.lon / (2 * Math.PI) * 720, y = ll.lat / Math.PI * 360;
+    markAt = [x, y];
+    fctx.strokeStyle = "#ff5a4a"; fctx.lineWidth = 2;
+    fctx.beginPath(); fctx.moveTo(x - 8, y); fctx.lineTo(x + 8, y); fctx.moveTo(x, y - 8); fctx.lineTo(x, y + 8); fctx.stroke();
+  }
+
+  // ---------- reading the status: steps, tips, events ----------
+  function setState(n, text, cls, done) {
+    $("s" + n).textContent = text || ""; $("s" + n).className = "state " + (cls || "muted");
+    $("n" + n).classList.toggle("done", !!done);
+  }
+  function popup(title, text, next, err) {
+    $("popTitle").textContent = title; $("popText").textContent = text; $("popNext").textContent = next || "";
+    $("pop").classList.toggle("err", !!err); $("pop").style.display = "flex";
+  }
+  let firstStatus = true;
+  function onEvents(s) {
+    if (firstStatus) { firstStatus = false; for (const ev of s.events || []) lastEvent = Math.max(lastEvent, ev.id); }
+    for (const ev of s.events || []) {
+      if (ev.id <= lastEvent) continue;
+      lastEvent = ev.id;
+      const cls = ev.kind === "error" ? "bad" : ev.kind === "done" || ev.kind === "saved" || ev.kind === "map-saved" || ev.kind === "locked" ? "ok" : "";
+      log(ev.text, cls);
+      if (ev.kind === "saved" || ev.kind === "map-saved") {
+        // Show it in the squares straight away; SeAT's list catches up on the next reload.
+        const p = planets.find((q) => q.planet_id === ev.planet_id);
+        if (p && ev.resource) { p.scans = (p.scans || []).filter((x) => x.resource !== ev.resource); p.scans.push({ resource: ev.resource, coverage: ev.coverage || 0.99, at: Date.now() / 1000, by: me }); }
+        if (p && ev.map) { p.maps = (p.maps || []).filter((x) => x.kind !== ev.map); p.maps.push({ kind: ev.map, coverage: 1, at: Date.now() / 1000, by: me }); }
+        renderPlanets();
+        if (ev.kind === "saved") {
+          const next = nextToScan(p);
+          popup("Done and saved for the corp", ev.text, next ? (next.row === 0 ? "Next: set EVE to No filter (this planet's own colours), then Scan." : `Next: click ${next.resource} in EVE${$("autoNext").checked ? " (the scan starts by itself)" : ", then Scan"}.`) : "This planet is done. Next: open the next planet in EVE.");
+        }
+      }
+      if (ev.kind === "done" && !s.autosave) popup("Scan done", ev.text, "Press Save now to give it to the corp.");
+      if (ev.kind === "done" && ev.resource === "" && s.autosave) {
+        const next = nextToScan(planet);
+        popup("Planet's own colours mapped", ev.text, next ? `Next: click ${next.resource || "the first resource"} in EVE${$("autoNext").checked ? " (the scan starts by itself)" : ", then Scan"}.` : "");
+      }
+      if (ev.kind === "error" && ev.resource) popup("Not saved", ev.text, "", true);
+      if (ev.kind === "planet" && ev.planet_id && $("autoPlanet").checked) selectPlanet(ev.planet_id);
     }
   }
-
-  let turnSpeed = 0, lastTurnAt = 0, fpsCount = 0, fpsAt = 0, fps = 0;
-  let ticks = 0, lastRim = null, lastRefine = 0, lastRimCheck = 0, lastStore = 0;
-  async function tick() {
-    ticks++;
-    if (painting || (!running && !facing && !follow && ticks % 5)) return;
-    painting = true;
-    try {
-      if (!frozen && $("client").value) {
-        const f = await grab().catch(() => null);
-        if (f) frame = f;
-        if (f) learnUi(f);
-        if (f && follow) followStep(f);
-        // The system's sky recorded: find which way the camera faces from it (no lock needed).
-        if (f && !facing && !follow && sky) skyFind(f);
-        if (f && !disc && $("auto").checked && ticks % 8 === 0) say("autoStatus", "Set the edge first: Click the edge, then click once on the planet's edge.", "warn");
-        // Zoomed in EVE: the rim moves; with the camera's lens known, so does the distance.
-        if (f && facing && disc && focal && $("follow").checked && Date.now() - lastRimCheck > 250) {
-          lastRimCheck = Date.now();
-          const rim = E.rimRadius(f.data.data, f.w, f.h, disc.r);
-          const steady = rim && lastRim && Math.abs(rim.r - lastRim) < disc.r * 0.01;
-          lastRim = rim ? rim.r : null;
-          if (steady && Math.abs(rim.r - disc.r) > disc.r * 0.012) {
-            disc = { cx: rim.cx, cy: rim.cy, r: rim.r, D: Math.sqrt((focal / rim.r) ** 2 + 1) };
-            forgetTrack();
-            updateButtons();
-          }
-        }
-        // Bare map versions of this planet recorded: no lock needed, find which version and where.
-        if (f && disc && !facing && !follow && versions.length && Date.now() - lastFind > 700) {
-          lastFind = Date.now();
-          if (!isFinite(disc.D)) disc = { ...disc, D: Math.sqrt((lensPx() / disc.r) ** 2 + 1) }, focal = lensPx();
-          const coarsePts = E.samplePoints(f.data.data, f.w, f.h, disc, 300, true);
-          let best = null;
-          for (const v of versions) {
-            const found = E.findOnMap(coarsePts, E.bareGrey(v.bare, true), v.mirrored);
-            if (found && found.score >= 0.55 && found.margin >= 0.15 && (!best || found.score > best.found.score)) best = { v, found };
-          }
-          if (best) {
-            useVersion(best.v);
-            const r = E.alignToMap(E.samplePoints(f.data.data, f.w, f.h, disc, 600), E.bareGrey(best.v.bare), best.v.mirrored, best.found, 1 * DEG, 0.5 * DEG) || best.found;
-            facing = { Q: E.poseQ(r.yaw, r.pitch), mirrored: best.v.mirrored, misses: [], owners: [$("client").value] };
-            focal = lensPx(); forgetTrack();
-            say("lockStatus", `Found on the bare planet map${versions.length > 1 ? ` (version "${best.v.label}")` : ""}: no lock needed. Pick the resource EVE shows and press Scan.`, "ok");
-            updateButtons();
-          } else say("lockStatus", "Looking for this view on the planet's bare map… none fits yet? Lock on one building: if this client's graphics differ, a new version gets recorded.", "");
-        }
-        if (f && disc && $("auto").checked && !facing && !follow) autoStep(f);
-        // Locked on: keep following the planet whether or not Scan is on (painting needs Scan).
-        if (f && facing && disc) {
-          fpsCount++; if (performance.now() - fpsAt > 2000) { fps = fpsCount * 1000 / (performance.now() - fpsAt); fpsCount = 0; fpsAt = performance.now(); }
-          const grey = E.greyDisc(f.data.data, f.w, f.h, disc);
-          // 1) A first guess from the last picture (EVE's camera can't roll: keep it upright).
-          let tracked = false;
-          if (prevGrey) {
-            const t = (lastStep && E.trackRotation(prevGrey, grey, disc.D, { guess: lastStep })) || E.trackRotation(prevGrey, grey, disc.D);
-            if (t) {
-              facing.Q = E.upright(E.mul(t.R, facing.Q)); lastStep = t.R; tracked = true;
-              // How fast the planet is turning (degrees a second, smoothed): above ~15 the next turn can be too big to follow.
-              const now = performance.now(), dt = Math.max(0.02, (now - (lastTurnAt || now - 40)) / 1000);
-              turnSpeed = 0.7 * turnSpeed + 0.3 * (t.moved * 180 / Math.PI / dt); lastTurnAt = now;
-            } else lastStep = null;
-          }
-          // 1b) Placed on the sky: exact, no drift, any filter, every planet in the system.
-          const skyResult = skyStep(f, tracked || !prevGrey);
-          // 2) Placed on the bare planet map: no piling-up error; lost → found again anywhere on the planet.
-          let ok = tracked || !prevGrey || skyResult === "placed", placed = skyResult === "placed";
-          const ref = placed ? null : mapRef();
-          if (ref) {
-            const pts = E.samplePoints(f.data.data, f.w, f.h, disc, 600);
-            const near = E.alignToMap(pts, ref.fine, facing.mirrored, E.poseOf(facing.Q), 2 * DEG, 0.5 * DEG);
-            // With a resource showing, EVE's colours weaken the match: a lower bar, and never a reason to drop the map.
-            // On the bare pass the map being recorded pulls the facing back as you come round to ground
-            // already painted (stops slow drift); low-contrast ground (Barren) matches itself only
-            // weakly, so its own map gets a lower bar, kept safe by the ±2° search.
-            const bareNow = $("resource").value === BARE, own = bareNow && bareVersion === freshVersion;
-            const enough = own ? 0.4 : bareNow ? 0.55 : 0.35;
-            if (near && near.score >= enough) { facing.Q = E.poseQ(near.yaw, near.pitch); ok = true; placed = true; mapMisses = 0; }
-            else if (near && tracked && !bareNow) { /* keep the tracked guess; the next picture is placed again */ }
-            else if (near && tracked && running && bareVersion !== freshVersion) {
-              // Tracking is fine but the saved map disagrees: the map is what's wrong (recorded
-              // under an older, wrong lock). Never jump to it; after a few such pictures, drop it.
-              if (++mapMisses > 6) {
-                dropVersion(); mapMisses = 0;
-                say("lockStatus", "This bare map version doesn't fit how this client draws the planet: pick Bare planet and Scan once to record a version for these graphics (the others are kept).", "warn");
-              }
-            }
-            else if (!tracked) {
-              ok = false;
-              // The whole-planet search needs a finished map: a half-recorded one finds look-alikes.
-              if (mapDone() && Date.now() - lastFind > 300) {
-                lastFind = Date.now();
-                const found = E.findOnMap(E.samplePoints(f.data.data, f.w, f.h, disc, 300, true), ref.coarse, facing.mirrored);
-                if (found && found.score >= 0.5 && found.margin >= 0.15) {
-                  const r = E.alignToMap(pts, ref.fine, facing.mirrored, found, 1 * DEG, 0.5 * DEG) || found;
-                  facing.Q = E.poseQ(r.yaw, r.pitch); ok = true; placed = true; lastStep = null;
-                }
-              }
-            }
-          }
-          lost = ok ? null : { grey };
-          // Lost with no finished map to fall back on: keep the last good picture, so the grip only
-          // comes back when the planet is turned back to where it was lost (never a silent jump).
-          if (!ok && placed === false && !mapDone()) { /* keep prevGrey */ }
-          else if (!ok) prevGrey = grey;
-          if (ok) prevGrey = grey;
-          if (ok && !running) {
-            // Following only.
-          } else if (ok) {
-            if ($("resource").value === BARE) {
-              if (!bare) bare = E.newBare();
-              E.paint(bare, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, "record");
-              const cover = E.bareCoverage(bare);
-              if (Date.now() - lastStore > 3000) { lastStore = Date.now(); storeBare(); }
-              say("scanStatus", cover > 0.97 ? "Bare planet recorded: switch EVE to a resource and pick it here." : `Bare planet ${Math.round(cover * 100)}% recorded (${fps.toFixed(1)} pictures a second). Still missing: ${E.missingHint({ weight: bare.weight }, facing.Q, facing.mirrored) || "a little here and there"}.`, "ok");
-            } else {
-              const m = mapFor($("resource").value);
-              E.paint(m, f.data.data, f.w, f.h, disc, facing.Q, facing.mirrored, 3, bare && E.bareCoverage(bare) > 0.2 ? bare : null);
-              const hint = E.missingHint(m, facing.Q, facing.mirrored), cover = E.coverage(m);
-              say("scanStatus", cover > 0.97 ? "Whole planet seen: save it, or pick the next resource." : `${Math.round(cover * 100)}% seen. Still missing: ${hint || "a little here and there"}.`, "ok");
-            }
-          } else {
-            say("scanStatus", mapDone() ? "Finding where this is on the planet map… (painting paused until it's sure)" : "Lost the grip (turned too fast): painting is paused. Turn back slowly to where it lost it and it picks up again, or press Re-centre / click one of your buildings.", "warn");
-          }
-          if (ok && running && turnSpeed > 15) say("scanStatus", `Turn slower: ${Math.round(turnSpeed)}° a second. Keep it under 15 (one full turn in about 30 seconds) or it loses the planet.`, "warn");
-          drawFlat(); updateButtons();
-        }
-        drawShot();
-      }
-    } finally { painting = false; }
+  function onStatus(s) {
+    status = s;
+    // Header rates.
+    const cap = s.capture || {}, proc = s.proc || {};
+    $("rates").innerHTML = s.client ? `EVE <b>${Math.round(cap.fps || 0)}</b> fps · scan <b>${Math.round(proc.fps || 0)}</b> fps · ${Math.round(proc.ms || 0)} ms · ${s.size ? s.size.join("×") : ""} · ${esc(cap.method || "starting")}` : "";
+    onEvents(s);
+    // Steps.
+    setState(1, planet ? planet.name : "pick one", planet ? "ok" : "warn", !!planet && !!s.client);
+    setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : "not set", s.edge ? "ok" : "warn", !!s.edge);
+    const pose = s.pose;
+    const own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed;
+    setState(3, pose ? (pose.placed ? "locked" : "lost") : "looking", pose && pose.placed ? "ok" : "warn", !!(pose && pose.placed));
+    const facts = [];
+    facts.push(["Locked by", pose ? (pose.sky_name ? `${pose.sky_of === (planet && planet.planet_id) ? "its own sky" : pose.sky_name + "'s sky (borrowed)"}` : "buildings") : "–"]);
+    if (pose) facts.push(["Match", `nebula ${pct(pose.coarse)} · stars ${pct(pose.stars)} (${pose.level})`]);
+    facts.push(["Own sky", own ? `${pct(own.coverage)} · stars ${pct(own.levels[2])}${s.sky.recording ? " · recording" : ""}${s.sky.unsent ? " · not shared yet" : ""}` : "none yet (records as you turn)"]);
+    if (bor) facts.push(["Borrowing", `${bor.name}'s sky`]);
+    if (s.sky && s.sky.compare) facts.push(["Same sky?", `own vs ${s.sky.compare.with}: ${s.sky.compare.deg.toFixed(2)}° apart`]);
+    if (s.sky && s.sky.rings != null) facts.push(["Rings", s.sky.rings ? "cut out of the sky" : "none"]);
+    $("skyFacts").innerHTML = facts.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
+    const run = s.run;
+    const picked = s.list ? s.list.picked : null;
+    $("listSaid").textContent = picked == null ? (s.list && s.list.guessed ? "not seen (point it out)" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`;
+    $("listSaid").className = picked == null ? "warn" : "ok";
+    const target = currentTarget();
+    $("scan").textContent = run && !run.done ? `Scanning ${run.resource || "bare planet"}… ${pct(run.coverage)}` : `Scan ${target.resource || "bare planet (No filter)"}`;
+    $("scan").disabled = !planet || !(pose && pose.placed) || (run && !run.done);
+    $("stop").disabled = !(run && !run.done);
+    $("saveNow").disabled = !(run && run.coverage > 0.05 && (!run.done || !s.autosave));
+    setState(4, run ? (run.done ? "done" : run.paused ? "paused" : pct(run.coverage)) : "", run ? (run.done ? "ok" : run.paused ? "warn" : "ok") : "muted", run && run.done);
+    setState(5, s.autosave ? "autosave on" : "autosave off", s.autosave ? "ok" : "warn");
+    // The next scan starts by itself when EVE switches to a resource still to do.
+    if ($("autoNext").checked && planet && pose && pose.placed && picked != null && picked !== lastPicked && (!run || run.done)) {
+      const res = picked === 0 ? "" : resourcesOf(planet)[picked - 1];
+      const s0 = res ? scanInfo(planet, res) : null;
+      if (lastPicked != null && (picked === 0 ? !mapInfo(planet, "bare") : scanClass(s0) !== "fresh")) { $("pop").style.display = "none"; startScan({ row: picked, resource: res }); }
+    }
+    if (picked != null) lastPicked = picked;
+    // Do now.
+    const [say, also, ok] = tips(s);
+    $("say").textContent = say; $("say").className = "say" + (ok ? " ok" : "");
+    $("also").innerHTML = also.map((t) => `<li>${esc(t)}</li>`).join("");
+    $("missing").textContent = run && !run.done && run.missing ? "Not seen yet: " + run.missing : "";
+    // Badge on the picture.
+    const badge = $("badge");
+    badge.textContent = pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.edge ? "Looking on the sky…" : "Edge not set";
+    badge.className = "badge " + (pose && pose.placed ? "ok" : "warn");
   }
-  setInterval(tick, 40); // as fast as pictures come (a tick still running skips the next)
-  // Offline test harness only (never set in the app): lets a test lock on and read the state.
-  if (window.__PISCAN_TEST__) window.__PISCAN_TEST__.page = {
-    tick, lock: (Q, mirrored, d) => { disc = { ...d }; focal = lensPx(); facing = { Q, mirrored, misses: [], owners: [] }; forgetTrack(); },
-    state: () => ({ facing, disc, skyCover: skyCover(), skySystem, skyLast, uiReady: !!uiMask && E.uiMaskReady(uiMask) }),
-    flush: () => saveSky(true),
-  };
+  function tips(s) {
+    const also = [];
+    const cap = s.capture || {};
+    if (!s.client) return ["Open EVE and log in a character, then pick it at the top left.", also];
+    if (cap.trouble) also.push(cap.trouble);
+    if (s.client && cap.fps && cap.fps < 40 && s.run && !s.run.done) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second: for 60, keep EVE in front and lift any frame-rate limit in EVE's settings.`);
+    if (!planet) return ["Pick the planet you have open in EVE (1).", also];
+    if (!s.edge) return ["Zoom all the way out in EVE, then press Find edge (2).", also];
+    if (s.ui && !s.ui.ready) also.push("Turn the planet a little: the app learns where EVE's windows are.");
+    const pose = s.pose, run = s.run;
+    if (!pose) {
+      const any = (s.sky && (s.sky.own || (s.sky.borrowed && s.sky.borrowed.loaded)));
+      if (!any) return ["No sky recorded in this system yet: point out three of your buildings (3), then turn the planet slowly.", also];
+      if (s.find && !s.find.sure) also.push(`Best guess not sure yet (nebula ${pct(s.find.coarse)}, stars ${pct(s.find.stars)}).`);
+      return ["Looking for the planet on the sky… turn the planet a little.", also];
+    }
+    if (!pose.placed) return ["Lost the sky: turn a bit slower, or zoom back out if you zoomed in.", also];
+    if (s.fast_turn) also.push("Turning fast: fine, but slow down if it loses the sky.");
+    const picked = s.list ? s.list.picked : null;
+    if (picked == null) also.push("The app can't see which resource EVE shows: point out EVE's list (4) so a wrong one can't be saved.");
+    if (run && !run.done) {
+      if (run.paused === "EVE shows another resource") return [`EVE shows another resource: click ${run.resource || "No filter"} in EVE, or Stop.`, also];
+      if (run.resource && !s.bare) also.push("This planet's own colours aren't mapped yet: readings are rougher. Do a No filter pass once.");
+      if (run.resource) also.push("EVE's colour band: both ends dragged right out.");
+      return [`Spin the planet: ${pct(run.coverage)} of ${run.resource || "its own colours"}${run.missing ? ", still missing " + run.missing.split(":")[0] : ""}.`, also];
+    }
+    const next = nextToScan(planet);
+    if (!next) return [`${planet.name} is up to date for the corp. Open the next planet in EVE.`, also, true];
+    if (next.row === 0) return ["Once per planet: set EVE to No filter, then Scan: the app maps this planet's own colours.", also];
+    return [`Click ${next.resource} in EVE's Scan panel, then Scan${$("autoNext").checked ? " (or it starts when EVE switches)" : ""}.`, also];
+  }
 
-  // ---------- save ----------
-  $("save").addEventListener("click", async () => {
-    const p = currentPlanet(), resource = $("resource").value, m = maps.get(resource);
-    if (!p || !m) return;
-    E.fillHoles(m, 4);
-    E.despeckle(m);
-    const bytes = E.cells(m);
-    let bin = ""; for (let i = 0; i < bytes.length; i += 4096) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 4096));
-    say("saveStatus", "Saving…");
-    try {
-      say("saveStatus", await invoke("piscan_save", { planetId: p.planet_id, resource, characterId: p.character_id ?? null, cells: btoa(bin) }), "ok");
-      const had = (p.scans || []).find((s) => s.resource === resource);
-      if (had) had.coverage = Math.max(had.coverage, E.coverage(m)); else (p.scans = p.scans || []).push({ resource, coverage: E.coverage(m) });
-    } catch (e) { say("saveStatus", String(e), "bad"); }
-  });
+  // ---------- the loop: picture + status in one call ----------
+  async function pollLoop() {
+    while (alive) {
+      try {
+        const want = Math.min(3840, Math.max(640, shot.width || 1280));
+        const raw = await invoke("planetscan_poll", { after: seq, width: want });
+        const buf = raw instanceof ArrayBuffer ? raw : new Uint8Array(raw).buffer;
+        const n = new DataView(buf).getUint32(0, true);
+        const msg = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n)));
+        if (buf.byteLength > 4 + n) {
+          const bmp = await createImageBitmap(new Blob([new Uint8Array(buf, 4 + n)], { type: "image/jpeg" }));
+          if (picture && picture.close) picture.close();
+          picture = bmp; seq = msg.seq;
+        }
+        if (msg.s && msg.s.size) onStatus(msg.s);
+        drawShot();
+      } catch (e) {
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+  }
+  setInterval(() => { if (alive) drawMap(); }, 250);
+  setInterval(() => { if (alive) loadPlanets(); }, 5 * 60 * 1000);
+  window.addEventListener("resize", drawShot);
 
-  $("rebare").addEventListener("click", () => { forgetBare(); $("resource").options[0].text = "Bare planet (EVE on No filter)"; updateButtons(); say("saveStatus", "Bare map cleared: pick Bare planet, press Scan and turn it all the way round.", "ok"); });
-  $("wipe").addEventListener("click", async () => {
-    const p = currentPlanet();
-    if (!p || !(p.scans || []).length) return;
-    say("saveStatus", "Deleting…");
-    try {
-      for (const sc of p.scans) await invoke("piscan_delete", { planetId: p.planet_id, resource: sc.resource });
-      p.scans = []; [...maps.keys()].forEach((k) => maps.delete(k));
-      say("saveStatus", `Deleted the corp's old scans of ${p.name}.`, "ok");
-      planetChanged();
-    } catch (e) { say("saveStatus", String(e), "bad"); }
-  });
-  $("client").addEventListener("change", () => { frame = null; fillPlanets(); });
-  $("planet").addEventListener("change", planetChanged);
-  $("others").addEventListener("change", fillPlanets);
-  $("othersPins").addEventListener("change", renderAnchors);
-  // Recording: frames saved by the app; the page notes what it had selected every second.
-  let recordTimer = null;
-  $("record").addEventListener("click", async () => {
-    if (await invoke("piscan_recording").catch(() => false)) { await invoke("piscan_record_stop").catch(() => {}); return; }
-    const name = $("client").value;
-    if (!name) return say("recordSaid", "Pick a client first.", "warn");
-    try {
-      await invoke("piscan_record_start", { name, seconds: 120 });
-      const started = Date.now();
-      $("record").textContent = "■ Stop recording";
-      recordTimer = setInterval(async () => {
-        const p = currentPlanet();
-        invoke("piscan_record_note", { note: { ms: Date.now() - started, planet: p && p.name, resource: $("resource").value, disc, locked: !!facing, Q: facing && facing.Q, mirrored: facing && facing.mirrored, bySky: !!(facing && facing.sky), sky: skyLast, skyCover: skyCover(), lens: skyLens(), width: shot.width } }).catch(() => {});
-        const on = await invoke("piscan_recording").catch(() => false);
-        $("recordSaid").textContent = on ? `recording… ${Math.round((Date.now() - started) / 1000)} s` : "Saved. Tell Claude it's done.";
-        if (!on) { clearInterval(recordTimer); $("record").textContent = "● Record for tuning"; }
-      }, 1000);
-    } catch (e) { say("recordSaid", String(e), "bad"); }
-  });
-  $("reload").addEventListener("click", async () => { await loadClients(); await loadPlanets(); });
-  (async () => { await loadClients(); await loadPlanets(); drawShot(); })();
+  (async () => {
+    await loadClients();
+    options();
+    await loadPlanets();
+    pollLoop();
+  })();
 })();
 </script>
 </body>

@@ -129,7 +129,11 @@
     </button>
     <button class="tool" data-tool="piscan" data-sec="pi">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 2.6 3 14.4 0 17M12 3.5c-3 2.6-3 14.4 0 17"/></svg>
-      <div><b>PI planet scan<em>BETA</em></b><span>Turn a planet in EVE; the app maps the whole planet's resources for the corp. Finds which way the planet faces from the stars behind it</span></div>
+      <div><b>PI planet scan<em>BETA</em></b><span>Spin a planet in EVE; the app maps its resources for the corp, locked on by the stars behind it</span></div>
+    </button>
+    <button class="tool" data-tool="piscanold" data-sec="pi">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c3 2.6 3 14.4 0 17"/></svg>
+      <div><b>PI planet scan (old)</b><span>The previous scanner, kept as a backup for now</span></div>
     </button>
     <button class="tool" data-tool="newgroup" data-sec="groups">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9M7.5 12h9"/></svg>
@@ -242,6 +246,7 @@
       if (btn.dataset.tool === "tuning") { location.href = "tuning.html"; return; }
       if (btn.dataset.tool === "newgroup") { location.href = "newgroup.html"; return; }
       if (btn.dataset.tool === "piscan") { location.href = "piscan.html"; return; }
+      if (btn.dataset.tool === "piscanold") { location.href = "piscan-old.html"; return; }
       if (btn.dataset.tool === "pioverview") { invoke("open_site", { site: "pi", remember: document.getElementById("skip").checked }).catch((err) => alert(err)); return; }
       if (btn.dataset.tool === "launcheraccounts") {
         soon.textContent = "Reading the EVE launcher's logs…";

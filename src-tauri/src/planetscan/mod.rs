@@ -343,12 +343,13 @@ impl Session {
 
         // EVE's windows (every sixth picture) and which row of EVE's resource list is lit.
         if self.frames % 6 == 0 {
+            let path = self.ui_path();
             if let Some(ui) = self.ui.as_mut() {
                 if ui.learn(&pic, disc.as_ref()) {
                     self.ui_version += 1;
                     if ui.ready() && self.ui_saved.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) {
                         self.ui_saved = Some(Instant::now());
-                        if let Some(path) = self.ui_path() {
+                        if let Some(path) = path {
                             jobs.push(Job::WriteFile { path, bytes: ui.to_bytes() });
                         }
                     }
@@ -396,7 +397,6 @@ impl Session {
 
         // ---- the facing ----
         let tries = self.skies_to_try();
-        let mut placed_now = false;
         if let Some(pose) = self.pose.as_mut() {
             pose.placed = false;
             let predicted = match pose.before {
@@ -421,11 +421,10 @@ impl Session {
                     pose.stars = fo.stars;
                     pose.level = fo.level;
                     pose.sky_of = Some(*id);
-                    placed_now = true;
                     break;
                 }
             }
-            if placed_now {
+            if pose.placed {
                 self.lost_since = None;
             } else if self.lost_since.is_none() {
                 self.lost_since = Some(Instant::now());
@@ -456,7 +455,6 @@ impl Session {
                 let mirrored = self.skies.get(&id).map(|s| s.mirrored).unwrap_or(true);
                 let was_none = self.pose.is_none();
                 self.pose = Some(Pose { yaw: found.yaw, pitch: found.pitch, mirrored, sky_of: Some(id), placed: true, coarse: found.coarse, stars: found.stars, level: found.level, before: None });
-                placed_now = true;
                 self.lost_since = None;
                 if let Some(pid) = self.planet_id() {
                     if self.is_gas() {
@@ -1005,6 +1003,15 @@ async fn load_map(app: &AppHandle, dir: Option<PathBuf>, planet: u64, kind: &str
 pub async fn planetscan_planet(app: AppHandle, engine: tauri::State<'_, Engine>, planet: PlanetInfo, system: Vec<PlanetInfo>) -> Result<(), String> {
     let inner = engine.0.clone();
     let mut jobs = Vec::new();
+    {
+        // The same planet again (the page reloading SeAT's list): just the new list.
+        let mut s = inner.state.lock().unwrap();
+        if s.planet_id() == Some(planet.id) && (s.skies.contains_key(&planet.id) || s.borrowed.is_some_and(|b| s.skies.contains_key(&b))) {
+            s.system = system;
+            s.planet = Some(planet);
+            return Ok(());
+        }
+    }
     let dir = {
         let mut s = inner.state.lock().unwrap();
         // The planet we leave: its sky to the PC and the corp if it changed.
