@@ -89,6 +89,7 @@
   details.section > summary { display: flex; }
   details.section > summary h2 { display: inline; }
   .scope { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13px; }
+  #simWrap.on { color: #f0c040; }
   .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; }
   .pill { border: 1px solid var(--line); background: #121216; color: var(--muted); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; cursor: pointer; }
   .pill.on { background: #1e4f86; border-color: #3d82cf; color: #eaf3ff; }
@@ -126,6 +127,7 @@
     <button class="mode" data-mode="vacation"><b>🏖 Vacation</b><span>Away for a while: save what's worth it</span></button>
     <button class="mode" data-mode="war"><b>⚔ War</b><span>Fight on mains, pack the rest</span></button>
     <button class="mode" data-mode="eviction"><b>☠ Being evicted</b><span>Everything into coffins</span></button>
+    <label class="tick" id="simWrap" title="Try a mode to see the plan for it; nothing is saved and nobody else sees it"><input type="checkbox" id="simTick"> Just simulate (don't save)</label>
     <label class="tick" id="corpTickWrap" hidden title="Directors: War / Being evicted for every member (they get the stricter of theirs and the corp's)"><input type="checkbox" id="corpTick"> Entire corp / alliance</label>
   </div>
   <p class="note" id="modeMsg"></p>
@@ -287,7 +289,13 @@
     $("scope").hidden = false; $("scope").innerHTML = h;
     $("sysPick").onchange = (e) => { view.system = e.target.value === "J145735" ? null : e.target.value; store.set("system", view.system); load(false); };
     $("scope").querySelectorAll("[data-div]").forEach(b => b.onclick = () => { const set = divs(), d = +b.dataset.div; set.has(d) ? set.delete(d) : set.add(d); store.set(divKey(), [...set]); render(); });
-    if ($("asPick")) $("asPick").onchange = (e) => { view.as = e.target.value ? +e.target.value : null; load(false); };
+    if ($("asPick")) $("asPick").onchange = (e) => {
+      view.as = e.target.value ? +e.target.value : null;
+      // A new person starts from their real mode; back to yourself ends the simulation.
+      sim = undefined; if (!view.as) { $("simTick").checked = false; $("simTick").disabled = false; }
+      $("modeMsg").textContent = "";
+      load(false);
+    };
   }
   // Who *can* do what: capitals, coffin ships and HD ships you have here, and who flies them.
   const HD_TYPES = ["Vargur", "Bhaalgorn", "Nestor", "Leshak", "Vindicator", "Paladin", "Kronos", "Golem"];
@@ -921,12 +929,17 @@
   // The stricter of your own mode and the corp's applies: Being evicted > War > Vacation.
   const RANK = { vacation: 1, war: 2, eviction: 3 };
   const stricter = (a, b) => (RANK[a] || 0) >= (RANK[b] || 0) ? a || null : b || null;
+  // A simulated mode (undefined = the real one): what the plan looks like in it, saved nowhere.
+  let sim = undefined;
   function corpBanner() {
     const c = data.corp_mode, mine = data.my_mode ? data.my_mode.mode : null;
     $("corpBanner").hidden = !c;
     if (c) $("corpBanner").innerHTML = `<b>${c.mode === "war" ? "⚔ WAR" : "☠ BEING EVICTED"}</b> is on for the whole corp since ${new Date(c.since).toLocaleString()}.${mine && mine !== c.mode ? ` Yours: ${esc(mine)}; the stricter one applies.` : ""}`;
-    mode = stricter(c ? c.mode : null, mine);
-    $("corpTickWrap").hidden = !data.leader || !!data.viewing_as;
+    mode = sim !== undefined ? sim : stricter(c ? c.mode : null, mine);
+    $("corpTickWrap").hidden = !data.leader || !!data.viewing_as || $("simTick").checked;
+    // Viewing as someone is always a simulation: their settings and the corp's stay as they are.
+    if (data.viewing_as) { $("simTick").checked = true; $("simTick").disabled = true; } else $("simTick").disabled = false;
+    $("simWrap").classList.toggle("on", sim !== undefined);
   }
   // ---------- what's missing to pack everything ----------
   function needs() {
@@ -1004,9 +1017,18 @@
   $("load").addEventListener("click", () => load(false));
   $("showAll").addEventListener("change", () => data && hulls());
   $("home").addEventListener("click", () => { location.href = "index.html"; });
+  $("simTick").addEventListener("change", () => {
+    if (!$("simTick").checked) { sim = undefined; $("modeMsg").textContent = ""; }
+    if (data) render();
+  });
   document.querySelectorAll(".mode[data-mode]").forEach(b => b.addEventListener("click", async () => {
     if (!data) return;
-    if (data.viewing_as) { $("modeMsg").textContent = `Viewing as ${data.viewing_as}: read only.`; return; }
+    if (data.viewing_as || $("simTick").checked) {
+      sim = mode === b.dataset.mode ? null : b.dataset.mode;
+      render();
+      $("modeMsg").textContent = `Simulating ${sim ? b.querySelector("b").textContent.trim() : "no mode"}${data.viewing_as ? " for " + data.viewing_as : ""}: nothing is saved. ${data.viewing_as ? "" : "Untick “Just simulate” to go back to your real mode."}`;
+      return;
+    }
     const msg = $("modeMsg"), corp = $("corpTick").checked && data.leader, name = b.querySelector("b").textContent.trim();
     const current = corp ? (data.corp_mode ? data.corp_mode.mode : null) : (data.my_mode ? data.my_mode.mode : null);
     const want = current === b.dataset.mode ? null : b.dataset.mode;
