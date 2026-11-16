@@ -77,6 +77,7 @@
   .pin { padding: 2px 7px; font-size: 12px; cursor: pointer; border-top: 1px solid #202026; }
   .pin:first-child { border-top: 0; }
   .pin.sel { background: #2a1a0a; color: var(--warn); }
+  .pin.many { color: var(--muted); }
   .pin .got { float: right; color: var(--ok); }
   /* right side */
   #right { display: grid; grid-template-columns: 1fr 380px; grid-template-rows: minmax(0, 1fr) auto; gap: 8px; padding: 8px; min-height: 0; min-width: 0; }
@@ -147,7 +148,8 @@
       <div class="kv" id="skyFacts"></div>
       <div class="row"><button class="btn" id="findSky" title="Drop the lock and find the facing from the sky alone">Find by the sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button><label class="tog" style="margin: 0"><input type="checkbox" id="showSky"> Show the sky map</label></div>
       <details id="pointOut"><summary>Point out buildings (first lock in a system)</summary>
-        <div class="small muted">Click one of your buildings in EVE so its network shows. Pick a building below, click it on the picture; three spread out lock on, then turn the planet slowly to record its sky.</div>
+        <div class="small muted">Only needed once per system (the corp shares the sky). In EVE, click your command center so your colony shows. Easy-to-spot buildings are listed first.</div>
+        <div class="small warn" id="pinSaid" style="margin-top: 3px"></div>
         <div class="pins" id="pins"></div>
         <div class="row"><button class="btn" id="lockPins" disabled>Lock on</button><button class="btn" id="clearPins">Clear</button></div>
       </details>
@@ -208,7 +210,7 @@
   };
   const FRESH_DAYS = 7;
   let planets = [], planet = null, me = null, status = null, seq = 0, alive = true;
-  let picture = null, clickMode = null, listClicks = [], pinPick = null, anchors = [];
+  let picture = null, shownSeq = 0, frozen = false, clickMode = null, listClicks = [], pinPick = null, anchors = [];
   let mapVersion = -1, mapAt = 0, lastEvent = 0, lastPicked = null, skyDrawnAt = 0;
   const settings = (() => { try { return JSON.parse(localStorage.getItem("planetscan") || "{}"); } catch { return {}; } })();
   const keep = () => { try { localStorage.setItem("planetscan", JSON.stringify(settings)); } catch {} };
@@ -323,7 +325,7 @@
     const changed = !planet || planet.planet_id !== id;
     planet = p; settings.planet = id; keep();
     renderPlanets(); renderResources(); renderPins();
-    if (changed) { anchors = []; mapVersion = -1; }
+    if (changed) { anchors = []; pinPick = null; letGo(); mapVersion = -1; }
     const info = (q) => {
       const sky = mapInfo(q, "sky"), bare = mapInfo(q, "bare");
       return { id: q.planet_id, name: q.name, type: q.type || "", sky_at: sky ? sky.at : null, bare_at: bare ? bare.at : null, sky_coverage: sky ? sky.coverage : null };
@@ -373,7 +375,19 @@
         }
       }
     }
-    // Pointing out buildings: the clicks so far.
+    // Pointing out buildings: where all of them land with the clicks so far (blue), and the clicks.
+    if (s.disc && anchors.length >= 2 && planet && planet.pins) {
+      const disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D }, lock = lockFromAnchors(disc);
+      if (lock) {
+        sctx.strokeStyle = "rgba(127,180,255,.95)"; sctx.lineWidth = 1.5 * dpr;
+        for (const pin of planet.pins) {
+          const at = E.toPicture(E.apply(lock.Q, E.planetVector(pin.lat, pin.lon, lock.mirrored)), disc);
+          if (!at.front) continue;
+          const [x, y] = P(at.x, at.y);
+          sctx.beginPath(); sctx.arc(x, y, 7 * dpr, 0, 2 * Math.PI); sctx.stroke();
+        }
+      }
+    }
     sctx.fillStyle = "#f0c040";
     for (const a of anchors) { const [x, y] = P(a.px, a.py); sctx.fillRect(x - 3 * dpr, y - 3 * dpr, 6 * dpr, 6 * dpr); }
     // EVE's resource list rows (while pointing it out, or when the app can't see which is lit).
@@ -409,6 +423,7 @@
     } else if (clickMode === "pin" && pinPick && s.disc) {
       anchors = anchors.filter((a) => a.id !== pinPick.id);
       anchors.push({ id: pinPick.id, px: p.x, py: p.y, lat: pinPick.lat, lon: pinPick.lon });
+      pinPick = null; setClick(null);
       renderPins();
     }
   });
@@ -425,32 +440,108 @@
   $("pointList").addEventListener("click", () => { listClicks = []; setClick(clickMode === "list" ? null : "list", "Click 'No filter' in EVE's resource list (on the picture)"); });
 
   // ---------- 3: pointing out buildings (no sky in this system yet) ----------
+  // Buildings that are one of a kind in a colony are easy to find on the picture: those first.
+  const pinRank = (name) => /command center/i.test(name) ? 0 : /launch ?pad/i.test(name) ? 1 : /storage/i.test(name) ? 2 : /extractor control/i.test(name) ? 3 : 4;
   function renderPins() {
     const box = $("pins"); box.innerHTML = "";
-    const pins = (planet && planet.pins || []).filter((p) => p.owner === me);
-    if (!pins.length) { box.innerHTML = '<div class="small muted" style="padding: 4px 7px">No buildings of this character here.</div>'; }
-    const count = {};
+    const pins = (planet && planet.pins || []).filter((p) => p.owner === me).slice().sort((a, b) => pinRank(a.name) - pinRank(b.name) || a.name.localeCompare(b.name));
+    if (!pins.length) { box.innerHTML = `<div class="small muted" style="padding: 4px 7px">${esc(me || "This character")} has no buildings on ${esc(planet ? planet.name : "this planet")}. Pick a character with a colony here (1), or a planet where you have one.</div>`; }
+    const count = {}, total = {};
+    for (const p of pins) total[p.name] = (total[p.name] || 0) + 1;
     for (const p of pins) {
       count[p.name] = (count[p.name] || 0) + 1;
+      const label = total[p.name] > 1 ? `${p.name} #${count[p.name]}` : p.name;
       const div = document.createElement("div");
-      div.className = "pin" + (pinPick && pinPick.id === p.id ? " sel" : "");
-      div.innerHTML = `${esc(p.name)} #${count[p.name]}` + (anchors.some((a) => a.id === p.id) ? '<span class="got">✓</span>' : "");
-      div.addEventListener("click", () => { pinPick = p; setClick("pin", `Click ${p.name} #${count[p.name]} on the picture`); renderPins(); });
+      div.className = "pin" + (pinPick && pinPick.id === p.id ? " sel" : "") + (total[p.name] > 1 ? " many" : "");
+      div.innerHTML = esc(label) + (anchors.some((a) => a.id === p.id) ? '<span class="got">✓</span>' : "");
+      div.title = total[p.name] > 1 ? "You have several of these: only use it if you can tell which one it is" : "One of a kind in your colony: easy to find";
+      div.addEventListener("click", () => pickPin(p, label));
       box.append(div);
     }
-    $("lockPins").disabled = anchors.length < 3;
+    $("lockPins").disabled = anchors.length < 2;
+    renderPinSaid();
   }
-  $("clearPins").addEventListener("click", () => { anchors = []; pinPick = null; setClick(null); renderPins(); });
+  async function pickPin(p, label) {
+    const s = status;
+    if (!s || !s.disc) return log("Set the planet's edge first (2).", "bad");
+    if (!s.ui || !s.ui.ready) return log("Turn the planet a little first: the app is still learning where EVE's windows are.", "warn");
+    if (!frozen) {
+      const ok = await invoke("planetscan_hold", { seq: shownSeq }).catch(() => false);
+      if (!ok) return log("No picture to hold yet.", "bad");
+      frozen = true;
+    }
+    pinPick = p; setClick("pin", `Click ${label} on the picture`); renderPins();
+  }
+  function letGo() {
+    if (frozen) { frozen = false; invoke("planetscan_hold", { seq: null }).catch(() => {}); }
+  }
+  /** Yaw and pitch (EVE's camera never rolls) that put the pointed-out buildings closest to their
+   * clicks: a pattern search from a first guess, in picture pixels. */
+  function fitPose(start, mirrored, disc) {
+    const miss = (yaw, pitch) => {
+      const Q = E.poseQ(yaw, pitch);
+      let e = 0;
+      for (const a of anchors) {
+        const at = E.toPicture(E.apply(Q, E.planetVector(a.lat, a.lon, mirrored)), disc);
+        if (!at.front) return Infinity;
+        e += (at.x - a.px) ** 2 + (at.y - a.py) ** 2;
+      }
+      return e;
+    };
+    let yaw = start.yaw, pitch = start.pitch, best = miss(yaw, pitch), step = 4 * DEG;
+    for (let i = 0; i < 4000 && step > 0.002 * DEG; i++) {
+      let moved = false;
+      for (const [dy, dp] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+        const e = miss(yaw + dy * step, pitch + dp * step);
+        if (e < best) { best = e; yaw += dy * step; pitch += dp * step; moved = true; break; }
+      }
+      if (!moved) step /= 2;
+    }
+    return { yaw, pitch };
+  }
+  /** The facing from the pointed-out buildings, as EVE's camera can have it (no roll), and how far
+   * each building then lands from its click (px). Tries both ways EVE could count longitude. */
+  function lockFromAnchors(disc) {
+    const options = [];
+    for (const mirrored of [true, false]) {
+      const solved = E.solveAnchors(anchors, disc, mirrored);
+      if (!solved) continue;
+      const pose = fitPose(E.poseOf(solved.Q), mirrored, disc), Q = E.poseQ(pose.yaw, pose.pitch);
+      let worst = 0;
+      for (const a of anchors) {
+        const at = E.toPicture(E.apply(Q, E.planetVector(a.lat, a.lon, mirrored)), disc);
+        worst = Math.max(worst, at.front ? Math.hypot(at.x - a.px, at.y - a.py) : Infinity);
+      }
+      options.push({ pose, Q, mirrored, worst });
+    }
+    // Two buildings can't tell the ways apart: EVE's (mirrored, as every lock so far) unless the other clearly fits better.
+    options.sort((a, b) => (a.mirrored ? a.worst : a.worst * 1.5) - (b.mirrored ? b.worst : b.worst * 1.5));
+    return options[0] || null;
+  }
+  function renderPinSaid() {
+    const s = status, el = $("pinSaid");
+    if (!el) return;
+    if (!s || !s.disc) { el.textContent = "Set the planet's edge first (2)."; return; }
+    if (!s.ui || !s.ui.ready) { el.textContent = "Turn the planet a little first: the app is learning where EVE's windows are."; return; }
+    if (!anchors.length) { el.textContent = frozen ? "Picture held. Click the building you picked." : "Hold the planet still, pick a building below, then click it on the picture (the picture holds still while you do)."; return; }
+    const disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D };
+    if (anchors.length < 2) { el.textContent = "Now a second building, as far from the first as you can."; return; }
+    const lock = lockFromAnchors(disc);
+    el.textContent = lock ? `They fit within ${Math.round(lock.worst)} px${lock.worst > 10 ? ": check them (the blue rings should sit on your buildings)" : ". Press Lock on (a third building makes it surer)."}` : "Those don't fit: Clear and try again.";
+  }
+  $("clearPins").addEventListener("click", () => { anchors = []; pinPick = null; setClick(null); letGo(); renderPins(); });
   $("lockPins").addEventListener("click", () => {
     const s = status;
-    if (!s || !s.disc) return log("Set the edge first.", "bad");
+    if (!s || !s.disc) return log("Set the planet's edge first (2).", "bad");
     const disc = { cx: s.disc.cx, cy: s.disc.cy, r: s.disc.r, D: s.disc.D };
-    const solved = E.solveAnchorsEitherWay(anchors, disc);
-    if (!solved) return log("Those don't solve: point out three spread-out buildings.", "bad");
-    const pose = E.poseOf(solved.Q);
-    invoke("planetscan_pose", { yaw: pose.yaw / DEG, pitch: pose.pitch / DEG, mirrored: solved.mirrored });
-    log(`Locked on from ${anchors.length} buildings (miss ${(solved.error / DEG).toFixed(1)}°). Turn slowly: this planet's sky records.`, "ok");
-    anchors = []; setClick(null); renderPins();
+    const lock = anchors.length >= 2 ? lockFromAnchors(disc) : null;
+    if (!lock) return log("Point out two buildings first.", "bad");
+    if (lock.worst > 25) return log(`Those don't fit together (${Math.round(lock.worst)} px off): check which building is which, or Clear and start again.`, "bad");
+    invoke("planetscan_pose", { yaw: lock.pose.yaw / DEG, pitch: lock.pose.pitch / DEG, mirrored: lock.mirrored });
+    log(`Locked on from ${anchors.length} buildings (within ${Math.round(lock.worst)} px).`, "ok");
+    frozen = false; // the app records the sky from the held picture, then lets it go
+    anchors = []; pinPick = null; setClick(null); renderPins();
+    $("pointOut").open = false;
   });
 
   // ---------- 3/4/5: commands ----------
@@ -606,7 +697,9 @@
     setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : "not set", s.edge ? "ok" : "warn", !!s.edge);
     const pose = s.pose;
     const own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed;
-    setState(3, pose ? (pose.placed ? "locked" : "lost") : "looking", pose && pose.placed ? "ok" : "warn", !!(pose && pose.placed));
+    const anySky = own || (bor && bor.loaded);
+    setState(3, pose ? (pose.placed ? (own && own.coverage < 0.95 && pose.sky_of === (planet && planet.planet_id) ? `locked · sky ${pct(own.coverage)}` : "locked") : "lost") : anySky ? "looking" : "first lock: buildings", pose && pose.placed ? "ok" : "warn", !!(pose && pose.placed));
+    renderPinSaid();
     const facts = [];
     facts.push(["Locked by", pose ? (pose.sky_name ? `${pose.sky_of === (planet && planet.planet_id) ? "its own sky" : pose.sky_name + "'s sky (borrowed)"}` : "buildings") : "–"]);
     if (pose) facts.push(["Match", `nebula ${pct(pose.coarse)} · stars ${pct(pose.stars)} (${pose.level})`]);
@@ -641,8 +734,8 @@
     $("missing").textContent = where ? `Not seen yet: ${where}.` + (how ? ` ${how[0].toUpperCase()}${how.slice(1)}.` : "") : "";
     // Badge on the picture.
     const badge = $("badge");
-    badge.textContent = pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.edge ? "Looking on the sky…" : "Edge not set";
-    badge.className = "badge " + (pose && pose.placed ? "ok" : "warn");
+    badge.textContent = frozen ? "Picture held: point out buildings" : pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.edge ? (anySky ? "Looking on the sky…" : "No sky yet: point out buildings") : "Edge not set";
+    badge.className = "badge " + (pose && pose.placed && !frozen ? "ok" : "warn");
   }
   let pointOutFor = null;
   function tips(s) {
@@ -653,15 +746,24 @@
     if (s.client && cap.fps && cap.fps < 40 && s.run && !s.run.done) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second: for 60, keep EVE in front and lift any frame-rate limit in EVE's settings.`);
     if (!planet) return ["Pick the planet you have open in EVE (1).", also];
     if (!s.edge) return ["Zoom all the way out in EVE, then press Find edge (2).", also];
-    if (s.ui && !s.ui.ready) also.push("Turn the planet a little: the app learns where EVE's windows are.");
+    const learning = s.ui && !s.ui.ready;
     const pose = s.pose, run = s.run;
     if (!pose) {
       const any = (s.sky && (s.sky.own || (s.sky.borrowed && s.sky.borrowed.loaded)));
-      if (!any) { if (pointOutFor !== planet.planet_id) { pointOutFor = planet.planet_id; $("pointOut").open = true; } return ["No sky recorded in this system yet: point out three of your buildings (3), then turn the planet slowly all the way round.", also]; }
+      if (!any) {
+        if (pointOutFor !== planet.planet_id) { pointOutFor = planet.planet_id; $("pointOut").open = true; }
+        if (learning) return ["First lock in this system. Turn the planet a little in EVE: the app learns where EVE's windows are.", also];
+        if (frozen) return [anchors.length < 2 ? "Picture held. Pick a building in the list (3), then click it on the picture." : "Press Lock on (3). A third building, far from the others, makes it surer.", also];
+        return ["First lock in this system: hold the planet still, then point out two of your buildings (3).", also];
+      }
+      if (learning) also.push("Turn the planet a little: the app learns where EVE's windows are.");
       if (s.find && !s.find.sure) also.push(`Best guess not sure yet (nebula ${pct(s.find.coarse)}, stars ${pct(s.find.stars)}).`);
       return ["Looking for the planet on the sky… turn the planet a little.", also];
     }
     if (!pose.placed) return ["Lost the sky: turn a bit slower, or zoom back out if you zoomed in.", also];
+    if (learning) also.push("Turn the planet a little: the app learns where EVE's windows are.");
+    const own = s.sky && s.sky.own, ownSky = pose.sky_of === planet.planet_id;
+    const recordingSky = ownSky && !(s.sky && s.sky.borrowed) && (!own || own.coverage < 0.95);
     if (s.fast_turn) also.push("Turning fast: fine, but slow down if it loses the sky.");
     const picked = s.list ? s.list.picked : null;
     if (picked == null) also.push("The app can't see which resource EVE shows: point out EVE's list (4) so a wrong one can't be saved.");
@@ -669,11 +771,16 @@
       if (run.paused === "EVE shows another resource") return [`EVE shows another resource: click ${run.resource || "No filter"} in EVE, or Stop.`, also];
       if (run.resource && !s.bare) also.push("This planet's own colours aren't mapped yet: readings are rougher. Do a No filter pass once.");
       if (run.resource) also.push("EVE's colour band: both ends dragged right out.");
+      if (recordingSky) also.push(`This planet's sky: ${pct(own ? own.coverage : 0)} recorded (it records as you turn, over the poles too).`);
       return [`Spin the planet: ${pct(run.coverage)} of ${run.resource || "its own colours"}${run.missing ? "; the rest is " + run.missing.split(":")[0] : ""}.`, also];
     }
     const next = nextToScan(planet);
     if (!next) return [`${planet.name} is up to date for the corp. Open the next planet in EVE.`, also, true];
-    if (next.row === 0) return [`Once per planet: check EVE shows ${planet.name}, set EVE to No filter, then Scan: the app maps this planet's own colours.`, also];
+    if (next.row === 0) {
+      if (recordingSky) return [`Locked. Check EVE shows ${planet.name}, set EVE to No filter and press Scan, then turn the planet slowly all the way round, over both poles: its colours and its sky record together (sky ${pct(own ? own.coverage : 0)}).`, also];
+      return [`Once per planet: check EVE shows ${planet.name}, set EVE to No filter, then Scan: the app maps this planet's own colours.`, also];
+    }
+    if (recordingSky) also.push(`This planet's sky is ${pct(own ? own.coverage : 0)} recorded: keep turning all the way round while you scan.`);
     return [`Click ${next.resource} in EVE's Scan panel, then Scan${$("autoNext").checked ? " (or it starts when EVE switches)" : ""}.`, also];
   }
 
@@ -687,9 +794,12 @@
         const n = new DataView(buf).getUint32(0, true);
         const msg = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n)));
         if (buf.byteLength > 4 + n) {
-          const bmp = await createImageBitmap(new Blob([new Uint8Array(buf, 4 + n)], { type: "image/jpeg" }));
-          if (picture && picture.close) picture.close();
-          picture = bmp; seq = msg.seq;
+          if (!frozen) {
+            const bmp = await createImageBitmap(new Blob([new Uint8Array(buf, 4 + n)], { type: "image/jpeg" }));
+            if (picture && picture.close) picture.close();
+            picture = bmp; shownSeq = msg.seq;
+          }
+          seq = msg.seq;
         }
         if (msg.s && msg.s.size) onStatus(msg.s);
         drawShot();

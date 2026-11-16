@@ -408,6 +408,7 @@ pub fn run() {
             planetscan::planetscan_edge,
             planetscan::planetscan_options,
             planetscan::planetscan_pose,
+            planetscan::planetscan_hold,
             planetscan::planetscan_find,
             planetscan::planetscan_scan,
             planetscan::planetscan_save,

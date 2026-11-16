@@ -162,6 +162,10 @@ struct Session {
     fast_turn: bool,
     identify_at: Option<Instant>,
     preview_width: usize,
+    /// The picture the pilot is pointing out buildings on (held still on the page).
+    held: Option<Arc<Frame>>,
+    /// Record the sky from the held picture at the next step (set by Lock on from buildings).
+    paint_held: bool,
 }
 
 impl Default for Session {
@@ -209,6 +213,8 @@ impl Default for Session {
             fast_turn: false,
             identify_at: None,
             preview_width: 1280,
+            held: None,
+            paint_held: false,
         }
     }
 }
@@ -219,6 +225,8 @@ pub struct Inner {
     frame_cv: Condvar,
     preview: Mutex<(u64, Arc<Vec<u8>>)>,
     preview_cv: Condvar,
+    /// The last few pictures sent to the page, by preview number (to hold the one the pilot sees).
+    shown: Mutex<std::collections::VecDeque<(u64, Arc<Frame>)>>,
     status: Mutex<Arc<String>>,
     gen: AtomicU64,
     cap_fps: AtomicU64,
@@ -237,6 +245,7 @@ impl Default for Engine {
             frame_cv: Condvar::new(),
             preview: Mutex::new((0, Arc::new(Vec::new()))),
             preview_cv: Condvar::new(),
+            shown: Mutex::new(std::collections::VecDeque::new()),
             status: Mutex::new(Arc::new("{}".into())),
             gen: AtomicU64::new(0),
             cap_fps: AtomicU64::new(0),
@@ -392,6 +401,36 @@ impl Session {
             self.mask = Some((key, SkyMask::new(f.w, f.h, Some(&disc), lens, ui, ring_now)));
         }
         let mask = &self.mask.as_ref().unwrap().1;
+
+        // ---- Lock on from buildings: the sky is recorded from the very picture they were pointed out on ----
+        let mut held_painted = false;
+        if self.paint_held && self.ui.as_ref().is_some_and(|u| u.ready()) {
+            if let (Some(hf), Some(pid), Some(pose)) = (self.held.clone(), self.planet.as_ref().map(|p| p.id), self.pose.as_ref()) {
+                if (hf.w, hf.h) == (f.w, f.h) {
+                    let hp = Pic { w: hf.w, h: hf.h, bgra: &hf.bgra };
+                    let hv = sky::view(buf, &hp, mask, lens);
+                    let q = pose_q(pose.yaw, pose.pitch);
+                    let sky = self.skies.entry(pid).or_insert_with(|| Sky::new(pose.mirrored));
+                    if sky.mirrored == pose.mirrored {
+                        sky.paint(&hv, &q, &[sky::COARSE, sky::MEDIUM, sky::FINE]);
+                        held_painted = true;
+                    }
+                }
+            }
+            self.paint_held = false;
+            self.held = None;
+        }
+        if held_painted {
+            let pid = self.planet.as_ref().map(|p| p.id).unwrap_or(0);
+            if let Some(p) = self.pose.as_mut() {
+                p.sky_of = Some(pid);
+                p.placed = true;
+                self.last_paint = Some((p.yaw, p.pitch, Instant::now()));
+            }
+            let d = self.sky_dirty.entry(pid).or_insert((false, false, 0.0, Instant::now()));
+            d.0 = true;
+            d.1 = true;
+        }
         let view = sky::view(buf, &pic, mask, lens);
         let find_rings = |r: Option<Rings>| r.map(|rg| (rg, disc.d));
 
@@ -469,7 +508,7 @@ impl Session {
         }
 
         // ---- recording this planet's own sky ----
-        let fresh_buildings = self.pose.as_ref().is_some_and(|p| p.sky_of.is_none());
+        let fresh_buildings = !self.paint_held && self.pose.as_ref().is_some_and(|p| p.sky_of.is_none());
         if let (Some(pid), Some(pose)) = (self.planet_id(), self.pose.as_ref()) {
             if (pose.placed || fresh_buildings) && self.ui.as_ref().is_some_and(|u| u.ready()) {
                 if self.rim_ok.1.is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
@@ -553,6 +592,10 @@ impl Session {
                     self.sky_dirty.insert(pid, (false, d.1 && !send, if send { cov } else { d.2 }, Instant::now()));
                 }
             }
+        }
+
+        if held_painted {
+            self.event(json!({ "kind": "locked", "text": "Sky recorded from the picture you pointed out: now turn the planet slowly all the way round, over both poles." }));
         }
 
         // Which planet is open (from its look), when asked to switch by itself.
@@ -663,6 +706,7 @@ impl Session {
             "auto_planet": self.auto_planet,
             "events": self.events,
             "preview_width": engine.preview_width.load(Ordering::Relaxed),
+            "held": self.held.is_some(),
         })
     }
 }
@@ -807,6 +851,13 @@ fn preview_loop(inner: Arc<Inner>, gen: u64) {
             let mut out = Vec::with_capacity(256 * 1024);
             if jpeg_encoder::Encoder::new(&mut out, 82).encode(&px, w as u16, h as u16, jpeg_encoder::ColorType::Bgra).is_ok() {
                 seq += 1;
+                {
+                    let mut shown = inner.shown.lock().unwrap();
+                    shown.push_back((seq, f.clone()));
+                    while shown.len() > 6 {
+                        shown.pop_front();
+                    }
+                }
                 *inner.preview.lock().unwrap() = (seq, Arc::new(out));
                 inner.preview_cv.notify_all();
             }
@@ -1148,7 +1199,25 @@ pub fn planetscan_pose(engine: tauri::State<'_, Engine>, yaw: f64, pitch: f64, m
     s.pose = Some(Pose { yaw: yaw * DEG, pitch: pitch * DEG, mirrored, sky_of: None, placed: true, coarse: 0.0, stars: 0.0, level: 0, before: None });
     s.lost_since = None;
     s.last_paint = None;
-    s.event(json!({ "kind": "locked", "text": "Locked on from the buildings: turn the planet slowly, this planet's sky records as you go." }));
+    s.paint_held = s.held.is_some();
+    if !s.paint_held {
+        s.event(json!({ "kind": "locked", "text": "Locked on from the buildings: turn the planet slowly, this planet's sky records as you go." }));
+    }
+}
+
+/// Hold the picture the page shows (preview number `seq`) while buildings are pointed out on it;
+/// None lets go. True when a picture is held.
+#[tauri::command]
+pub fn planetscan_hold(engine: tauri::State<'_, Engine>, seq: Option<u64>) -> bool {
+    let frame = seq.and_then(|n| {
+        let shown = engine.0.shown.lock().unwrap();
+        let found: Option<Arc<Frame>> = shown.iter().rev().find(|(k, _)| *k == n).or(shown.back()).map(|(_, f)| f.clone());
+        found
+    });
+    let mut s = engine.0.state.lock().unwrap();
+    s.held = frame;
+    s.paint_held = false;
+    s.held.is_some()
 }
 
 /// Drop the facing and look on the sky again.
