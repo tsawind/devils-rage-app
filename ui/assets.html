@@ -491,7 +491,9 @@
 
   // ---------- plan: coffins, HD capitals, packing ----------
   // Bay sizes from the pilot's own skill (+5% a level; 4 when nobody's assigned yet).
-  const lvl = (p, skill) => (p && p.freighter && p.freighter[skill]) || 4;
+  // The pilot's skill as it works now (an Alpha's freighter skills count as 0); nobody assigned
+  // yet: the coffin plans' levels (Caldari Freighter 2, ORE Freighter 3).
+  const lvl = (p, skill) => p && p.freighter && skill in p.freighter ? p.freighter[skill] : ({ "Caldari Freighter": 2, "ORE Freighter": 3 })[skill] ?? 0;
   const charonCap = (p) => 465000 * (1 + 0.05 * lvl(p, "Caldari Freighter")) * Math.pow(1.275, 3);
   const bowheadCap = (p) => 1600000 * (1 + 0.05 * lvl(p, "ORE Freighter"));
   const isCarrier = (h) => ["Carrier", "Supercarrier"].includes(h.group);
@@ -737,7 +739,9 @@
   }
   function pilotCell(r) {
     const cls = r.status === "needs a pilot" ? "short" : r.status === "needs Omega" ? "note" : "enough";
-    return `${r.pilot ? jump(r.pilot) + " " + tag(r.pilot) + ` <span class="note">${acct(r.pilot)}</span>` : "—"} <span class="${cls}">${r.status}</span>`;
+    const sk = r.h.type === "Charon" ? "Caldari Freighter" : r.h.type === "Bowhead" ? "ORE Freighter" : null;
+    const skNote = sk && r.pilot ? ` <span class="note" title="${esc(sk)} as it works now: +5% per level">${esc(sk)} ${lvl(r.pilot, sk)}${lvl(r.pilot, sk) === 0 && isAlpha(r.pilot) ? " (Alpha)" : ""}</span>` : "";
+    return `${r.pilot ? jump(r.pilot) + " " + tag(r.pilot) + ` <span class="note">${acct(r.pilot)}</span>` : "—"} <span class="${cls}">${r.status}</span>${skNote}`;
   }
   const othersLine = (r) => {
     if (!r.others || !r.others.length) return "";
