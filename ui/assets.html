@@ -277,8 +277,8 @@
     $("loaded").textContent = (data.offlineBecause ? "Saved copy (SeAT: " + data.offlineBecause + ") · " : "") + "from " + new Date(data.generated).toLocaleString();
     const card = (b, t) => `<div class="card stat"><b>${b}</b><span>${t}</span></div>`;
     $("overview").innerHTML = card(pilots().length, `Characters · ${pilots().length - alphas} Omega · ${alphas} Alpha · ${new Set(pilots().map(p => p.account && p.account.id).filter(Boolean)).size} accounts`)
-      + card(isk(sum(counted)) + " ISK", `Everything counted: ${countedName}`)
-      + card(isk(sum(counted.filter(x => x.home))) + " ISK", `Counted, in ${HOME()}${HOME() === "Daisy" ? " (J145735)" : ""}`)
+      + card(isk(sum(counted)) + " ISK", `Everywhere (${countedName}): every system, Jita included`)
+      + card(isk(sum(counted.filter(x => x.home))) + " ISK", `In ${HOME()}${HOME() === "Daisy" ? " (J145735)" : ""} (${countedName}): what this page plans for`)
       + card(isk(sum((data.items || []).filter(inDiv))) + " ISK", `Division ${[...divs()].filter(Boolean).sort((a, b) => a - b).join(", ") || "—"} hangar${[...divs()].filter(Boolean).length === 1 ? "" : "s"}`);
   }
   function scope() {
@@ -415,7 +415,7 @@
         <b>Room in ${HOME()}</b><span>${m3(nowM3)} as it sits · <b>${m3(packedM3)}</b> fully repackaged · ${m3(itemsM3)} just items (no ships)</span>
         <b>Keep rigged: 1M bay (dread)</b><span>${shown(b1)} <span class="note">· ${m3(b1.used)} · rigs ${isk(b1.saved)}</span></span>
         <b>Keep rigged: 2M bay (Bowhead / carrier)</b><span>${b2.l.length > b1.l.length ? (b1.l.length ? "the 1M ships + " : "") + shown(b2, b1.l) : b2.l.length ? "the same ships (nothing else rigged)" : "—"} <span class="note">· ${m3(b2.used)} · rigs ${isk(b2.saved)}${rigged.length > b2.l.length ? ` · ${rigged.length - b2.l.length} more rigged ships get repackaged` : ""}</span></span></div>
-      <table class="t"><tr><th>Most valuable</th><th>ISK</th><th>Where</th></tr>${best.map(x => `<tr><td>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}${x.ship && x.assembled ? ' <span class="note">assembled</span>' : ""}</td><td>${isk(withFit(x))}${withFit(x) > x.value ? ' <span class="note">with fit</span>' : ""}</td><td class="note">${x.home ? HOME() : esc(x.place)}${x.in ? " · in " + esc(x.in) : ""}</td></tr>`).join("")}</table></div>` };
+      <table class="t"><tr><th>Most valuable</th><th>ISK</th><th>Where</th></tr>${best.map(x => `<tr><td>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}${x.copy ? ' <span class="note">(copy)</span>' : ""}${x.ship && x.assembled ? ' <span class="note">assembled</span>' : ""}</td><td>${isk(withFit(x))}${withFit(x) > x.value ? ' <span class="note">with fit</span>' : ""}</td><td class="note">${x.home ? HOME() : esc(x.place)}${x.in ? " · in " + esc(x.in) : ""}</td></tr>`).join("")}</table></div>` };
   }
   function clonesOf(p, cl) {
     if (!cl.length) return '<div class="body note">No jump clones.</div>';
@@ -756,7 +756,7 @@
       : (a, b) => a.batch - b.batch || ((order.get(a.p.name) ?? 1e9) - (order.get(b.p.name) ?? 1e9)) || (b.saves - a.saves));
   }
   // ---------- the plan: one ordered checklist ----------
-  const label = (x) => `${x.name ? `<b>${esc(x.name)}</b> · ` : ""}${esc(x.type)}`;
+  const label = (x) => `${x.name ? `<b>${esc(x.name)}</b> · ` : ""}${esc(x.type)}${x.copy ? ' <span class="note">(copy)</span>' : ""}`;
   const BATCH_NAME = ["Main", "Second", "Third", "Everyone else", "Alphas: one online at a time"];
   const LAUNCHER = "https://forums.eveonline.com/t/the-new-eve-online-launcher-beta/402083";
   function makePlan() {
