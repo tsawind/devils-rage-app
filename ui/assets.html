@@ -56,6 +56,8 @@
   .shipsec.bay { border-color: #3f9a5a; } .shipsec.bay > b { color: #8fe0a6; }
   .shipsec.hangar { border-color: #3d82cf; } .shipsec.hangar > b { color: #9cc8ff; }
   .shipsec.stay { border-color: #55555f; } .shipsec.stay > b { color: var(--muted); }
+  li.ship.fits { background: rgba(63, 154, 90, .14); border-radius: 4px; }
+  .sortseg { margin-left: 6px; } .sortseg button.on { background: #44444e; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; vertical-align: middle; }
   .seg button { background: #121216; color: var(--muted); border: 0; border-right: 1px solid var(--line); padding: 0 6px; font-size: 11px; cursor: pointer; }
   .seg button:last-child { border-right: 0; }
@@ -839,15 +841,20 @@
       if (x.ships.length) {
         const hullRow = (d) => rows.find(r => r.h.item_id === d.item_id);
         const myBay = rows.find(r => r.pilot === p && r.kind === "ships");
+        const bayUsed = myBay ? myBay.load.filter(d => d.owner === p.name).reduce((a, d) => a + d.m3, 0) : 0;
         const parentOf = (d) => x.ships.find(s2 => s2.item_id === d.holder);
         const where = (d) => hullRow(d) ? "hull" : destOf(d) === "keep" ? "keep" : !keptIds.has(d.item_id) ? "cheap" : bayOf.has(d.item_id) ? (bayOf.get(d.item_id).pilot === p ? "bay" : "other") : repacked.has(d.item_id) ? "repack" : "noroom";
         const seg = (d) => hullRow(d) ? "" : `<span class="seg" data-item="${d.item_id}" data-where="${where(d)}" data-m3="${d.m3}" data-name="${esc(d.name || d.type)}">${myBay ? `<button type="button" data-dest="bay" class="${where(d) === "bay" ? "on" : ""}">Bay</button>` : ""}<button type="button" data-dest="hangar" class="${["other", "repack", "noroom"].includes(where(d)) ? "on" : ""}">Hangar</button><button type="button" data-dest="keep" class="${["keep", "cheap"].includes(where(d)) ? "on" : ""}">Keep</button>${destOf(d) ? `<button type="button" data-dest="" title="back to the plan's choice">↺</button>` : ""}</span>`;
-        const row = (d) => `<li class="ship ${where(d)}">${seg(d)} ${label(d)} <small>${isk(fitted(d))} · ${m3(d.m3)}${hullRow(d) ? (hullRow(d).pilot ? ` · coffin hull: ${esc(hullRow(d).pilot.name)} already boarded` : ' · <span class="short">coffin hull: needs a pilot</span>') : ""}${where(d) === "other" ? ` → ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}` : where(d) === "repack" ? " → repackage into your containers" : where(d) === "cheap" ? " · cheap" : where(d) === "noroom" ? ' · <span class="short">no room anywhere</span>' : ""}${parentOf(d) ? ` · <span class="amber">in ${esc(parentOf(d).name || parentOf(d).type)}'s escape bay: take it out first</span>` : ""}${d.tooBig && where(d) !== "bay" ? ' · <span class="short">doesn\'t fit your bay</span>' : ""}</small></li>`;
-        const by = (w) => [...x.ships].filter(d => w.includes(where(d))).sort((a, b) => fitted(b) - fitted(a));
+        const free = myBay ? myBay.cap - bayUsed : 0;
+        const couldFit = (d) => myBay && !hullRow(d) && where(d) !== "bay" && d.m3 <= free;
+        const row = (d) => `<li class="ship ${where(d)}${couldFit(d) ? " fits" : ""}"${couldFit(d) ? ` title="Fits in your bay (${m3(free)} left)"` : ""}>${seg(d)} ${label(d)} <small>${isk(fitted(d))} · ${m3(d.m3)}${hullRow(d) ? (hullRow(d).pilot ? ` · coffin hull: ${esc(hullRow(d).pilot.name)} already boarded` : ' · <span class="short">coffin hull: needs a pilot</span>') : ""}${where(d) === "other" ? ` → ${esc(bayOf.get(d.item_id).h.type)}${bayOf.get(d.item_id).pilot ? " (" + esc(bayOf.get(d.item_id).pilot.name) + ")" : ""}` : where(d) === "repack" ? " → repackage into your containers" : where(d) === "cheap" ? " · cheap" : where(d) === "noroom" ? ' · <span class="short">no room anywhere</span>' : ""}${parentOf(d) ? ` · <span class="amber">in ${esc(parentOf(d).name || parentOf(d).type)}'s escape bay: take it out first</span>` : ""}${d.tooBig && where(d) !== "bay" ? ' · <span class="short">doesn\'t fit your bay</span>' : ""}</small></li>`;
+        const byName = store.get("shipSort", "isk") === "name";
+        const by = (w) => [...x.ships].filter(d => w.includes(where(d))).sort(byName ? (a, b) => (a.name || a.type).localeCompare(b.name || b.type) : (a, b) => fitted(b) - fitted(a));
         const bayList = by(["bay"]), hangarList = by(["other", "repack", "noroom"]), stayList = by(["keep", "cheap", "hull"]);
         const used = bayList.reduce((a, d) => a + d.m3, 0);
-        acts.push({ k: "ships", html: `<div class="shipsbox" data-free="${myBay ? myBay.cap - used : 0}">Your ships <span class="note">(ISK with fittings · pick Bay / Hangar / Keep for any of them; the others stay put)</span><div class="baywarn"></div>
-          ${myBay ? `<div class="shipsec bay"><b>Into your ${esc(myBay.h.type)}'s bay</b> <span class="note">${m3(used)} of ${m3(myBay.cap)}</span>${bayList.length ? `<ul class="list plain">${bayList.map(row).join("")}</ul>` : '<div class="note">nothing yet</div>'}</div>` : ""}
+        acts.push({ k: "ships", html: `<div class="shipsbox" data-free="${myBay ? myBay.cap - used : 0}">Your ships <span class="note">(ISK with fittings · pick Bay / Hangar / Keep for any of them; the others stay put)</span>
+          <span class="seg sortseg"><button type="button" data-sort="isk" class="${byName ? "" : "on"}">by ISK</button><button type="button" data-sort="name" class="${byName ? "on" : ""}">by name (in-game order)</button></span><div class="baywarn"></div>
+          ${myBay ? `<div class="shipsec bay"><b>Into your ${esc(myBay.h.type)}'s bay</b> <span class="note">${m3(used)} of ${m3(myBay.cap)} · <b>${m3(Math.max(0, myBay.cap - used))} left</b>${x.ships.some(couldFit) ? " · dim green = still fits" : ""}</span>${bayList.length ? `<ul class="list plain">${bayList.map(row).join("")}</ul>` : '<div class="note">nothing yet</div>'}</div>` : ""}
           ${hangarList.length ? `<div class="shipsec hangar"><b>To the division hangar</b><ul class="list plain">${hangarList.map(row).join("")}</ul></div>` : ""}
           ${stayList.length ? `<div class="shipsec stay"><b>Stays here</b><ul class="list plain">${stayList.map(row).join("")}</ul></div>` : ""}</div>` });
       }
@@ -886,7 +893,8 @@
     document.querySelectorAll("#steps input.clonepick").forEach(b => b.addEventListener("change", () => { store.set("clonePick." + b.dataset.who, b.value || null); render(); }));
     // Bay / Hangar / Keep: everything of this character stays where it is now (nothing else
     // moves in or out on its own), then the one you clicked changes. Bay only when it fits.
-    document.querySelectorAll("#steps .seg button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll("#steps .sortseg button").forEach(b => b.addEventListener("click", () => { store.set("shipSort", b.dataset.sort); render(); }));
+    document.querySelectorAll("#steps .seg:not(.sortseg) button").forEach(b => b.addEventListener("click", () => {
       const seg = b.closest(".seg"), box = b.closest(".shipsbox"), want = b.dataset.dest || null;
       if (want === "bay" && seg.dataset.where !== "bay") {
         const free = Number(box.dataset.free || 0), need = Number(seg.dataset.m3 || 0);
