@@ -297,6 +297,17 @@
       load(false);
     };
   }
+  // What sits in customs offices: not in the structure, so it doesn't drop with it and the
+  // coffins can't load it without a trip; worth collecting if it's valuable.
+  function pocos() {
+    const l = (data.items || []).filter(x => x.home && x.poco && (x.division ? inDiv(x) : personalOn() && x.mine !== false));
+    if (!l.length) return "";
+    const total = l.reduce((a, x) => a + x.value, 0), big = [...l].sort((a, b) => b.value - a.value).filter(x => x.value >= 50e6).slice(0, 12);
+    const owners = new Map(); for (const x of l) owners.set(x.owner, (owners.get(x.owner) || 0) + x.value);
+    return `<details style="margin-top:8px"><summary class="note">In customs offices: <b>${isk(total)}</b> (${[...owners.entries()].sort((a, b) => b[1] - a[1]).map(([o, v]) => `${esc(o)} ${isk(v)}`).join(", ")}) · not in the structure, not in the plan</summary>
+      <div class="note" style="margin:4px 0">Customs office stock stays when the structure dies (unless they shoot the customs offices too). Collect what's worth it with a hauler and it joins the plan.</div>
+      ${big.length ? `<table class="t"><tr><th>Worth collecting</th><th>ISK</th><th>Where</th></tr>${big.map(x => `<tr><td>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}</td><td>${isk(x.value)}</td><td class="note">${esc(x.owner)} · ${esc(x.site || "customs office")}</td></tr>`).join("")}</table>` : ""}</details>`;
+  }
   // Who *can* do what: capitals, coffin ships and HD ships you have here, and who flies them.
   const HD_TYPES = ["Vargur", "Bhaalgorn", "Nestor", "Leshak", "Vindicator", "Paladin", "Kronos", "Golem"];
   function glance() {
@@ -318,7 +329,7 @@
   function nothing() {
     // Ships someone is sitting in (and what's in them) leave with their pilot; everything else here is lost.
     const sat = new Set(pilots().map(p => p.ship_item_id).filter(Boolean));
-    const home = (data.items || []).filter(x => x.home && (x.division ? inDiv(x) : x.mine !== false));
+    const home = (data.items || []).filter(x => x.home && !x.poco && (x.division ? inDiv(x) : x.mine !== false));
     const inSat = (x) => sat.has(x.item_id) || sat.has(x.holder);
     const lostOf = (l) => l.filter(x => !inSat(x)).reduce((a, x) => a + x.value, 0);
     const personal = personalOn() ? lostOf(home.filter(x => !x.division)) : 0, division = lostOf(home.filter(x => x.division));
@@ -353,6 +364,7 @@
       </div>
       ${top.length ? `<details style="margin-top:6px"><summary class="note">The 15 most valuable drops: trash, self-destruct or split them before the end so they don't feed the enemy</summary>
         <table class="t">${top.map(({ x, v }) => `<tr><td>${x.qty > 1 ? x.qty + " × " : ""}${esc(x.type)}${x.ship && x.assembled ? ' <span class="note">assembled, with fit</span>' : ""}</td><td>${isk(v)}</td><td class="note">${esc(x.owner)}${x.in ? " · in " + esc(x.in) : ""}</td></tr>`).join("")}</table></details>` : ""}
+      ${pocos()}
       ${glance()}
       <p class="note" style="margin:8px 0 2px">What everyone in ${HOME()} sits in now (ships with a pilot in them are saved) · click a name for their details:</p>
       <div class="kv">${["Dreads / FAX", "Haulers / carriers", "Subcaps", "No ship / pod", "elsewhere"].filter(k => by.has(k)).map(section).join("")}</div>`;
@@ -691,7 +703,8 @@
   // best ship worth sitting in: a pod beats an Epithal), then everything else into the hangar.
   const SIT_MIN = 30e6, CHEAP_GROUPS = /Industrial|Hauler|Shuttle|Mining|Expedition Frigate|Exhumer|Barge|Corvette|Capsule/i, COVERT = /Covert|Stealth Bomber|Force Recon|Black Ops|Blockade Runner/i;
   function logins(rows) {
-    const items = (data.items || []).filter(x => x.home && x.mine !== false && !x.division);
+    // Not what's in a customs office: it isn't in the structure (see “In customs offices”).
+    const items = (data.items || []).filter(x => x.home && x.mine !== false && !x.division && !x.poco);
     const top = (x) => (!INSIDE.test(x.flag) || (x.ship && x.assembled)) && !/Freight Container/.test(x.in || "");
     const clone = new Map(cloneActions().map(a => [a.p.name, a]));
     const out = [];
@@ -741,7 +754,7 @@
     const rows = assign(), list = logins(rows);
     const n = Math.min(store.get("logins", list.length), list.length);
     const picked = list.slice(0, n);
-    const division = (data.items || []).filter(x => x.home && inDiv(x));
+    const division = (data.items || []).filter(x => x.home && inDiv(x) && !x.poco);
     const allIn = [...division, ...picked.flatMap(x => x.dump)], kept = keepVac(allIn);
     const f = fill(rows, kept);
     return { rows, list, n, picked, allIn, kept, f };
