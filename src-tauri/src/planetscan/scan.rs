@@ -108,9 +108,44 @@ pub fn unmix(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
     unmix_any(r, g, b, br, bg, bb)
 }
 
-/// The same without the too-bright rule: for a planet where nothing glows (a gas giant's pale
-/// cloud bands are bright, but EVE's colours lie over them like anywhere else).
+/// The same without the too-bright rule.
 pub fn unmix_any(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
+    let (best, at) = band_fit(r, g, b, br, bg, bb);
+    if best > 4000.0 {
+        None
+    } else {
+        Some(at as f32 / (STEPS - 1) as f32)
+    }
+}
+
+/// How bright EVE's light can make a gas giant's own colour against its planet map. EVE lights
+/// the planet from the top of the picture whichever way it's turned, so the same place is dimmer
+/// low in the picture and brighter high up than the planet map has it. Kept narrow: from 1.3 up,
+/// VIII's replayed Base Metals belt started losing real readings to "no resource".
+const GAS_LIGHT: (f32, f32) = (0.8, 1.15);
+
+/// A gas giant: EVE lays its colours only where the resource is (on planet VIII a belt round the
+/// equator); the rest of the planet shows as it is, not dimmed at all. Read against the band,
+/// that undimmed planet looked like the band's white top, so most of the planet read as the
+/// richest level. So a pixel that fits the planet's own colour (at EVE's light there) better than
+/// any band colour laid over it is level 0: no resource. Nothing glows on a gas giant, so its
+/// bright cloud bands are read too.
+pub fn unmix_gas(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
+    let (best, at) = band_fit(r, g, b, br, bg, bb);
+    let (r, g, b) = (r as f32, g as f32, b as f32);
+    let light = ((r * br + g * bg + b * bb) / (br * br + bg * bg + bb * bb).max(1.0)).clamp(GAS_LIGHT.0, GAS_LIGHT.1);
+    let own = (r - light * br).powi(2) + (g - light * bg).powi(2) + (b - light * bb).powi(2);
+    if own < best {
+        Some(0.0)
+    } else if best > 4000.0 {
+        None
+    } else {
+        Some(at as f32 / (STEPS - 1) as f32)
+    }
+}
+
+/// The band step that fits a pixel best over the planet's colour there, and how far off it is.
+fn band_fit(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> (f32, usize) {
     let k = 1.0 - OVERLAY;
     let d = [k * br - r as f32, k * bg - g as f32, k * bb - b as f32];
     let fine = band_fine();
@@ -140,11 +175,7 @@ pub fn unmix_any(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> 
             at = i;
         }
     }
-    if best > 4000.0 {
-        None
-    } else {
-        Some(at as f32 / (STEPS - 1) as f32)
-    }
+    (best, at)
 }
 
 /// The same by trying every step (for checking the quick one).
@@ -374,7 +405,7 @@ impl Map {
                                             Some(0.0)
                                         } else if let Some((br, bg, bb)) = bare.and_then(|m| m.bare_rgb(cell)) {
                                             if reads_bright {
-                                                unmix_any(r, g, b, br, bg, bb)
+                                                unmix_gas(r, g, b, br, bg, bb)
                                             } else {
                                                 unmix(r, g, b, br, bg, bb)
                                             }
@@ -939,6 +970,34 @@ mod tests {
         m.seen[100 * RES_W + 50] = false;
         m.version += 1;
         assert!((m.coverage() - 1.0).abs() < 1e-9 && !m.missing()[100 * RES_W + 50]);
+    }
+
+    /// On a gas giant the planet showing as it is (EVE's colours not laid over it there), a bit
+    /// brighter or dimmer with EVE's light, is no resource; the band laid over it still reads as
+    /// its level. A rock planet's reading of the same pixels is what it always was.
+    #[test]
+    fn a_gas_giant_showing_as_it_is_reads_nothing() {
+        let (br, bg, bb) = (182.0f32, 192.0, 181.0);
+        for light in [0.88f32, 1.0, 1.08] {
+            let (r, g, b) = ((br * light) as u8, (bg * light) as u8, (bb * light) as u8);
+            assert_eq!(unmix_gas(r, g, b, br, bg, bb), Some(0.0), "light {light}");
+            // Read as a rock planet (as dev.179 read VIII) that's near the band's white top.
+            if light >= 1.0 {
+                assert!(unmix(r, g, b, br, bg, bb).is_some_and(|v| v > 0.85), "light {light}: {:?}", unmix(r, g, b, br, bg, bb));
+            }
+        }
+        // The band's white top over that dark band is still the top: it greys the colour.
+        let top = band_fine()[STEPS - 1];
+        let px = [(0.65 * 88.0 + top[0]) as u8, (0.65 * 84.0 + top[1]) as u8, (0.65 * 64.0 + top[2]) as u8];
+        assert!(unmix_gas(px[0], px[1], px[2], 88.0, 84.0, 64.0).is_some_and(|v| v > 0.95));
+        let k = 1.0 - OVERLAY;
+        for step in [6usize, 20, 30, 40, 50, 55] {
+            let c = band_fine()[step];
+            let (r, g, b) = ((k * br + c[0]) as u8, (k * bg + c[1]) as u8, (k * bb + c[2]) as u8);
+            let level = unmix_gas(r, g, b, br, bg, bb).unwrap();
+            assert!((level - step as f32 / 59.0).abs() < 0.04, "step {step}: {level}");
+            assert_eq!(unmix_gas(r, g, b, br, bg, bb), unmix(r, g, b, br, bg, bb), "step {step}");
+        }
     }
 
     #[test]
