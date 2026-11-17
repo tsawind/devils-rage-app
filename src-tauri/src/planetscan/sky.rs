@@ -870,6 +870,12 @@ impl Boot {
     pub fn sure(&self) -> bool {
         self.fitted() >= 3 && self.turned >= 20.0 * DEG && self.coarse - self.other >= 0.02
     }
+    /// A gas giant's start (rings cut out, less sky left): most of the pictures must fit. Made-up
+    /// broad rings on real pictures gave wrong pitches that only half the pictures fitted; with a
+    /// thin ring all of them fit.
+    pub fn sure_past_rings(&self) -> bool {
+        self.sure() && self.fitted() * 4 >= self.later.len() * 3
+    }
 }
 
 /// One picture's points for a start from nothing: for matching and for painting, coarse and medium.

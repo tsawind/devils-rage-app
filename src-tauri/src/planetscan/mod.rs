@@ -45,9 +45,12 @@ pub fn lens_for(width: usize) -> f64 {
 /// When a resource scan counts as done (Tsa: 99 % of the planet).
 const DONE_AT: f64 = 0.99;
 
-/// A gas giant: under this share of the picture left as sky beside its rings, the sky gives no
-/// facing (with so little, a wrong one is likelier than none).
+/// A gas giant: under this share of the picture left as sky beside its rings, the whole-sky
+/// search gives no facing (with so little, a wrong one is likelier than none).
 const MIN_SKY: f64 = 0.25;
+/// Following from the last facing (a small search near it) needs less: a broad ring leaves about
+/// a third of the picture as sky even near level with it.
+const FOLLOW_MIN_SKY: f64 = 0.15;
 
 pub struct Frame {
     pub w: usize,
@@ -714,7 +717,8 @@ impl Session {
         let key = ((disc.r * 4.0) as i64, f.w as i64, f.h as i64, self.ui_version, if rings.is_some() && self.pose.is_some() { ((ring_pitch / (0.5 * DEG)).round() as i64) << 24 | self.ring_version as i64 } else { i64::MIN });
         if self.mask.as_ref().is_none_or(|(k, _)| *k != key) {
             let ui = self.ui.as_ref().filter(|u| u.ready());
-            let ring_now = rings.filter(|_| self.pose.is_some()).map(|rg| (rg, sky::axis_for_pitch(ring_pitch), disc.d));
+            // A degree either way: the pitch moves between pictures (the mask is remade every half degree).
+            let ring_now = rings.filter(|_| self.pose.is_some()).map(|rg| (rg.with_spread(1.0 * DEG), sky::axis_for_pitch(ring_pitch), disc.d));
             self.mask = Some((key, SkyMask::new(f.w, f.h, Some(&disc), lens, ui, ring_now)));
         }
         let mask = &self.mask.as_ref().unwrap().1;
@@ -755,7 +759,7 @@ impl Session {
         let mut locked_said: Option<String> = None;
         let tries = self.skies_to_try();
         // A gas giant with too little sky left beside its rings: none of it is trusted.
-        let sky_usable = !gas || rings.is_none() || sky_share >= MIN_SKY;
+        let sky_usable = !gas || rings.is_none() || sky_share >= FOLLOW_MIN_SKY;
         if let Some(pose) = self.pose.as_mut() {
             pose.placed = false;
             pose.by_planet = false;
@@ -816,7 +820,7 @@ impl Session {
             for id in &tries {
                 let Some(sky) = self.skies.get_mut(id) else { continue };
                 let found = match (&free_view, rings) {
-                    (Some(v), Some(rg)) => sky::find(v, sky, Some((rg, disc.d))),
+                    (Some(v), Some(rg)) => sky::find(v, sky, Some((rg.with_spread(1.5 * DEG), disc.d))),
                     _ => sky::find(&view, sky, None),
                 };
                 if let Some(found) = found {
@@ -853,7 +857,8 @@ impl Session {
             let b = self.boot.get_or_insert_with(BootRun::new);
             if b.job.as_ref().is_some_and(|j| j.is_finished()) {
                 let result = b.job.take().and_then(|j| j.join().ok()).flatten();
-                let sure = result.as_ref().is_some_and(|r| r.sure());
+                // Past a gas giant's rings less sky is left: most pictures must fit, too.
+                let sure = result.as_ref().is_some_and(|r| if rings.is_some() { r.sure_past_rings() } else { r.sure() });
                 match result {
                     Some(r) if sure => {
                         // The sky from the full pictures: the first at yaw 0, the others where they fitted.
@@ -940,7 +945,8 @@ impl Session {
                 b.at = Instant::now();
                 if b.frames.len() > BOOT_PICTURES {
                     let pts = std::mem::take(&mut b.points);
-                    let boot_rings = rings.map(|rg| (rg, disc.d));
+                    // Cut a few degrees either way too: the trial pitches are a few degrees apart.
+                    let boot_rings = rings.map(|rg| (rg.with_spread(4.0 * DEG), disc.d));
                     b.job = std::thread::Builder::new()
                         .name("planetscan-boot".into())
                         .spawn(move || -> Option<sky::Boot> {

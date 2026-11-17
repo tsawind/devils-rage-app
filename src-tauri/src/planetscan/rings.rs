@@ -22,10 +22,14 @@ pub const RING_BINS: usize = 400;
 /// left out. Near the ring plane that still leaves the sky above it.
 pub const RINGS_UNKNOWN: (f64, f64) = (1.0, 7.0);
 
-/// Which distances in the ring plane are ring (cut out of the sky).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Which distances in the ring plane are ring (cut out of the sky), and how far either way in
+/// pitch the cut is also made (while the pitch isn't known well: a start from nothing tries
+/// pitches a few degrees apart, and a broad ring's texture just past the cut would fit "not
+/// turned" at a slightly wrong one).
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Rings {
     bits: [u64; 7],
+    spread: f64,
 }
 
 impl Default for Rings {
@@ -61,7 +65,11 @@ fn bin_of(r: f64) -> Option<usize> {
 
 impl Rings {
     pub fn none() -> Rings {
-        Rings { bits: [0; 7] }
+        Rings { bits: [0; 7], spread: 0.0 }
+    }
+    /// The same cut, also made a pitch `spread` (radians) either way.
+    pub fn with_spread(&self, spread: f64) -> Rings {
+        Rings { bits: self.bits, spread }
     }
     /// Rings from r1 to r2 planet radii (tests, and pictures made up for them).
     pub fn band(r1: f64, r2: f64) -> Rings {
@@ -90,6 +98,7 @@ impl Rings {
         for (a, b) in out.bits.iter_mut().zip(other.bits.iter()) {
             *a |= *b;
         }
+        out.spread = self.spread.max(other.spread);
         out
     }
     #[inline]
@@ -97,9 +106,25 @@ impl Rings {
         bin_of(r).is_some_and(|b| self.get(b))
     }
     /// Does a camera ray end on the rings (n = the planet's axis in camera space, d = distance)?
+    /// With a spread, also at the pitch that much either way.
     #[inline]
     pub fn hit(&self, ray: &[f32; 3], n: &V3, d: f64) -> bool {
-        self.any() && plane_radius(ray, n, d).is_some_and(|r| self.cut_at(r))
+        if !self.any() {
+            return false;
+        }
+        if plane_radius(ray, n, d).is_some_and(|r| self.cut_at(r)) {
+            return true;
+        }
+        if self.spread > 0.0 {
+            let pitch = n[2].atan2(n[1]);
+            for p in [pitch - self.spread, pitch + self.spread, pitch - self.spread / 2.0, pitch + self.spread / 2.0] {
+                let m = [0.0, p.cos(), p.sin()];
+                if plane_radius(ray, &m, d).is_some_and(|r| self.cut_at(r)) {
+                    return true;
+                }
+            }
+        }
+        false
     }
     /// The bands, (from, to) in planet radii.
     pub fn bands(&self) -> Vec<(f64, f64)> {
@@ -775,15 +800,15 @@ mod tests {
     /// where there are none; a window isn't a ring and a still picture says nothing.
     #[test]
     fn rings_measured_from_over_the_poles() {
-        let (w, h) = (960usize, 512usize);
-        let lens = 750.0 * 960.0 / 1280.0;
-        let disc = Disc::with_lens(480.0, 256.0, 0.26 * lens, lens);
+        let (w, h) = (640usize, 360usize);
+        let lens = 375.0;
+        let disc = Disc::with_lens(320.0, 180.0, 0.26 * lens, lens);
         let thin = |r: f64| (1.6..=1.9).contains(&r).then(|| (110.0 + 60.0 * (r * 60.0).sin(), 0.8));
         let broad = |r: f64| (2.0..=6.0).contains(&r).then(|| (90.0 + 50.0 * (r * 23.0).sin() + 25.0 * (r * 71.0).sin(), 0.85));
         let none = |_: f64| None;
         let measure = |pitch: f64, ring: &dyn Fn(f64) -> Option<(f64, f64)>, turn: f64| {
             let mut pole = PoleRings::new();
-            for k in 0..16 {
+            for k in 0..POLE_LOOKS as usize + 3 {
                 let px = picture_with(w, h, &disc, lens, k as f64 * turn * DEG, pitch * DEG, ring);
                 pole.learn(&Pic { w, h, bgra: &px }, &disc, lens, None);
             }
