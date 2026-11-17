@@ -31,9 +31,13 @@
   .step h3 .state { margin-left: auto; font-weight: 400; font-size: 11.5px; }
   /* A finished step folds to its title line (click the title to open it again). */
   .step.fold h3 { cursor: pointer; }
-  .step.fold.done h3::after { content: "▸"; color: var(--muted); font-size: 11px; }
-  .step.fold.done.open h3::after { content: "▾"; }
-  .step.fold.done:not(.open) .more { display: none; }
+  .step.fold.done:not(.any) h3::after { content: "▸"; color: var(--muted); font-size: 11px; }
+  .step.fold.done.open:not(.any) h3::after { content: "▾"; }
+  .step.fold.done:not(.any):not(.open) .more { display: none; }
+  /* Steps that are never "done" (resources until all five are, saving) fold when you click their title. */
+  .step.fold.any h3::after { content: "▾"; color: var(--muted); font-size: 11px; }
+  .step.fold.any.shut h3::after { content: "▸"; }
+  .step.fold.any.shut .more { display: none; }
   .muted { color: var(--muted); } .small { font-size: 12px; } .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
   select { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 4px 7px; font: inherit; max-width: 100%; }
   .btn { border: 1px solid var(--line); border-radius: 7px; background: #121216; color: var(--text); padding: 4px 10px; }
@@ -147,29 +151,35 @@
       </div>
     </div></div>
 
-    <div class="step"><div class="n" id="n4">4</div><div>
+    <div class="step fold"><div class="n" id="n4">4</div><div>
       <h3>The planet map <span class="state" id="s4"></span></h3>
+      <div class="more">
       <div class="small muted">EVE on <b>No filter</b>, zoomed all the way out. Spin the planet every side, over both poles: saved for the corp at 99 %, keep going to 99.9 % (missed spots show purple on the map).</div>
       <div class="row" style="align-items: baseline"><span class="big" id="basePct">–</span><span class="small muted" id="baseSaid"></span></div>
       <div class="meter"><i id="baseMeter"></i></div>
       <label class="tog"><input type="checkbox" id="baseOn" checked> Record the planet's colours</label>
       <div class="small muted" style="margin-top: 4px">EVE's resource list: <span id="listSaid"></span> <button class="btn" id="pointList" style="padding: 1px 7px" title="Show the app where EVE's list is (two clicks), if it reads it wrong">Point it out</button></div>
       <div class="row"><button class="btn" id="forgetBase" title="Throw this planet's map away (here and the corp's copy) and start again">Start over</button></div>
+      </div>
     </div></div>
 
-    <div class="step"><div class="n" id="n6">6</div><div>
+    <div class="step fold any" data-fold="res"><div class="n" id="n6">6</div><div>
       <h3>Resources <span class="state" id="s6"></span></h3>
+      <div class="more">
       <div class="small muted">Once the planet map and sky are done: click each resource in EVE's scan list. The app sees which one is lit, scans it while you spin the planet, and saves it at 99 %.</div>
       <div class="small muted">EVE's colour slider (the bar above its list): <span id="sliderSaid"></span></div>
       <div id="resList"></div>
       <div class="row"><button class="btn" id="saveRes" title="Save this resource for the corp now, even under 99 %">Save it now</button><button class="btn" id="keepRes" hidden title="Keep painting this resource after its save at 99 %, to fill in more detail; then Save again">Keep scanning</button><button class="btn" id="stopRes" title="Stop this resource's scan (nothing saved)">Stop</button><button class="btn" id="rescanRes" title="Scan this planet's resources again (a fresh before/after scan): the ones done so far count as not done">Scan all again</button></div>
+      </div>
     </div></div>
 
-    <div class="step"><div class="n" id="n5">5</div><div>
+    <div class="step fold any" data-fold="save"><div class="n" id="n5">5</div><div>
       <h3>Save for the corp <span class="state" id="s5"></span></h3>
+      <div class="more">
       <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (the planet map and its sky)</label>
       <div class="row"><button class="btn" id="saveMaps" title="Save this planet's sky and map for the corp now, even under 99 %">Save now</button></div>
       <div class="row" style="align-items: baseline"><button class="btn" id="recordBtn" title="Keep EVE's pictures (5 a second, in 30 s files, until you stop it, at most an hour) with everything the app showed, in the app's recordings folder, for fixing things. Nothing leaves the PC.">Record for testing</button><span class="small muted" id="recSaid"></span></div>
+      </div>
     </div></div>
   </div>
 
@@ -609,7 +619,21 @@
     $("n" + n).classList.toggle("done", !!done);
     $("n" + n).closest(".step").classList.toggle("done", !!done);
   }
-  for (const h of document.querySelectorAll(".step.fold h3")) h.addEventListener("click", () => h.closest(".step").classList.toggle("open"));
+  // Click a step's title to fold or open it. Steps 2–4 fold by themselves once done; 5 and 6 only
+  // when clicked, and stay as left (kept between sessions).
+  let shut = {};
+  try { shut = JSON.parse(localStorage.getItem("piscan-shut") || "{}") || {}; } catch (e) { shut = {}; }
+  for (const h of document.querySelectorAll(".step.fold h3")) {
+    const step = h.closest(".step"), key = step.dataset.fold;
+    if (key && shut[key]) step.classList.add("shut");
+    h.addEventListener("click", (e) => {
+      if (e.target.closest("button, input, label")) return;
+      if (key) {
+        shut[key] = step.classList.toggle("shut");
+        try { localStorage.setItem("piscan-shut", JSON.stringify(shut)); } catch (err) {}
+      } else step.classList.toggle("open");
+    });
+  }
   let firstStatus = true, lastEvent = 0, lookingSince = null, reloadSoon = 0;
   // Start: a 5 s countdown (EVE's opening zoom and any pop-ups settle), then the app watches.
   let countdown = null;
