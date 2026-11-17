@@ -27,8 +27,10 @@ pub struct Lever {
 
 const HML_0_HIGH: &[(i64, &str)] = &[(0, "High"), (1, "Medium"), (2, "Low")];
 const HML_3_HIGH: &[(i64, &str)] = &[(3, "High"), (2, "Medium"), (1, "Low")];
-const HLO_2_HIGH: &[(i64, &str)] = &[(2, "High"), (1, "Low"), (0, "Off")];
-const HMLO_3_HIGH: &[(i64, &str)] = &[(3, "High"), (2, "Medium"), (1, "Low"), (0, "Off")];
+const HLO_2_HIGH: &[(i64, &str)] = &[(2, "High"), (1, "Low"), (0, "Disabled")];
+/// Post-processing: 0 is EVE's "Low" (seen in Darkness Holder's settings_2, 17 Nov), not off.
+const HML_2_HIGH: &[(i64, &str)] = &[(2, "High"), (1, "Medium"), (0, "Low")];
+const HMLO_3_HIGH: &[(i64, &str)] = &[(3, "High"), (2, "Medium"), (1, "Low"), (0, "Disabled")];
 const FONT: &[(i64, &str)] = &[(2, "Large"), (1, "Medium"), (0, "Small")];
 const VOL: &[(i64, &str)] = &[(2, "High"), (1, "Medium"), (0, "Low")];
 const NONE: &[(i64, &str)] = &[];
@@ -132,7 +134,7 @@ pub const LEVERS: &[Lever] = &[
         key: "postProcessingQuality",
         kind: "level",
         label: "Post-processing",
-        choices: HLO_2_HIGH,
+        choices: HML_2_HIGH,
     },
     Lever {
         section: "device",

@@ -40,6 +40,10 @@
   .preset b { display: block; }
   .preset span { color: var(--muted); font-size: 12px; }
   .preset.on { border-color: var(--red-hi); background: #2a0f12; }
+  .preset i { display: block; font-style: normal; color: var(--warn); font-size: 11px; font-weight: 600; letter-spacing: .3px; margin: 2px 0; }
+  .manual { margin-top: 10px; }
+  .manual ul { margin: 4px 0 0 18px; padding: 0; font-size: 13px; }
+  .manual li { margin: 3px 0; }
   table { width: 100%; border-collapse: collapse; }
   td, th { padding: 6px 8px; border-top: 1px solid #23232a; text-align: left; vertical-align: middle; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
@@ -69,6 +73,9 @@
 
   <h2>1 · Pick a preset (or start from one and adjust)</h2>
   <div class="presets" id="presets"></div>
+  <div class="card manual" id="manual" hidden><b>Set by hand in EVE, once per account</b>
+    <span class="muted" style="font-size: 12px"> · EVE keeps these in its own per-account files, which the app doesn't touch.</span>
+    <ul id="manualList"></ul></div>
 
   <h2>2 · Adjust the levers</h2>
   <p class="note">Ticked rows are written; unticked rows stay as each client has them. “Now” is the first picked profile's current value.</p>
@@ -162,10 +169,17 @@
     const ph = $("presets"); ph.innerHTML = "";
     PRESETS.forEach(p => {
       const b = el("button", "preset" + (preset === p.id ? " on" : ""));
-      b.append(el("b", null, p.name), el("span", null, p.why));
+      b.append(el("b", null, p.name));
+      if (p.warn) b.append(el("i", null, p.warn));
+      b.append(el("span", null, p.why));
       b.addEventListener("click", () => usePreset(p));
       ph.append(b);
     });
+
+    const cur = PRESETS.find(p => p.id === preset);
+    $("manual").hidden = !(cur && cur.manual && cur.manual.length);
+    $("manualList").innerHTML = "";
+    (cur?.manual || []).forEach(m => $("manualList").append(el("li", null, m)));
 
     // Levers
     const t = $("levers"); t.innerHTML = "";

@@ -131,7 +131,7 @@
   function usePreset(id) {
     const p = PRESETS.find(x => x.id === id) || PRESETS[0];
     values = { ...p.values }; prefs = { ...p.prefs };
-    $("presetWhy").textContent = p.why || "";
+    $("presetWhy").textContent = (p.warn ? p.warn + ". " : "") + (p.why || "") + (p.manual && p.manual.length ? " Set by hand in EVE once per account: " + p.manual.join(" ") : "");
     renderLevers();
   }
   function renderLevers() {
