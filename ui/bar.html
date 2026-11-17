@@ -40,6 +40,7 @@
   <button class="tab" data-act="updates">Check for updates</button>
   <button class="tab dev" data-act="record" id="rec" title="Record everything (dev): the whole app window twice a second and, while a planet scan runs, EVE's pictures 5 a second, with every detail, in 30 s files in the app's recordings folder (up to an hour). Nothing leaves the PC.">Record</button>
   <button class="tab dev" data-act="snapshot" id="snap" title="Snapshot (dev): the app window, EVE's picture when scanning, and every detail (status, the end of the log) into the app's recordings folder">Snapshot</button>
+  <button class="tab dev" data-act="video" id="video" title="Video (dev): record one monitor, EVE client or the app, only the boxes you draw, at the rate, quality and size you pick, in small files">Video…</button>
   <button class="tab dev" data-act="snapshot-pick" title="Snapshot of… (dev): pick a whole monitor, one EVE client or the app window, at full size">Snapshot of…</button>
   <div class="drag" data-drag></div>
   <div class="ver" data-drag id="ver"></div>
@@ -80,6 +81,9 @@
         const rec = document.getElementById("rec");
         rec.classList.toggle("rec", st.recording != null);
         rec.textContent = st.recording != null ? `● Stop ${Math.floor(st.recording / 60)}:${String(st.recording % 60).padStart(2, "0")}` : "Record";
+        const vid = document.getElementById("video");
+        vid.classList.toggle("rec", st.video != null);
+        vid.textContent = st.video != null ? `● Video ${Math.floor(st.video / 60)}:${String(st.video % 60).padStart(2, "0")}` : "Video…";
         document.getElementById("snap").textContent = st.snapshot ? "Saved ✓" : "Snapshot";
         document.getElementById("ver").textContent = st.channel === "stable" ? st.version : `${st.version} · ${st.channel}`;
       }

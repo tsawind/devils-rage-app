@@ -264,6 +264,10 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         // Off the window's own thread: building a window from inside a plain command can hang on Windows.
+        "video" => {
+            let app = app.clone();
+            std::thread::spawn(move || devrec::open_video(&app));
+        }
         "snapshot-pick" => {
             let app = app.clone();
             std::thread::spawn(move || devrec::open_picker(&app));
@@ -370,6 +374,10 @@ pub fn run() {
             bar::bar_state,
             devrec::dev_snapshot_targets,
             devrec::dev_snapshot_take,
+            devrec::dev_video_still,
+            devrec::dev_video_start,
+            devrec::dev_video_stop,
+            devrec::dev_video_status,
             previews::preview_clients,
             previews::preview_frame,
             previews::preview_focus,

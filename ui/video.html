@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Video (dev)</title>
+<style>
+  :root { --bg:#0a0a0c; --panel:#121216; --line:#24242c; --text:#c9c9d0; --muted:#6a6a72; --hi:#fff; --red-hi:#d6242c; --ok:#7fd45a; --bad:#ff6a5a; --box:#3fd0ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; display: grid; grid-template-columns: 300px 1fr; }
+  #side { padding: 14px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+  h1 { font-size: 14px; color: var(--hi); margin: 0; }
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+  select, button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; padding: 6px 9px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--red-hi); color: var(--hi); }
+  #go { font-weight: 600; padding: 9px; }
+  #go.on { border-color: var(--red-hi); color: #ff8a7a; }
+  #boxes { display: flex; flex-direction: column; gap: 4px; }
+  .bx { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .bx span { flex: 1; }
+  .bx button { padding: 1px 7px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  #said { min-height: 34px; font-size: 12px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  #view { position: relative; overflow: auto; padding: 10px; }
+  #still { display: block; max-width: 100%; cursor: crosshair; }
+  .row { display: flex; gap: 6px; }
+</style>
+</head>
+<body>
+  <div id="side">
+    <h1>Video (dev)</h1>
+    <div class="muted">Pick what to record, drag boxes on the still to record only those parts (none on: all of it). Files of 30 s or 25 MB at most in the app's recordings folder (vid-…). Nothing leaves the PC.</div>
+    <label>Source <select id="source"></select></label>
+    <div class="row"><button id="refresh" title="A new still of the source">New still</button><button id="clear" title="Remove every box">Clear boxes</button></div>
+    <div id="boxes"></div>
+    <label>Pictures a second <select id="fps"><option>1</option><option selected>2</option><option>5</option><option>10</option><option>15</option></select></label>
+    <label>Quality <select id="quality"><option value="55">Low (small files)</option><option value="75" selected>Medium</option><option value="90">High (text sharp)</option></select></label>
+    <label>Size <select id="size"><option value="full" selected>Full</option><option value="half">Half</option></select></label>
+    <button id="go">Start recording</button>
+    <div id="said" class="muted"></div>
+  </div>
+  <div id="view"><canvas id="still"></canvas></div>
+<script>
+  "use strict";
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+  const $ = (id) => document.getElementById(id);
+  const canvas = $("still"), ctx = canvas.getContext("2d");
+  let targets = [], still = null, src = { w: 1, h: 1 }, boxes = [], drag = null, on = false;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("dev-video") || "{}") || {}; } catch (e) { saved = {}; }
+  function keep() {
+    saved.source = $("source").value; saved.fps = $("fps").value; saved.quality = $("quality").value; saved.size = $("size").value;
+    saved.boxes = saved.boxes || {}; saved.boxes[saved.source] = boxes;
+    try { localStorage.setItem("dev-video", JSON.stringify(saved)); } catch (e) {}
+  }
+  function say(t, cls) { $("said").textContent = t; $("said").className = cls || "muted"; }
+  const target = () => (targets[+$("source").value] || {}).target;
+  async function loadTargets() {
+    targets = await invoke("dev_snapshot_targets").catch(() => []);
+    $("source").innerHTML = targets.map((t, i) => `<option value="${i}">${t.label.replace(/</g, "&lt;")}</option>`).join("");
+    if (saved.source && targets[+saved.source]) $("source").value = saved.source;
+    for (const k of ["fps", "quality", "size"]) if (saved[k]) $(k).value = saved[k];
+  }
+  async function loadStill() {
+    const t = target();
+    if (!t) return;
+    say("Taking a still…");
+    try {
+      const r = await invoke("dev_video_still", { target: t });
+      src = { w: r.w, h: r.h };
+      const img = new Image();
+      img.onload = () => { still = img; canvas.width = img.width; canvas.height = img.height; draw(); say(`${r.w} × ${r.h}: drag on the still to add a box.`); };
+      img.src = "data:image/jpeg;base64," + r.jpeg;
+    } catch (e) { say(`Couldn't take a still: ${e}`, "bad"); }
+    boxes = ((saved.boxes || {})[$("source").value] || []).map((b) => ({ ...b }));
+    listBoxes();
+  }
+  const k = () => canvas.width / src.w;
+  function draw() {
+    if (!still) return;
+    ctx.drawImage(still, 0, 0);
+    ctx.lineWidth = 2;
+    boxes.forEach((b, i) => {
+      ctx.strokeStyle = b.on ? "#3fd0ff" : "rgba(160,160,170,.6)";
+      ctx.setLineDash(b.on ? [] : [6, 4]);
+      ctx.strokeRect(b.r[0] * k(), b.r[1] * k(), b.r[2] * k(), b.r[3] * k());
+      ctx.fillStyle = b.on ? "#3fd0ff" : "#999"; ctx.font = "bold 13px Segoe UI";
+      ctx.fillText(String(i + 1), b.r[0] * k() + 5, b.r[1] * k() + 16);
+    });
+    ctx.setLineDash([]);
+    if (drag) { ctx.strokeStyle = "#ffd24a"; ctx.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0); }
+  }
+  function listBoxes() {
+    $("boxes").innerHTML = "";
+    boxes.forEach((b, i) => {
+      const row = document.createElement("div"); row.className = "bx";
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = b.on; cb.disabled = on;
+      cb.addEventListener("change", () => { b.on = cb.checked; keep(); draw(); });
+      const t = document.createElement("span"); t.textContent = `Box ${i + 1}: ${b.r[2]} × ${b.r[3]} at ${b.r[0]}, ${b.r[1]}`;
+      const x = document.createElement("button"); x.textContent = "✕"; x.disabled = on; x.title = "Remove this box";
+      x.addEventListener("click", () => { boxes.splice(i, 1); keep(); listBoxes(); draw(); });
+      row.append(cb, t, x); $("boxes").append(row);
+    });
+    if (!boxes.length) $("boxes").innerHTML = '<div class="muted">No boxes: the whole source is recorded.</div>';
+  }
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) * canvas.width / r.width, (e.clientY - r.top) * canvas.height / r.height]; };
+  canvas.addEventListener("mousedown", (e) => { if (on || !still) return; const [x, y] = pos(e); drag = { x0: x, y0: y, x1: x, y1: y }; });
+  window.addEventListener("mousemove", (e) => { if (!drag) return; const [x, y] = pos(e); drag.x1 = x; drag.y1 = y; draw(); });
+  window.addEventListener("mouseup", () => {
+    if (!drag) return;
+    const x = Math.min(drag.x0, drag.x1) / k(), y = Math.min(drag.y0, drag.y1) / k(), w = Math.abs(drag.x1 - drag.x0) / k(), h = Math.abs(drag.y1 - drag.y0) / k();
+    drag = null;
+    if (w > 16 && h > 16) {
+      const r = [Math.max(0, Math.round(x)), Math.max(0, Math.round(y)), Math.round(Math.min(w, src.w - x)), Math.round(Math.min(h, src.h - y))];
+      // Even sizes, so half size halves cleanly.
+      r[2] -= r[2] % 2; r[3] -= r[3] % 2;
+      boxes.push({ r, on: true }); keep(); listBoxes();
+    }
+    draw();
+  });
+  $("source").addEventListener("change", () => { keep(); loadStill(); });
+  for (const id of ["fps", "quality", "size"]) $(id).addEventListener("change", keep);
+  $("refresh").addEventListener("click", loadStill);
+  $("clear").addEventListener("click", () => { boxes = []; keep(); listBoxes(); draw(); });
+  $("go").addEventListener("click", async () => {
+    if (on) { await invoke("dev_video_stop"); return; }
+    const spec = { target: target(), boxes: boxes.filter((b) => b.on).map((b) => b.r), fps: +$("fps").value, quality: +$("quality").value, half: $("size").value === "half" };
+    try { const dir = await invoke("dev_video_start", { spec }); say(`Recording into ${dir}`, "ok"); } catch (e) { say(`Couldn't start: ${e}`, "bad"); }
+  });
+  async function poll() {
+    try {
+      const st = await invoke("dev_video_status");
+      const was = on; on = !!st.on;
+      $("go").textContent = on ? `● Stop (${Math.floor(st.secs / 60)}:${String(st.secs % 60).padStart(2, "0")})` : "Start recording";
+      $("go").classList.toggle("on", on);
+      for (const id of ["source", "fps", "quality", "size", "refresh", "clear"]) $(id).disabled = on;
+      if (on) say(`${st.frames} pictures · ${st.mb.toFixed(1)} MB · ${st.files} file${st.files === 1 ? "" : "s"}`, "ok");
+      else if (was) say(`Saved: ${st.frames} pictures, ${st.mb.toFixed(1)} MB in ${st.files} files (vid-…).`, "ok");
+      if (was !== on) listBoxes();
+    } catch (e) {}
+  }
+  loadTargets().then(loadStill);
+  setInterval(poll, 1000);
+</script>
+</body>
+</html>

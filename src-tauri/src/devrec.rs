@@ -333,3 +333,226 @@ fn screen_picture(x: i32, y: i32, w: u32, h: u32) -> Result<crate::capture::Pict
 fn screen_picture(_x: i32, _y: i32, _w: u32, _h: u32) -> Result<crate::capture::Picture, String> {
     Err("only on Windows".into())
 }
+
+// ------------------------------------------------------------------ video: boxes on a source
+
+/// A video recording: one source (monitor, EVE client, the app), only the boxes switched on
+/// (none on: the whole source), at a chosen rate, quality and size.
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct VideoSpec {
+    pub target: Target,
+    /// Boxes in the source's own pixels: x, y, width, height.
+    #[serde(default)]
+    pub boxes: Vec<[u32; 4]>,
+    pub fps: f32,
+    pub quality: u8,
+    /// Half size (each 2 × 2 pixels averaged) instead of full.
+    #[serde(default)]
+    pub half: bool,
+}
+
+static VIDEO_ON: AtomicBool = AtomicBool::new(false);
+/// Seconds since 1970 it started, pictures, bytes and files so far.
+static VIDEO_STATS: std::sync::Mutex<(u64, u64, u64, u32)> = std::sync::Mutex::new((0, 0, 0, 0));
+/// A file is closed at 30 s or 25 MB, whichever first: small enough to fetch through the bridge.
+const VIDEO_PART_SECS: u64 = 30;
+const VIDEO_PART_BYTES: u64 = 25 << 20;
+
+/// The source's whole picture now.
+fn grab(app: &AppHandle, target: &Target) -> Result<crate::capture::Picture, String> {
+    match target {
+        Target::App => crate::capture::window_picture(main_handle(app).ok_or("the app window isn't there")?, 8192),
+        Target::Client { name } => {
+            let handle = crate::clipboard::open_clients().into_iter().find(|(n, _)| n == name).map(|(_, h)| h).ok_or("that EVE client is closed")?;
+            crate::capture::window_picture(handle, 8192)
+        }
+        Target::Monitor { x, y, w, h, .. } => screen_picture(*x, *y, *w, *h),
+    }
+}
+
+/// One box out of a picture (clipped to it), at full or half size, BGRA.
+fn cut(pic: &crate::capture::Picture, b: [u32; 4], half: bool) -> Option<(u32, u32, Vec<u8>)> {
+    let (x0, y0) = (b[0].min(pic.width), b[1].min(pic.height));
+    let (x1, y1) = ((b[0] + b[2]).min(pic.width), (b[1] + b[3]).min(pic.height));
+    if x1 < x0 + 8 || y1 < y0 + 8 {
+        return None;
+    }
+    let (w, h) = (x1 - x0, y1 - y0);
+    let at = |x: u32, y: u32| ((y * pic.width + x) * 4) as usize;
+    if !half {
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        for y in y0..y1 {
+            out.extend_from_slice(&pic.bgra[at(x0, y)..at(x1, y)]);
+        }
+        return Some((w, h, out));
+    }
+    let (hw, hh) = (w / 2, h / 2);
+    let mut out = vec![0u8; (hw * hh * 4) as usize];
+    for y in 0..hh {
+        for x in 0..hw {
+            let (sx, sy) = (x0 + x * 2, y0 + y * 2);
+            for c in 0..4 {
+                let sum = pic.bgra[at(sx, sy) + c] as u32 + pic.bgra[at(sx + 1, sy) + c] as u32 + pic.bgra[at(sx, sy + 1) + c] as u32 + pic.bgra[at(sx + 1, sy + 1) + c] as u32;
+                out[((y * hw + x) * 4) as usize + c] = (sum / 4) as u8;
+            }
+        }
+    }
+    Some((hw, hh, out))
+}
+
+/// The source as a still, at most 1100 wide, for drawing the boxes on: its full size, then a JPEG.
+#[tauri::command]
+pub async fn dev_video_still(app: AppHandle, target: Target) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let pic = grab(&app, &target)?;
+        let k = (pic.width / 1100 + 1).max(1);
+        let (w, h) = (pic.width / k, pic.height / k);
+        let mut small = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let s = (((y * k) * pic.width + x * k) * 4) as usize;
+                small[((y * w + x) * 4) as usize..((y * w + x) * 4 + 4) as usize].copy_from_slice(&pic.bgra[s..s + 4]);
+            }
+        }
+        let mut jpeg = Vec::new();
+        jpeg_encoder::Encoder::new(&mut jpeg, 85).encode(&small, w as u16, h as u16, jpeg_encoder::ColorType::Bgra).map_err(|e| e.to_string())?;
+        Ok(json!({ "w": pic.width, "h": pic.height, "jpeg": crate::previews::base64_encode(&jpeg) }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Start a video recording (stops one already running first). Returns the folder.
+#[tauri::command]
+pub fn dev_video_start(app: AppHandle, spec: VideoSpec) -> Result<String, String> {
+    let dir = folder(&app)?;
+    VIDEO_ON.store(false, Ordering::SeqCst);
+    std::thread::sleep(Duration::from_millis(150));
+    let stamp = now_secs();
+    *VIDEO_STATS.lock().unwrap() = (stamp, 0, 0, 0);
+    VIDEO_ON.store(true, Ordering::SeqCst);
+    let out = dir.clone();
+    std::thread::Builder::new()
+        .name("dev-video".into())
+        .spawn(move || video_loop(app, out, stamp, spec))
+        .map_err(|e| e.to_string())?;
+    Ok(dir.display().to_string())
+}
+
+#[tauri::command]
+pub fn dev_video_stop() {
+    VIDEO_ON.store(false, Ordering::SeqCst);
+}
+
+/// Recording a video: seconds, pictures, MB, files.
+#[tauri::command]
+pub fn dev_video_status() -> serde_json::Value {
+    let (started, frames, bytes, files) = *VIDEO_STATS.lock().unwrap();
+    if !VIDEO_ON.load(Ordering::SeqCst) {
+        return json!({ "on": false, "frames": frames, "mb": bytes as f64 / 1048576.0, "files": files });
+    }
+    json!({ "on": true, "secs": now_secs().saturating_sub(started), "frames": frames, "mb": bytes as f64 / 1048576.0, "files": files })
+}
+
+/// Recording a video, for how many seconds (for the bar).
+pub fn video_secs() -> Option<u64> {
+    VIDEO_ON.load(Ordering::SeqCst).then(|| now_secs().saturating_sub(VIDEO_STATS.lock().unwrap().0))
+}
+
+/// The video: `vid-<stamp>-NNN.bin`, REC2 like the others: per box per picture a note (ms, which
+/// box, where in the source, its size; once a second also the page and the scan's status) and a
+/// JPEG. Closed at 30 s or 25 MB; an hour at most.
+fn video_loop(app: AppHandle, dir: PathBuf, stamp: u64, spec: VideoSpec) {
+    crate::planetscan::sky::background_thread();
+    let started = Instant::now();
+    let every = Duration::from_secs_f32(1.0 / spec.fps.clamp(0.5, 30.0));
+    let quality = spec.quality.clamp(30, 95);
+    let (mut part, mut part_bytes) = (0u32, 0u64);
+    let mut out: Option<(std::io::BufWriter<std::fs::File>, Instant)> = None;
+    let mut details_at: Option<Instant> = None;
+    while VIDEO_ON.load(Ordering::SeqCst) && started.elapsed() < Duration::from_secs(3600) {
+        let at = Instant::now();
+        if out.as_ref().is_none_or(|(_, t)| t.elapsed() >= Duration::from_secs(VIDEO_PART_SECS) || part_bytes >= VIDEO_PART_BYTES) {
+            if let Some((mut w, _)) = out.take() {
+                let _ = w.flush();
+            }
+            part += 1;
+            part_bytes = 0;
+            match std::fs::File::create(dir.join(format!("vid-{stamp}-{part:03}.bin"))) {
+                Ok(file) => {
+                    let mut w = std::io::BufWriter::new(file);
+                    let _ = w.write_all(b"REC2");
+                    out = Some((w, Instant::now()));
+                    VIDEO_STATS.lock().unwrap().3 = part;
+                }
+                Err(e) => {
+                    log::warn!("video: couldn't write ({e})");
+                    break;
+                }
+            }
+        }
+        match grab(&app, &spec.target) {
+            Ok(pic) => {
+                let boxes = if spec.boxes.is_empty() { vec![[0, 0, pic.width, pic.height]] } else { spec.boxes.clone() };
+                let details = details_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(1));
+                if details {
+                    details_at = Some(Instant::now());
+                }
+                for (k, b) in boxes.iter().enumerate() {
+                    let Some((w, h, px)) = cut(&pic, *b, spec.half) else { continue };
+                    let mut jpeg = Vec::with_capacity(256 * 1024);
+                    if jpeg_encoder::Encoder::new(&mut jpeg, quality).encode(&px, w as u16, h as u16, jpeg_encoder::ColorType::Bgra).is_err() {
+                        continue;
+                    }
+                    let mut note = json!({ "ms": started.elapsed().as_millis() as u64, "at": now_secs(), "box": k, "rect": b, "w": w, "h": h, "source": [pic.width, pic.height] });
+                    if details && k == 0 {
+                        note["page"] = json!(page_url(&app));
+                        note["scan"] = scan_status(&app);
+                    }
+                    let note = note.to_string();
+                    let Some((wr, _)) = out.as_mut() else { break };
+                    let ok = wr.write_all(&(note.len() as u32).to_le_bytes()).is_ok()
+                        && wr.write_all(note.as_bytes()).is_ok()
+                        && wr.write_all(&(jpeg.len() as u32).to_le_bytes()).is_ok()
+                        && wr.write_all(&jpeg).is_ok();
+                    if !ok {
+                        VIDEO_ON.store(false, Ordering::SeqCst);
+                        break;
+                    }
+                    let n = 8 + note.len() as u64 + jpeg.len() as u64;
+                    part_bytes += n;
+                    let mut st = VIDEO_STATS.lock().unwrap();
+                    st.1 += 1;
+                    st.2 += n;
+                }
+            }
+            Err(e) => log::debug!("video: no picture ({e})"),
+        }
+        std::thread::sleep(every.saturating_sub(at.elapsed()));
+    }
+    if let Some((mut w, _)) = out.take() {
+        let _ = w.flush();
+    }
+    VIDEO_ON.store(false, Ordering::SeqCst);
+    let (_, frames, bytes, files) = *VIDEO_STATS.lock().unwrap();
+    log::info!("video saved: vid-{stamp}-*.bin, {frames} pictures, {} MB in {files} files", bytes >> 20);
+}
+
+/// Open the video recorder window.
+pub fn open_video(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(VIDEO_WINDOW) {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let built = tauri::WebviewWindowBuilder::new(app, VIDEO_WINDOW, tauri::WebviewUrl::App("video.html".into()))
+        .title("Video (dev)")
+        .inner_size(1180.0, 860.0)
+        .resizable(true)
+        .center()
+        .build();
+    if let Err(e) = built {
+        log::warn!("couldn't open the video recorder: {e}");
+    }
+}
+const VIDEO_WINDOW: &str = "video";

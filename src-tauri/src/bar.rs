@@ -14,6 +14,7 @@ pub struct BarState {
     /// Dev mode: recording everything, for how many seconds; the snapshot just taken.
     recording: Option<u64>,
     snapshot: Option<String>,
+    video: Option<u64>,
 }
 
 /// A bar button was pressed (home, mapper, seat, accounts, pi, settings, admin, reload,
@@ -63,5 +64,6 @@ pub fn bar_state(app: AppHandle) -> BarState {
         channel: s.channel(&app).as_str(),
         recording: crate::devrec::recording_secs(),
         snapshot: crate::devrec::last_snapshot(),
+        video: crate::devrec::video_secs(),
     }
 }

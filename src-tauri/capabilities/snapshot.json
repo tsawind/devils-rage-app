@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "snapshot",
-  "description": "The dev-mode snapshot picker (snapshot): lists the app window, the monitors and the EVE clients, and takes a snapshot of one. Local page only.",
-  "windows": ["snapshot"],
-  "webviews": ["snapshot"],
+  "description": "The dev-mode snapshot picker (snapshot) and video recorder (video): lists the app window, the monitors and the EVE clients, and takes a snapshot of one. Local page only.",
+  "windows": ["snapshot", "video"],
+  "webviews": ["snapshot", "video"],
   "permissions": ["core:default", "core:window:allow-close"]
 }
