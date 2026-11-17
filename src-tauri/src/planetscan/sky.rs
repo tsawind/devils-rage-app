@@ -461,23 +461,42 @@ pub fn match_points(view: &View, level: usize) -> Vec<Pt> {
 
 /// Sky features on a grid every `gap` degrees.
 pub fn points(view: &View, level: usize, gap: f64) -> Vec<Pt> {
+    points_on(view, level, gap, 1)
+}
+
+/// The same, the rows shared out over `cores` threads (painting: the fine level is a lot of points).
+pub fn points_on(view: &View, level: usize, gap: f64, cores: usize) -> Vec<Pt> {
     let s = &SPECS[level];
     let hb = ((s.spot * view.ppd / 2.0).round() as i64).max(1);
     let hr = ((s.ring * view.ppd / 2.0).round() as i64).max(hb + 2);
     let step = ((gap * view.ppd).round() as i64).max(2);
-    let mut out = Vec::new();
-    let mut y = hb + step / 2;
-    while y < view.h as i64 - hb {
-        let mut x = hb + step / 2;
-        while x < view.w as i64 - hb {
-            if let Some(g) = view.feature(x, y, hb, hr) {
-                out.push(Pt { d: view.ray(x as f64, y as f64), g: g.clamp(-s.clip, s.clip) });
+    let rows: Vec<i64> = (0..).map(|k| hb + step / 2 + k * step).take_while(|&y| y < view.h as i64 - hb).collect();
+    let band = |ys: &[i64]| -> Vec<Pt> {
+        let mut out = Vec::new();
+        for &y in ys {
+            let mut x = hb + step / 2;
+            while x < view.w as i64 - hb {
+                if let Some(g) = view.feature(x, y, hb, hr) {
+                    out.push(Pt { d: view.ray(x as f64, y as f64), g: g.clamp(-s.clip, s.clip) });
+                }
+                x += step;
             }
-            x += step;
         }
-        y += step;
+        out
+    };
+    if cores <= 1 || rows.len() < 32 {
+        return band(&rows);
     }
-    out
+    let chunk = rows.len().div_ceil(cores);
+    std::thread::scope(|sc| {
+        let handles: Vec<_> = rows.chunks(chunk).map(|ys| sc.spawn(move || band(ys))).collect();
+        handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+    })
+}
+
+/// Cores to paint with (leaving one for the rest of the app).
+pub fn paint_cores() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).saturating_sub(1).clamp(1, 8)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -642,24 +661,36 @@ impl Sky {
         }
         Some(format!("{}: turn the view that way", parts.join(" and ")))
     }
-    /// Paint a picture's sky at facing Q. Which levels: all by default.
+    /// Paint a picture's sky at facing Q. Which levels: all by default. Each level on its own
+    /// core (the fine one is most of the work).
     pub fn paint(&mut self, view: &View, q: &M3, levels: &[usize]) -> usize {
         let qt = transpose(q);
-        let mut painted = 0;
-        for &level in levels {
-            let pts = points(view, level, SPECS[level].paint);
-            let m = &mut self.levels[level];
-            for p in &pts {
-                let d = [p.d[0] as f64, p.d[1] as f64, p.d[2] as f64];
-                let i = m.cell_of(&apply(&qt, &d));
-                if m.n[i] < u16::MAX {
-                    m.sum[i] += p.g;
-                    m.n[i] += 1;
-                }
-            }
-            m.grey = None;
-            painted += pts.len();
-        }
+        let cores = paint_cores().saturating_sub(2).max(1);
+        let painted: usize = std::thread::scope(|sc| {
+            let handles: Vec<_> = self
+                .levels
+                .iter_mut()
+                .enumerate()
+                .filter(|(k, _)| levels.contains(k))
+                .map(|(level, m)| {
+                    sc.spawn(move || {
+                        // The fine level is most of the points: its rows over most of the cores.
+                        let pts = points_on(view, level, SPECS[level].paint, if level == FINE { cores } else { 1 });
+                        for p in &pts {
+                            let d = [p.d[0] as f64, p.d[1] as f64, p.d[2] as f64];
+                            let i = m.cell_of(&apply(&qt, &d));
+                            if m.n[i] < u16::MAX {
+                                m.sum[i] += p.g;
+                                m.n[i] += 1;
+                            }
+                        }
+                        m.grey = None;
+                        pts.len()
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap_or(0)).sum()
+        });
         self.frames += 1;
         painted
     }

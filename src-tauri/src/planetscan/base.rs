@@ -8,6 +8,7 @@
 
 use super::geom::{apply, facing_of, pose_q, to_sphere, transpose, Disc, M3};
 use super::rings::Rings;
+use super::scan::{Map, GRID_H, GRID_W};
 use super::sky::{axis_for_pitch, Pic, DEG};
 use std::f64::consts::PI;
 
@@ -431,6 +432,39 @@ impl Base {
         }
         base.version = 1;
         Some(base)
+    }
+
+    /// The planet's own colours on the resource scans' 1° grid (each 1° cell the mean of the map
+    /// cells in it), to unmix EVE's scan colours against. In the same frame as this map.
+    pub fn bare_map(&self) -> Map {
+        let n = GRID_W * GRID_H;
+        let mut sum = vec![[0f64; 4]; n];
+        for row in 0..self.h {
+            let gr = (row * GRID_H / self.h).min(GRID_H - 1);
+            for col in 0..self.w {
+                let i = row * self.w + col;
+                let wt = self.weight[i];
+                if wt <= 0.0 {
+                    continue;
+                }
+                let gc = (col * GRID_W / self.w).min(GRID_W - 1);
+                let s = &mut sum[gr * GRID_W + gc];
+                let c = self.sum[i];
+                s[0] += (c[0] / wt) as f64;
+                s[1] += (c[1] / wt) as f64;
+                s[2] += (c[2] / wt) as f64;
+                s[3] += 1.0;
+            }
+        }
+        let mut bytes = vec![0u8; n * 3];
+        for (k, s) in sum.iter().enumerate() {
+            if s[3] > 0.0 {
+                bytes[k * 3] = (s[0] / s[3]).round().clamp(1.0, 255.0) as u8;
+                bytes[k * 3 + 1] = (s[1] / s[3]).round().clamp(0.0, 255.0) as u8;
+                bytes[k * 3 + 2] = (s[2] / s[3]).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        Map::from_bare_bytes(&bytes).unwrap_or_else(|| Map::new(true))
     }
 
     /// The patches still to see (purple on the map), for the green targets: on a 256 × 128 grid,

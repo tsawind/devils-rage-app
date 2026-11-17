@@ -257,6 +257,7 @@ struct Session {
     /// The green targets: patches still to see on the planet map and the sky (from 95 %).
     base_targets: Vec<base::Target>,
     sky_targets: Vec<base::Target>,
+    run_targets: Vec<base::Target>,
     targets_at: Option<Instant>,
     /// What the page's Do now box says (kept with each recorded picture).
     page_say: String,
@@ -357,6 +358,7 @@ impl Default for Session {
             recorder: None,
             base_targets: Vec::new(),
             sky_targets: Vec::new(),
+            run_targets: Vec::new(),
             targets_at: None,
             page_say: String::new(),
         }
@@ -1111,6 +1113,10 @@ impl Session {
                 Some(b) if self.base_cov.0 >= 0.95 && self.base_cov.0 < 0.9995 => b.targets(6),
                 _ => Vec::new(),
             };
+            self.run_targets = match self.run.as_ref() {
+                Some(r) if !r.done && r.map.coverage() >= 0.9 => base::patches(scan::GRID_W, scan::GRID_H, &r.map.missing(), 6),
+                _ => Vec::new(),
+            };
             let reach = self.reach.filter(|_| gas);
             let done = self.sky_done();
             self.sky_targets = match self.planet_id().and_then(|pid| self.skies.get(&pid)) {
@@ -1264,6 +1270,11 @@ impl Session {
             run.map.despeckle(0.2);
             let cells = run.map.cells();
             let resource = run.resource.clone();
+            // The colours seen, kept on the PC (every scan, by time), to read again later.
+            if let Some(dir) = self.dir.as_ref() {
+                let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                jobs.push(Job::WriteFile { path: dir.join("scans").join(format!("{pid}-{}-{stamp}.bin", safe_name(&resource))), bytes: run.map.raw_bytes() });
+            }
             if autosave {
                 jobs.push(Job::SaveScan { planet: pid, planet_name: pname.clone(), resource: resource.clone(), character_id, cells, coverage });
             }
@@ -1314,7 +1325,8 @@ impl Session {
         let own = self.planet_id().and_then(|id| self.skies.get(&id));
         let run = self.run.as_ref().map(|r| {
             let hint = self.pose.as_ref().filter(|_| !r.done).and_then(|p| r.map.missing_hint(&pose_q(p.yaw, p.pitch), p.mirrored));
-            json!({ "resource": r.resource, "row": r.row, "coverage": r.map.coverage(), "done": r.done, "paused": r.paused, "secs": r.started.elapsed().as_secs_f64(), "frames": r.painted_frames, "version": r.map.version, "missing": hint })
+            json!({ "resource": r.resource, "row": r.row, "coverage": r.map.coverage(), "done": r.done, "paused": r.paused, "secs": r.started.elapsed().as_secs_f64(), "frames": r.painted_frames, "version": r.map.version, "missing": hint,
+                "targets": self.run_targets.iter().map(|t| [t.lat, t.lon, t.radius]).collect::<Vec<_>>() })
         });
         json!({
             "client": self.client,
@@ -2054,6 +2066,18 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
                 return Err("pick the planet first".into());
             }
             let bare = resource.is_empty();
+            // A resource is read against the planet's own colours: from its planet map (the
+            // same frame as the facings), which has to be done first.
+            if !bare {
+                let pid = s.planet_id().unwrap_or(0);
+                let own = if s.base_cov.0 >= 0.9 { s.base.as_ref().map(|b| b.bare_map()) } else { None };
+                match own {
+                    Some(m) => {
+                        s.bares.insert(pid, m);
+                    }
+                    None => return Err("map the planet first (its planet map to 99 %): resources are read against its own colours".into()),
+                }
+            }
             s.run = Some(Run { resource, row, map: Map::new(bare), started: Instant::now(), done: false, paused: None, painted_frames: 0 });
         }
     }
@@ -2289,12 +2313,18 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
         // Inside the lock only a quick copy: the scanner keeps going while the picture is made.
         enum Snapshot {
             Planet(usize, usize, Vec<u8>),
+            Resource(Vec<u8>),
             Sky { w: usize, h: usize, sum: Vec<f32>, n: Vec<u16>, mw: usize, mh: usize, msum: Vec<f32>, mn: Vec<u16>, reach: Option<[bool; 181]> },
             None,
         }
         let copy = {
             let s = inner.state.lock().unwrap();
-            if kind == "planet" {
+            if kind == "resource" {
+                match s.run.as_ref().filter(|r| !r.resource.is_empty()) {
+                    Some(r) => Snapshot::Resource(r.map.cells()),
+                    None => Snapshot::None,
+                }
+            } else if kind == "planet" {
                 match s.base.as_ref() {
                     Some(b) => Snapshot::Planet(b.w, b.h, b.rgb()),
                     None => Snapshot::None,
@@ -2312,6 +2342,19 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
         };
         let (w, h, rgb) = match copy {
             Snapshot::None => return tauri::ipc::Response::new(Vec::new()),
+            Snapshot::Resource(cells) => {
+                // EVE's own band, low → high, at twice the grid; not seen yet purple.
+                let (w, h) = (scan::GRID_W * 2, scan::GRID_H * 2);
+                let mut rgb = vec![0u8; w * h * 3];
+                for y in 0..h {
+                    for x in 0..w {
+                        let c = cells[(y / 2) * scan::GRID_W + x / 2];
+                        let px = if c == 0 { [96, 0, 88] } else { scan::band_rgb((c - 1) as f32 / 250.0) };
+                        rgb[(y * w + x) * 3..(y * w + x) * 3 + 3].copy_from_slice(&px);
+                    }
+                }
+                (w, h, rgb)
+            }
             Snapshot::Planet(w, h, mut rgb) => {
                 base::fill_gaps(&mut rgb, w, h);
                 // Not seen yet: purple, so a missed spot stands out on a dark planet.

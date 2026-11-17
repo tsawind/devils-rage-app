@@ -11,6 +11,9 @@ pub const GRID_H: usize = 180;
 /// Paint from within about 37° of the disc's middle (facing ≥ 0.8); a cell keeps its most
 /// face-on look, and is settled once seen at 0.97.
 pub const PAINT_FACING: f64 = 0.8;
+/// A resource scan from within about 45° (facing ≥ 0.7): EVE's resource fields are smooth on a
+/// 1° grid, so a bit more of each picture counts and a planet fills in faster.
+pub const RESOURCE_FACING: f64 = 0.7;
 const SETTLED: f32 = 0.97;
 
 /// EVE's scan colours to heat 0..1 when the bare planet isn't known (blue .2 → red .8 → white 1).
@@ -71,6 +74,19 @@ fn band_fine() -> &'static [[f32; 3]; STEPS] {
     })
 }
 
+/// EVE's band colour for a level (for showing a scan), brightened to full strength.
+pub fn band_rgb(level: f32) -> [u8; 3] {
+    let t = level.clamp(0.0, 1.0) * (BAND.len() - 1) as f32;
+    let a = t.floor() as usize;
+    let b = (a + 1).min(BAND.len() - 1);
+    let f = t - a as f32;
+    let mut out = [0u8; 3];
+    for c in 0..3 {
+        out[c] = ((BAND[a][c] * (1.0 - f) + BAND[b][c] * f) * 1.3).round().clamp(0.0, 255.0) as u8;
+    }
+    out
+}
+
 /// Resource level 0 … 1 at a pixel, knowing the bare planet's colour there; None where the
 /// planet is too bright to see through (glowing lava).
 pub fn unmix(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
@@ -99,15 +115,21 @@ pub struct Map {
     pub bare: bool,
     /// Resource: level; bare: r, g, b.
     pub value: Vec<f32>,
+    /// Resource: the colours seen (r, g, b), kept so the levels can be read again later against
+    /// a better planet map.
+    pub raw: Vec<f32>,
     pub seen: Vec<bool>,
     pub best: Vec<f32>,
     pub version: u64,
+    /// Each picture's sums per cell (r, g, b, count, level) and how face-on, kept between pictures.
+    scratch: Vec<[f32; 5]>,
+    square: Vec<f32>,
 }
 
 impl Map {
     pub fn new(bare: bool) -> Map {
         let n = GRID_W * GRID_H;
-        Map { bare, value: vec![0.0; if bare { n * 3 } else { n }], seen: vec![false; n], best: vec![0.0; n], version: 0 }
+        Map { bare, value: vec![0.0; if bare { n * 3 } else { n }], raw: if bare { Vec::new() } else { vec![0.0; n * 3] }, seen: vec![false; n], best: vec![0.0; n], version: 0, scratch: vec![[0.0; 5]; n], square: vec![0.0; n] }
     }
     pub fn coverage(&self) -> f64 {
         let (mut seen, mut all) = (0.0, 0.0);
@@ -131,67 +153,90 @@ impl Map {
     }
     /// Paint one picture: every disc pixel facing the camera well enough (`every` = pixel step).
     /// With `bare`, a resource map unmixed against the planet's own colours. Returns cells painted.
+    /// The pixels are worked out on several cores (the unmixing is the slow part).
     pub fn paint(&mut self, pic: &Pic, disc: &Disc, q: &M3, mirrored: bool, every: usize, bare: Option<&Map>) -> usize {
         let qt = transpose(q);
-        let n = GRID_W * GRID_H;
-        // This picture's own look at each cell: sums and how face-on.
-        let mut sum = vec![[0f32; 4]; n];
-        let mut square = vec![0f32; n];
-        let mut touched: Vec<usize> = Vec::new();
+        let every = every.max(1);
         let (y0, y1) = ((disc.cy - disc.r).floor().max(0.0) as usize, ((disc.cy + disc.r).ceil() as usize).min(pic.h - 1));
         let (x0, x1) = ((disc.cx - disc.r).floor().max(0.0) as usize, ((disc.cx + disc.r).ceil() as usize).min(pic.w - 1));
-        let mut y = y0;
-        while y <= y1 {
-            let mut x = x0;
-            while x <= x1 {
-                if let Some(v) = to_sphere(x as f64, y as f64, disc) {
-                    let f = facing_of(&v, disc);
-                    if f >= PAINT_FACING {
-                        let (lat, lon) = lat_lon(&apply(&qt, &v), mirrored);
-                        let row = ((lat / PI * GRID_H as f64).floor() as usize).min(GRID_H - 1);
-                        let col = ((lon / (2.0 * PI) * GRID_W as f64).floor() as usize).min(GRID_W - 1);
-                        let cell = row * GRID_W + col;
-                        let (r, g, b) = pic.rgb(x, y);
-                        let level = if self.bare {
-                            Some(0.0)
-                        } else if let Some((br, bg, bb)) = bare.and_then(|m| m.bare_rgb(cell)) {
-                            unmix(r, g, b, br, bg, bb)
-                        } else {
-                            Some(heat(r, g, b))
-                        };
-                        if let Some(level) = level {
-                            let s = &mut sum[cell];
-                            if s[3] == 0.0 {
-                                touched.push(cell);
+        let rows: Vec<usize> = (y0..=y1).step_by(every).collect();
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 8);
+        let chunk = rows.len().div_ceil(threads).max(1);
+        let is_bare = self.bare;
+        let min_facing = if is_bare { PAINT_FACING } else { RESOURCE_FACING };
+        // Each pixel: its cell, colour, level and how face-on.
+        let looks: Vec<Vec<(u32, [f32; 4], f32)>> = std::thread::scope(|sc| {
+            let handles: Vec<_> = rows
+                .chunks(chunk)
+                .map(|band| {
+                    sc.spawn(move || {
+                        let mut out = Vec::with_capacity(band.len() * (x1 - x0) / every + 1);
+                        for &y in band {
+                            let mut x = x0;
+                            while x <= x1 {
+                                if let Some(v) = to_sphere(x as f64, y as f64, disc) {
+                                    let f = facing_of(&v, disc);
+                                    if f >= min_facing {
+                                        let (lat, lon) = lat_lon(&apply(&qt, &v), mirrored);
+                                        let row = ((lat / PI * GRID_H as f64).floor() as usize).min(GRID_H - 1);
+                                        let col = ((lon / (2.0 * PI) * GRID_W as f64).floor() as usize).min(GRID_W - 1);
+                                        let cell = row * GRID_W + col;
+                                        let (r, g, b) = pic.rgb(x, y);
+                                        let level = if is_bare {
+                                            Some(0.0)
+                                        } else if let Some((br, bg, bb)) = bare.and_then(|m| m.bare_rgb(cell)) {
+                                            unmix(r, g, b, br, bg, bb)
+                                        } else {
+                                            Some(heat(r, g, b))
+                                        };
+                                        if let Some(level) = level {
+                                            out.push((cell as u32, [r as f32, g as f32, b as f32, level], f as f32));
+                                        }
+                                    }
+                                }
+                                x += every;
                             }
-                            s[0] += r as f32;
-                            s[1] += g as f32;
-                            s[2] += b as f32;
-                            s[3] += 1.0;
-                            if !self.bare {
-                                s[0] = s[0] - r as f32 + level;
-                            }
-                            square[cell] = square[cell].max(f as f32);
                         }
-                    }
+                        out
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+        });
+        // This picture's own look at each cell: sums and how face-on.
+        let mut touched: Vec<usize> = Vec::new();
+        for part in &looks {
+            for &(cell, c, f) in part {
+                let cell = cell as usize;
+                let s = &mut self.scratch[cell];
+                if s[3] == 0.0 {
+                    touched.push(cell);
                 }
-                x += every;
+                s[0] += c[0];
+                s[1] += c[1];
+                s[2] += c[2];
+                s[3] += 1.0;
+                s[4] += c[3];
+                self.square[cell] = self.square[cell].max(f);
             }
-            y += every;
         }
         let mut painted = 0;
         for cell in touched {
-            if self.best[cell] >= SETTLED || square[cell] <= self.best[cell] + 0.02 {
+            let s = std::mem::replace(&mut self.scratch[cell], [0.0; 5]);
+            let square = std::mem::replace(&mut self.square[cell], 0.0);
+            if self.best[cell] >= SETTLED || square <= self.best[cell] + 0.02 {
                 continue;
             }
-            self.best[cell] = square[cell];
-            let s = sum[cell];
+            self.best[cell] = square;
             if self.bare {
                 self.value[cell * 3] = s[0] / s[3];
                 self.value[cell * 3 + 1] = s[1] / s[3];
                 self.value[cell * 3 + 2] = s[2] / s[3];
             } else {
-                self.value[cell] = s[0] / s[3];
+                self.value[cell] = s[4] / s[3];
+                self.raw[cell * 3] = s[0] / s[3];
+                self.raw[cell * 3 + 1] = s[1] / s[3];
+                self.raw[cell * 3 + 2] = s[2] / s[3];
             }
             self.seen[cell] = true;
             painted += 1;
@@ -200,6 +245,23 @@ impl Map {
             self.version += 1;
         }
         painted
+    }
+    /// A resource scan to keep on the PC: "RAW1", then for each cell its level byte (as `cells`)
+    /// and the colours seen (r, g, b; 0 where not seen), so it can be read again later.
+    pub fn raw_bytes(&self) -> Vec<u8> {
+        let n = GRID_W * GRID_H;
+        let mut out = b"RAW1".to_vec();
+        out.extend(self.cells());
+        for i in 0..n {
+            for c in 0..3 {
+                out.push(if self.seen[i] && !self.bare { self.raw[i * 3 + c].round().clamp(0.0, 255.0) as u8 } else { 0 });
+            }
+        }
+        out
+    }
+    /// The cells still to see (for the green targets).
+    pub fn missing(&self) -> Vec<bool> {
+        self.seen.iter().map(|&s| !s).collect()
     }
     /// EVE's resource fields are smooth: a lone cell far from the cells round it takes their median.
     pub fn despeckle(&mut self, limit: f32) {
@@ -416,6 +478,42 @@ pub fn picked_row(pic: &Pic, spot: &ListSpot) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A planet of one colour with EVE's band at 0.6 laid over it, painted on several cores:
+    /// every cell seen reads 0.6, and the colours seen are kept.
+    #[test]
+    fn resource_painted_against_the_bare_planet() {
+        use crate::planetscan::geom::{pose_q, Disc};
+        let bare_rgb = [90.0f32, 80.0, 70.0];
+        let bytes: Vec<u8> = (0..GRID_W * GRID_H).flat_map(|_| [90u8, 80, 70]).collect();
+        let bare = Map::from_bare_bytes(&bytes).unwrap();
+        let level = 0.6f32;
+        let c = band_fine()[(level * (STEPS - 1) as f32).round() as usize];
+        let seen: Vec<u8> = (0..3).map(|k| ((1.0 - OVERLAY) * bare_rgb[k] + c[k]).round() as u8).collect();
+        let (w, h) = (640usize, 400usize);
+        let disc = Disc::with_lens(320.0, 200.0, 100.0, 375.0);
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                if (x as f64 - 320.0).hypot(y as f64 - 200.0) < 100.0 {
+                    px[(y * w + x) * 4..(y * w + x) * 4 + 4].copy_from_slice(&[seen[2], seen[1], seen[0], 255]);
+                }
+            }
+        }
+        let mut m = Map::new(false);
+        let painted = m.paint(&Pic { w, h, bgra: &px }, &disc, &pose_q(0.4, 0.3), false, 1, Some(&bare));
+        assert!(painted > 100, "{painted}");
+        for i in 0..GRID_W * GRID_H {
+            if m.seen[i] {
+                assert!((m.value[i] - level).abs() < 0.03, "cell {i}: {}", m.value[i]);
+                assert!((m.raw[i * 3] - seen[0] as f32).abs() < 1.0, "raw {}", m.raw[i * 3]);
+            }
+        }
+        let raw = m.raw_bytes();
+        assert_eq!(raw.len(), 4 + GRID_W * GRID_H * 4);
+        // Painting the same picture again changes nothing (each cell keeps its most face-on look).
+        assert_eq!(m.paint(&Pic { w, h, bgra: &px }, &disc, &pose_q(0.4, 0.3), false, 1, Some(&bare)), 0);
+    }
 
     #[test]
     fn unmix_finds_the_band() {

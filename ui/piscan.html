@@ -91,6 +91,8 @@
   #log div { padding: 2px 0; border-top: 1px solid #202026; }
   #log div:first-child { border-top: 0; }
   #log .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+  #resList { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 12.5px; margin: 6px 0 2px; }
+  #resList .on { color: var(--ok); } #resList .now { color: var(--warn); }
   /* the live progress card (over the map, not the picture) */
   #card { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); max-width: 78%; z-index: 5; background: rgba(14,22,8,.93); border: 1.5px solid #4e7f12; border-radius: 10px; padding: 9px 14px 10px; box-shadow: 0 6px 24px #000; }
   #card .t { font-size: 15px; font-weight: 600; color: var(--ok); margin-bottom: 3px; }
@@ -155,6 +157,13 @@
       <div class="row"><button class="btn" id="forgetBase" title="Throw this planet's map away (here and the corp's copy) and start again">Start over</button></div>
     </div></div>
 
+    <div class="step"><div class="n" id="n6">6</div><div>
+      <h3>Resources <span class="state" id="s6"></span></h3>
+      <div class="small muted">Once the planet map and sky are done: click each resource in EVE's scan list. The app sees which one is lit, scans it while you spin the planet, and saves it at 99 %.</div>
+      <div id="resList"></div>
+      <div class="row"><button class="btn" id="saveRes" title="Save this resource for the corp now, even under 99 %">Save it now</button><button class="btn" id="stopRes" title="Stop this resource's scan (nothing saved)">Stop</button></div>
+    </div></div>
+
     <div class="step"><div class="n" id="n5">5</div><div>
       <h3>Save for the corp <span class="state" id="s5"></span></h3>
       <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (the planet map and its sky)</label>
@@ -166,13 +175,13 @@
   <div id="right">
     <div class="view" id="viewBox"><canvas id="shot"></canvas><div class="badge" id="badge"></div><div class="zoomsaid" id="shotZoom"></div><div class="clickhint" id="clickHint"></div></div>
     <div class="view" id="mapBox"><canvas id="map"></canvas>
-      <div class="tabs"><button class="btn" id="tabPlanet">Planet map</button><button class="btn" id="tabSky">Sky map</button></div>
+      <div class="tabs"><button class="btn" id="tabPlanet">Planet map</button><button class="btn" id="tabSky">Sky map</button><button class="btn" id="tabRes" hidden>Resource</button></div>
       <div class="zoomsaid" id="mapZoom"></div>
       <div id="card" hidden><span class="hide" id="cardHide">Hide</span><div class="t" id="cardTitle"></div><div class="nums" id="cardNums"></div><div class="x" id="cardText"></div></div>
     </div>
     <div id="panel">
       <div class="card now"><h2>Do now</h2><div class="say" id="say">Starting…</div>
-        <div class="row" id="ask" hidden><button class="btn go" id="startBtn" title="EVE zoomed all the way out on this planet: the app starts watching after a 5 second countdown">Start</button><button class="btn" id="cancelStart" hidden>Cancel</button></div>
+        <div class="row" id="ask" hidden><button class="btn go" id="startBtn" title="EVE zoomed all the way out on this planet: the app starts watching after a 5 second countdown">Start</button><button class="btn" id="cancelStart" hidden>Cancel</button><button class="btn go" id="startRes" hidden title="Start scanning this resource now (if the app can't see EVE's list)"></button></div>
         <ul id="also"></ul></div>
       <div class="card small muted" id="mapNote">Wheel: zoom (on the picture and the map). Drag: move. Double-click: all of it.</div>
       <div class="card" style="flex: 1; display: flex; flex-direction: column; min-height: 0"><div class="small muted" style="margin-bottom: 4px">What happened</div><div id="log"></div></div>
@@ -432,15 +441,16 @@
   let mapKind = settings.mapKind === "sky" ? "sky" : "planet", mapImg = null, mapVersion = -1, mapAt = 0, mapBusy = false, mapDrawnAt = 0;
   function setMapKind(kind) {
     mapKind = kind; settings.mapKind = kind; keep();
-    $("tabPlanet").classList.toggle("on", kind === "planet"); $("tabSky").classList.toggle("on", kind === "sky");
+    $("tabPlanet").classList.toggle("on", kind === "planet"); $("tabSky").classList.toggle("on", kind === "sky"); $("tabRes").classList.toggle("on", kind === "resource");
     mapImg = null; mapVersion = -1; drawMap(); refreshMap(true);
   }
   $("tabPlanet").addEventListener("click", () => setMapKind("planet"));
   $("tabSky").addEventListener("click", () => setMapKind("sky"));
+  $("tabRes").addEventListener("click", () => setMapKind("resource"));
   async function refreshMap(force) {
     const s = status;
     if (!s || mapBusy) return;
-    const version = mapKind === "planet" ? (s.base_map ? s.base_map.version : 0) : (s.sky && s.sky.own ? s.sky.own.frames : -2);
+    const version = mapKind === "planet" ? (s.base_map ? s.base_map.version : 0) : mapKind === "resource" ? (s.run ? s.run.version : -3) : (s.sky && s.sky.own ? s.sky.own.frames : -2);
     if (!force && version === mapVersion && Date.now() - mapAt < 15000) return;
     if (!force && Date.now() - mapAt < (mapKind === "planet" ? 1000 : 2500)) return;
     mapBusy = true;
@@ -469,7 +479,7 @@
     } else {
       mctx.fillStyle = "#0e0e14"; mctx.fillRect(f.x, f.y, iw * f.k, ih * f.k);
       mctx.fillStyle = "#8a8a92"; mctx.font = `${13 * dpr}px Segoe UI, sans-serif`; mctx.textAlign = "center";
-      mctx.fillText(mapKind === "planet" ? "No planet map yet: it paints in as you spin the planet (EVE on No filter)." : "No sky yet: turn the planet sideways in EVE.", W / 2, H / 2);
+      mctx.fillText(mapKind === "planet" ? "No planet map yet: it paints in as you spin the planet (EVE on No filter)." : mapKind === "resource" ? "No resource being scanned: click one in EVE's scan list." : "No sky yet: turn the planet sideways in EVE.", W / 2, H / 2);
     }
     // 30° grid.
     mctx.strokeStyle = "rgba(255,255,255,.08)"; mctx.lineWidth = 1;
@@ -489,13 +499,13 @@
     let cross = null;
     if (s && s.pose && s.pose.q) {
       const Q = s.pose.q;
-      const t = mapKind === "planet" ? [0, 0, 1] : [0, 0, -1];
+      const t = mapKind === "sky" ? [0, 0, -1] : [0, 0, 1];
       const v = [Q[0] * t[0] + Q[3] * t[1] + Q[6] * t[2], Q[1] * t[0] + Q[4] * t[1] + Q[7] * t[2], Q[2] * t[0] + Q[5] * t[1] + Q[8] * t[2]];
       const lat = Math.acos(Math.max(-1, Math.min(1, v[2]))); let lon = Math.atan2(v[1], v[0]); if (lon < 0) lon += 2 * Math.PI;
       cross = { lat: lat / RAD, lon: lon / RAD, v };
     }
     // The green targets: patches still to see. The nearest one to the cross is the brightest.
-    const targets = s ? (mapKind === "planet" ? (s.base_map && s.base_map.targets) : (s.sky && s.sky.targets)) || [] : [];
+    const targets = s ? (mapKind === "planet" ? (s.base_map && s.base_map.targets) : mapKind === "resource" ? (s.run && s.run.targets) : (s.sky && s.sky.targets)) || [] : [];
     if (targets.length) {
       const apart = (t) => {
         if (!cross) return 0;
@@ -527,7 +537,7 @@
       mctx.strokeStyle = s.pose.placed ? "#ff5a4a" : "#f0c040"; mctx.lineWidth = 2 * dpr;
       mctx.beginPath(); mctx.moveTo(x - 9 * dpr, y); mctx.lineTo(x + 9 * dpr, y); mctx.moveTo(x, y - 9 * dpr); mctx.lineTo(x, y + 9 * dpr); mctx.stroke();
     }
-    $("mapZoom").textContent = (zMap.k > 1 ? `${zMap.k.toFixed(1)}× · ` : "") + (mapKind === "planet" ? "north at the top" : "the sky round this planet");
+    $("mapZoom").textContent = (zMap.k > 1 ? `${zMap.k.toFixed(1)}× · ` : "") + (mapKind === "sky" ? "the sky round this planet" : mapKind === "resource" ? `${(status && status.run && status.run.resource) || "resource"}: EVE's colours, low → high · north at the top` : "north at the top");
   }
 
   // ---------- reading the status: steps, tips, events ----------
@@ -553,6 +563,11 @@
         // SeAT's own list after a moment (who saved what, when).
         clearTimeout(reloadSoon); reloadSoon = setTimeout(loadPlanets, 4000);
       }
+      if (ev.kind === "done" && ev.resource && ev.planet_id) {
+        if (!resDoneNow.has(ev.planet_id)) resDoneNow.set(ev.planet_id, new Set());
+        resDoneNow.get(ev.planet_id).add(ev.resource);
+      }
+      if (ev.kind === "saved" && ev.resource) { clearTimeout(reloadSoon); reloadSoon = setTimeout(loadPlanets, 4000); }
       if (ev.kind === "base-done" && planet) {
         // The live card over the map: it keeps counting and closes by itself once both are done.
         card.for = planet.planet_id; card.hidden = false; card.doneAt = 0; card.saving = !!ev.saving;
@@ -609,6 +624,8 @@
     const picked = s.list ? s.list.picked : null;
     $("listSaid").textContent = picked == null ? (s.list && s.list.guessed ? "not seen" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`;
     $("listSaid").className = picked === 0 ? "ok" : "warn";
+    // 6: resources
+    drawResources(s);
     // 5
     setState(5, s.recording ? "recording" : s.autosave ? "autosave on" : "autosave off", s.recording ? "bad" : s.autosave ? "ok" : "warn");
     const rec = s.recording;
@@ -621,8 +638,12 @@
     const [say, also, ok, ask] = tips(s);
     $("say").textContent = say; $("say").className = "say" + (ok ? " ok" : "");
     $("ask").hidden = !ask;
-    $("startBtn").hidden = !!countdown;
-    $("cancelStart").hidden = !countdown;
+    $("startBtn").hidden = !!countdown || ask === "res";
+    $("cancelStart").hidden = !countdown || ask === "res";
+    const nextRes = ask === "res" ? nextResource(s) : null;
+    $("startRes").hidden = !nextRes;
+    if (nextRes) $("startRes").textContent = `Start ${nextRes}`;
+    autoStartResource(s);
     $("also").innerHTML = also.map((t) => `<li>${esc(t)}</li>`).join("");
     const badge = $("badge");
     badge.textContent = !s.started ? "Waiting for Start" : rg && rg.phase ? `Measuring the rings · ${pct(rg.progress)}` : pose ? (pose.placed ? (pose.by_planet ? "On the planet map (too little sky past the rings)" : `On the sky · stars ${pct(pose.stars)}`) : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
@@ -633,6 +654,83 @@
     const said = say + (also.length ? " | " + also.join(" | ") : "");
     if (said !== lastSaid) { lastSaid = said; invoke("planetscan_say", { text: said }).catch(() => {}); }
   }
+  // ---------- resources: one scan each, EVE's list order ----------
+  const resDoneNow = new Map();
+  let resStarting = null, resStartingAt = 0;
+  function planetComplete(s) {
+    const base = s.base_map || {}, own = s.sky && s.sky.own;
+    return (base.coverage || 0) >= 0.999 && (own ? own.done || 0 : 0) >= 0.999;
+  }
+  /** Resources done on this planet: in this session, or saved to SeAT in the last 12 hours. */
+  function resDone(p) {
+    const out = new Set(resDoneNow.get(p.planet_id) || []);
+    for (const r of resourcesOf(p)) {
+      const sc = scanInfo(p, r);
+      if (sc && sc.at && Date.now() / 1000 - sc.at < 12 * 3600 && (sc.coverage || 0) >= 0.95) out.add(r);
+    }
+    return out;
+  }
+  function nextResource(s) {
+    if (!planet) return null;
+    const done = resDone(planet);
+    return resourcesOf(planet).find((r) => !done.has(r)) || null;
+  }
+  function nextPlanetForResources() {
+    if (!planet) return null;
+    const list = systemOf(planet), at = list.findIndex((p) => p.planet_id === planet.planet_id);
+    const after = list.slice(at + 1).concat(list.slice(0, Math.max(0, at)));
+    return after.find((p) => resDone(p).size < resourcesOf(p).length) || null;
+  }
+  function resourceTips(s, also) {
+    const run = s.run, names = resourcesOf(planet), done = resDone(planet), picked = s.list ? s.list.picked : null;
+    if (run && run.resource && !run.done) {
+      if (run.paused) return [`Scanning ${run.resource}: paused (${run.paused}).`, also];
+      const miss = run.missing ? `; the rest is ${run.missing.split(":")[0]}` : "";
+      also.push("Bring the red cross onto the green circles to fill the last spots.");
+      return [`Scanning ${run.resource}: ${pct(run.coverage)}${miss}. Spin the planet every side and over both poles; it saves at 99 %.`, also];
+    }
+    const next = names.find((n) => !done.has(n));
+    if (!next) {
+      const np = nextPlanetForResources();
+      return [`${planet.name}: all ${names.length} resources scanned.${np ? ` Next: open ${np.name} in EVE and pick it on the left.` : " Every planet here is scanned."}`, also, true];
+    }
+    if (picked >= 1 && done.has(names[picked - 1])) also.push(`${names[picked - 1]} is done already.`);
+    if (picked == null) also.push("The app can't see which row of EVE's list is lit: press Start below, or point the list out (4).");
+    return [`Resources ${done.size} of ${names.length}: click ${next} in EVE's scan list. The app starts scanning it by itself.`, also, false, "res"];
+  }
+  function startResource(name, row) {
+    if (!planet || !name) return;
+    resStarting = name; resStartingAt = Date.now();
+    invoke("planetscan_scan", { resource: name, row: row || null })
+      .then(() => { log(`Scanning ${name} on ${planet.name}: spin the planet every side.`); setMapKind("resource"); })
+      .catch((e) => log(String(e), "bad"));
+  }
+  /** EVE's list shows a resource not done yet, on a finished planet, locked on: scan it. */
+  function autoStartResource(s) {
+    if (!planet || !s.started || !s.pose || !s.pose.placed || !planetComplete(s)) return;
+    const names = resourcesOf(planet), picked = s.list ? s.list.picked : null;
+    if (!picked || picked < 1 || picked > names.length) return;
+    const name = names[picked - 1];
+    if (s.run && s.run.resource === name) return;
+    if (resDone(planet).has(name)) return;
+    if (resStarting === name && Date.now() - resStartingAt < 3000) return;
+    startResource(name, picked);
+  }
+  function drawResources(s) {
+    const names = planet ? resourcesOf(planet) : [], done = planet ? resDone(planet) : new Set(), run = s.run;
+    $("resList").innerHTML = names.map((r) => {
+      const now = run && run.resource === r;
+      const sc = planet ? scanInfo(planet, r) : null;
+      const said = now && !run.done ? `scanning ${pct(run.coverage)}${run.paused ? " · paused" : ""}` : done.has(r) ? (sc && sc.at ? `done ${ago(sc.at)}` : "done") : sc && sc.at ? `last ${ago(sc.at)}` : "–";
+      return `<span class="${now && !run.done ? "now" : done.has(r) ? "on" : ""}">${esc(r)}</span><span class="${now && !run.done ? "now" : done.has(r) ? "on" : "muted"}">${esc(said)}</span>`;
+    }).join("");
+    setState(6, planet ? `${done.size} of ${names.length}` : "", done.size >= names.length && names.length ? "ok" : run && run.resource && !run.done ? "warn" : "muted", names.length > 0 && done.size >= names.length);
+    $("saveRes").hidden = !(run && run.resource && !run.done);
+    $("stopRes").hidden = !(run && run.resource && !run.done);
+    $("tabRes").hidden = !(run && run.resource);
+    if (mapKind === "resource" && !(run && run.resource)) setMapKind("planet");
+  }
+
   // The live card: shown at 99 % (or when a planet's map is past it), counting the map and the
   // sky; once both are at 99.9 % it says which planet is next and closes by itself after 10 s.
   const card = { for: null, hidden: false, doneAt: 0, saving: true, hiddenFor: new Set() };
@@ -710,6 +808,7 @@
       return ["Lost the sky: turn back a little, a bit slower.", also];
     }
     if (pose.by_planet) also.push("Past the rings there's hardly any sky: the app is following the planet's own map here. It records the planet map, not the sky.");
+    if (planetComplete(s) || (s.run && s.run.resource && !s.run.done)) return resourceTips(s, also);
     if (s.fast_turn) also.push("Turning fast: fine, but slow down if it loses the sky.");
     const skyDone = own ? own.done || 0 : 0, mapDone = base.coverage || 0;
     const skyMiss = s.sky && s.sky.missing ? `; the rest is ${s.sky.missing.split(":")[0]}` : "";
@@ -782,6 +881,9 @@
   $("home").addEventListener("click", () => { alive = false; invoke("planetscan_stop"); location.href = "index.html#pi"; });
   window.addEventListener("beforeunload", () => invoke("planetscan_stop"));
   $("popOk").addEventListener("click", () => { $("pop").style.display = "none"; });
+  $("startRes").addEventListener("click", () => { const n = nextResource(status); if (n) startResource(n, null); });
+  $("saveRes").addEventListener("click", () => invoke("planetscan_save").then(() => log("Saving this resource for the corp…")).catch((e) => log(String(e), "bad")));
+  $("stopRes").addEventListener("click", () => { invoke("planetscan_scan", { resource: null, row: null }); log("Resource scan stopped (not saved).", "warn"); });
   $("cardHide").addEventListener("click", () => { if (planet) card.hiddenFor.add(planet.planet_id); card.hidden = true; $("card").hidden = true; });
 
   // ---------- the loop: picture + status in one call ----------
