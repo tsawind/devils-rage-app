@@ -268,25 +268,6 @@ fn safe(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
 }
 
-/// Open the snapshot picker (a small window over the app).
-pub fn open_picker(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(PICKER) {
-        let _ = w.show();
-        let _ = w.set_focus();
-        return;
-    }
-    let built = tauri::WebviewWindowBuilder::new(app, PICKER, tauri::WebviewUrl::App("snapshot.html".into()))
-        .title("Snapshot of…")
-        .inner_size(380.0, 460.0)
-        .resizable(true)
-        .always_on_top(true)
-        .center()
-        .build();
-    if let Err(e) = built {
-        log::warn!("couldn't open the snapshot picker: {e}");
-    }
-}
-const PICKER: &str = "snapshot";
 
 /// A part of the desktop (a whole monitor) as it's shown now, BGRA.
 #[cfg(windows)]
@@ -538,7 +519,7 @@ fn video_loop(app: AppHandle, dir: PathBuf, stamp: u64, spec: VideoSpec) {
     log::info!("video saved: vid-{stamp}-*.bin, {frames} pictures, {} MB in {files} files", bytes >> 20);
 }
 
-/// Open the video recorder window.
+/// Open the capture window (snapshots and video of a source, with boxes).
 pub fn open_video(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(VIDEO_WINDOW) {
         let _ = w.show();
@@ -546,8 +527,9 @@ pub fn open_video(app: &AppHandle) {
         return;
     }
     let built = tauri::WebviewWindowBuilder::new(app, VIDEO_WINDOW, tauri::WebviewUrl::App("video.html".into()))
-        .title("Video (dev)")
-        .inner_size(1180.0, 860.0)
+        .title("Capture (dev)")
+        .inner_size(760.0, 560.0)
+        .min_inner_size(380.0, 260.0)
         .resizable(true)
         .center()
         .build();
@@ -556,3 +538,37 @@ pub fn open_video(app: &AppHandle) {
     }
 }
 const VIDEO_WINDOW: &str = "video";
+
+/// A snapshot of the boxes switched on (none: all of the source), each at full size, with the
+/// details file. Returns the files' common name. For pressing again and again while showing a bug.
+#[tauri::command]
+pub async fn dev_snapshot_boxes(app: AppHandle, target: Target, boxes: Vec<[u32; 4]>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = folder(&app)?;
+        let pic = grab(&app, &target)?;
+        // Unique even when pressed several times a second.
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let all = if boxes.is_empty() { vec![[0, 0, pic.width, pic.height]] } else { boxes.clone() };
+        let mut files = Vec::new();
+        for (k, b) in all.iter().enumerate() {
+            let Some((w, h, px)) = cut(&pic, *b, false) else { continue };
+            let mut jpeg = Vec::with_capacity(1 << 20);
+            jpeg_encoder::Encoder::new(&mut jpeg, 92).encode(&px, w as u16, h as u16, jpeg_encoder::ColorType::Bgra).map_err(|e| e.to_string())?;
+            let name = format!("snap-{stamp}-{}.jpg", k + 1);
+            std::fs::write(dir.join(&name), jpeg).map_err(|e| e.to_string())?;
+            files.push(name);
+        }
+        let s = crate::settings::load(&app);
+        let details = json!({
+            "at": stamp / 1000, "of": target, "boxes": all, "files": files, "source": [pic.width, pic.height],
+            "version": app.package_info().version.to_string(), "channel": s.channel(&app).as_str(),
+            "page": page_url(&app), "scan": scan_status(&app), "log": crate::commands::read_log(app.clone()),
+        });
+        std::fs::write(dir.join(format!("snap-{stamp}.json")), serde_json::to_vec_pretty(&details).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        log::info!("snapshot snap-{stamp}: {} box(es)", files.len());
+        *LAST_SNAP.lock().unwrap() = Some((format!("snap-{stamp}"), Instant::now()));
+        Ok(format!("snap-{stamp} ({} picture{})", files.len(), if files.len() == 1 { "" } else { "s" }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

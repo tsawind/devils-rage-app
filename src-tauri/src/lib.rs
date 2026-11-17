@@ -270,7 +270,7 @@ pub fn bar_action(app: &AppHandle, action: &str) {
         }
         "snapshot-pick" => {
             let app = app.clone();
-            std::thread::spawn(move || devrec::open_picker(&app));
+            std::thread::spawn(move || devrec::open_video(&app));
         }
         "snapshot" => {
             let app = app.clone();
@@ -374,6 +374,7 @@ pub fn run() {
             bar::bar_state,
             devrec::dev_snapshot_targets,
             devrec::dev_snapshot_take,
+            devrec::dev_snapshot_boxes,
             devrec::dev_video_still,
             devrec::dev_video_start,
             devrec::dev_video_stop,

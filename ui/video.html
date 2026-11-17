@@ -2,45 +2,48 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Video (dev)</title>
+<title>Capture (dev)</title>
 <style>
-  :root { --bg:#0a0a0c; --panel:#121216; --line:#24242c; --text:#c9c9d0; --muted:#6a6a72; --hi:#fff; --red-hi:#d6242c; --ok:#7fd45a; --bad:#ff6a5a; --box:#3fd0ff; }
+  :root { --bg:#0a0a0c; --panel:#121216; --line:#24242c; --text:#c9c9d0; --muted:#6a6a72; --hi:#fff; --red-hi:#d6242c; --ok:#7fd45a; --bad:#ff6a5a; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body { background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; display: grid; grid-template-columns: 300px 1fr; }
-  #side { padding: 14px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; overflow: auto; }
-  h1 { font-size: 14px; color: var(--hi); margin: 0; }
-  label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
-  select, button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; padding: 6px 9px; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font: 12px/1.35 "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; }
+  #bar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 6px; border-bottom: 1px solid var(--line); }
+  select, button { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; color: var(--text); font: inherit; padding: 4px 7px; }
   button { cursor: pointer; }
   button:hover { border-color: var(--red-hi); color: var(--hi); }
-  #go { font-weight: 600; padding: 9px; }
+  button:disabled, select:disabled { opacity: .5; cursor: default; }
+  #source { max-width: 210px; }
+  #snap, #go { font-weight: 600; }
   #go.on { border-color: var(--red-hi); color: #ff8a7a; }
-  #boxes { display: flex; flex-direction: column; gap: 4px; }
-  .bx { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-  .bx span { flex: 1; }
-  .bx button { padding: 1px 7px; }
-  .muted { color: var(--muted); font-size: 12px; }
-  #said { min-height: 34px; font-size: 12px; }
-  .ok { color: var(--ok); } .bad { color: var(--bad); }
-  #view { position: relative; overflow: auto; padding: 10px; }
-  #still { display: block; max-width: 100%; cursor: crosshair; }
-  .row { display: flex; gap: 6px; }
+  #more { display: none; gap: 5px; flex-wrap: wrap; align-items: center; }
+  body.more #more { display: flex; }
+  #boxes { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 0 6px; }
+  #boxes:empty { display: none; }
+  .bx { display: flex; align-items: center; gap: 3px; color: var(--muted); }
+  .bx button { padding: 0 5px; }
+  #said { padding: 3px 8px; color: var(--muted); min-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ok { color: var(--ok) !important; } .bad { color: var(--bad) !important; }
+  #view { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 4px; }
+  #still { cursor: crosshair; }
 </style>
 </head>
 <body>
-  <div id="side">
-    <h1>Video (dev)</h1>
-    <div class="muted">Pick what to record, drag boxes on the still to record only those parts (none on: all of it). Files of 30 s or 25 MB at most in the app's recordings folder (vid-…). Nothing leaves the PC.</div>
-    <label>Source <select id="source"></select></label>
-    <div class="row"><button id="refresh" title="A new still of the source">New still</button><button id="clear" title="Remove every box">Clear boxes</button></div>
-    <div id="boxes"></div>
-    <label>Pictures a second <select id="fps"><option>1</option><option selected>2</option><option>5</option><option>10</option><option>15</option></select></label>
-    <label>Quality <select id="quality"><option value="55">Low (small files)</option><option value="75" selected>Medium</option><option value="90">High (text sharp)</option></select></label>
-    <label>Size <select id="size"><option value="full" selected>Full</option><option value="half">Half</option></select></label>
-    <button id="go">Start recording</button>
-    <div id="said" class="muted"></div>
+  <div id="bar">
+    <select id="source" title="What to capture"></select>
+    <button id="refresh" title="A new still of the source">⟳</button>
+    <button id="snap" title="Save the boxes switched on (none: all of it) at full size, with every detail. Press as often as you like.">Snapshot</button>
+    <button id="go" title="Record the boxes switched on (none: all of it)">● Record</button>
+    <button id="opts" title="Video settings, clear boxes">⋯</button>
+    <span id="more">
+      <select id="fps" title="Pictures a second"><option value="1">1 / s</option><option value="2" selected>2 / s</option><option value="5">5 / s</option><option value="10">10 / s</option><option value="15">15 / s</option></select>
+      <select id="quality" title="Quality (file size)"><option value="55">Low</option><option value="75" selected>Medium</option><option value="90">High (sharp text)</option></select>
+      <select id="size" title="Full or half size"><option value="full" selected>Full size</option><option value="half">Half size</option></select>
+      <button id="clear" title="Remove every box">Clear boxes</button>
+    </span>
   </div>
+  <div id="boxes"></div>
+  <div id="said">Drag on the still to draw a box.</div>
   <div id="view"><canvas id="still"></canvas></div>
 <script>
   "use strict";
@@ -51,93 +54,115 @@
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("dev-video") || "{}") || {}; } catch (e) { saved = {}; }
   function keep() {
-    saved.source = $("source").value; saved.fps = $("fps").value; saved.quality = $("quality").value; saved.size = $("size").value;
-    saved.boxes = saved.boxes || {}; saved.boxes[saved.source] = boxes;
+    saved.source = targets[+$("source").value] ? targets[+$("source").value].label : saved.source;
+    saved.fps = $("fps").value; saved.quality = $("quality").value; saved.size = $("size").value; saved.more = document.body.classList.contains("more");
+    saved.boxes = saved.boxes || {}; if (saved.source) saved.boxes[saved.source] = boxes;
     try { localStorage.setItem("dev-video", JSON.stringify(saved)); } catch (e) {}
   }
-  function say(t, cls) { $("said").textContent = t; $("said").className = cls || "muted"; }
+  function say(t, cls) { $("said").textContent = t; $("said").className = cls || ""; }
   const target = () => (targets[+$("source").value] || {}).target;
+  const onBoxes = () => boxes.filter((b) => b.on).map((b) => b.r);
   async function loadTargets() {
     targets = await invoke("dev_snapshot_targets").catch(() => []);
     $("source").innerHTML = targets.map((t, i) => `<option value="${i}">${t.label.replace(/</g, "&lt;")}</option>`).join("");
-    if (saved.source && targets[+saved.source]) $("source").value = saved.source;
+    const at = targets.findIndex((t) => t.label === saved.source);
+    if (at >= 0) $("source").value = String(at);
     for (const k of ["fps", "quality", "size"]) if (saved[k]) $(k).value = saved[k];
+    document.body.classList.toggle("more", !!saved.more);
   }
   async function loadStill() {
     const t = target();
     if (!t) return;
-    say("Taking a still…");
     try {
       const r = await invoke("dev_video_still", { target: t });
       src = { w: r.w, h: r.h };
       const img = new Image();
-      img.onload = () => { still = img; canvas.width = img.width; canvas.height = img.height; draw(); say(`${r.w} × ${r.h}: drag on the still to add a box.`); };
+      img.onload = () => { still = img; canvas.width = img.width; canvas.height = img.height; fit(); draw(); };
       img.src = "data:image/jpeg;base64," + r.jpeg;
+      boxes = ((saved.boxes || {})[targets[+$("source").value].label] || []).map((b) => ({ ...b }));
+      listBoxes();
+      if (!$("said").className) say(`${r.w} × ${r.h}: drag on the still to draw a box.`);
     } catch (e) { say(`Couldn't take a still: ${e}`, "bad"); }
-    boxes = ((saved.boxes || {})[$("source").value] || []).map((b) => ({ ...b }));
-    listBoxes();
   }
+  // The still always fits the window, however small it's made.
+  function fit() {
+    if (!still) return;
+    const v = $("view"), k = Math.min((v.clientWidth - 8) / still.width, (v.clientHeight - 8) / still.height);
+    canvas.style.width = `${Math.max(40, still.width * k)}px`; canvas.style.height = `${Math.max(30, still.height * k)}px`;
+  }
+  new ResizeObserver(fit).observe($("view"));
   const k = () => canvas.width / src.w;
   function draw() {
     if (!still) return;
     ctx.drawImage(still, 0, 0);
-    ctx.lineWidth = 2;
+    const lw = Math.max(2, canvas.width / 500);
+    ctx.lineWidth = lw;
     boxes.forEach((b, i) => {
-      ctx.strokeStyle = b.on ? "#3fd0ff" : "rgba(160,160,170,.6)";
-      ctx.setLineDash(b.on ? [] : [6, 4]);
+      ctx.strokeStyle = b.on ? "#3fd0ff" : "rgba(160,160,170,.7)";
+      ctx.setLineDash(b.on ? [] : [lw * 3, lw * 2]);
       ctx.strokeRect(b.r[0] * k(), b.r[1] * k(), b.r[2] * k(), b.r[3] * k());
-      ctx.fillStyle = b.on ? "#3fd0ff" : "#999"; ctx.font = "bold 13px Segoe UI";
-      ctx.fillText(String(i + 1), b.r[0] * k() + 5, b.r[1] * k() + 16);
+      ctx.fillStyle = ctx.strokeStyle; ctx.font = `bold ${Math.round(lw * 7)}px Segoe UI`;
+      ctx.fillText(String(i + 1), b.r[0] * k() + lw * 3, b.r[1] * k() + lw * 8);
     });
     ctx.setLineDash([]);
     if (drag) { ctx.strokeStyle = "#ffd24a"; ctx.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0); }
   }
   function listBoxes() {
-    $("boxes").innerHTML = "";
+    const box = $("boxes"); box.innerHTML = "";
     boxes.forEach((b, i) => {
-      const row = document.createElement("div"); row.className = "bx";
+      const row = document.createElement("label"); row.className = "bx"; row.title = `${b.r[2]} × ${b.r[3]} at ${b.r[0]}, ${b.r[1]}`;
       const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = b.on; cb.disabled = on;
       cb.addEventListener("change", () => { b.on = cb.checked; keep(); draw(); });
-      const t = document.createElement("span"); t.textContent = `Box ${i + 1}: ${b.r[2]} × ${b.r[3]} at ${b.r[0]}, ${b.r[1]}`;
+      const t = document.createElement("span"); t.textContent = `Box ${i + 1}`;
       const x = document.createElement("button"); x.textContent = "✕"; x.disabled = on; x.title = "Remove this box";
-      x.addEventListener("click", () => { boxes.splice(i, 1); keep(); listBoxes(); draw(); });
-      row.append(cb, t, x); $("boxes").append(row);
+      x.addEventListener("click", (e) => { e.preventDefault(); boxes.splice(i, 1); keep(); listBoxes(); draw(); });
+      row.append(cb, t, x); box.append(row);
     });
-    if (!boxes.length) $("boxes").innerHTML = '<div class="muted">No boxes: the whole source is recorded.</div>';
   }
-  const pos = (e) => { const r = canvas.getBoundingClientRect(); return [(e.clientX - r.left) * canvas.width / r.width, (e.clientY - r.top) * canvas.height / r.height]; };
+  // Mouse to the still's own pixels, kept inside it.
+  const pos = (e) => {
+    const r = canvas.getBoundingClientRect();
+    const x = Math.min(Math.max(0, (e.clientX - r.left) * canvas.width / r.width), canvas.width);
+    const y = Math.min(Math.max(0, (e.clientY - r.top) * canvas.height / r.height), canvas.height);
+    return [x, y];
+  };
   canvas.addEventListener("mousedown", (e) => { if (on || !still) return; const [x, y] = pos(e); drag = { x0: x, y0: y, x1: x, y1: y }; });
   window.addEventListener("mousemove", (e) => { if (!drag) return; const [x, y] = pos(e); drag.x1 = x; drag.y1 = y; draw(); });
   window.addEventListener("mouseup", () => {
     if (!drag) return;
-    const x = Math.min(drag.x0, drag.x1) / k(), y = Math.min(drag.y0, drag.y1) / k(), w = Math.abs(drag.x1 - drag.x0) / k(), h = Math.abs(drag.y1 - drag.y0) / k();
+    let x = Math.round(Math.min(drag.x0, drag.x1) / k()), y = Math.round(Math.min(drag.y0, drag.y1) / k());
+    let w = Math.round(Math.abs(drag.x1 - drag.x0) / k()), h = Math.round(Math.abs(drag.y1 - drag.y0) / k());
     drag = null;
-    if (w > 16 && h > 16) {
-      const r = [Math.max(0, Math.round(x)), Math.max(0, Math.round(y)), Math.round(Math.min(w, src.w - x)), Math.round(Math.min(h, src.h - y))];
-      // Even sizes, so half size halves cleanly.
-      r[2] -= r[2] % 2; r[3] -= r[3] % 2;
-      boxes.push({ r, on: true }); keep(); listBoxes();
-    }
+    w = Math.min(w, src.w - x); h = Math.min(h, src.h - y);
+    // Even sizes, so half size halves cleanly.
+    w -= w % 2; h -= h % 2;
+    if (w > 16 && h > 16) { boxes.push({ r: [x, y, w, h], on: true }); keep(); listBoxes(); }
     draw();
   });
-  $("source").addEventListener("change", () => { keep(); loadStill(); });
+  $("source").addEventListener("change", () => { say(""); keep(); loadStill(); });
   for (const id of ["fps", "quality", "size"]) $(id).addEventListener("change", keep);
   $("refresh").addEventListener("click", loadStill);
+  $("opts").addEventListener("click", () => { document.body.classList.toggle("more"); keep(); fit(); });
   $("clear").addEventListener("click", () => { boxes = []; keep(); listBoxes(); draw(); });
+  $("snap").addEventListener("click", async () => {
+    $("snap").disabled = true;
+    try { say(`Saved ${await invoke("dev_snapshot_boxes", { target: target(), boxes: onBoxes() })}`, "ok"); } catch (e) { say(`Couldn't: ${e}`, "bad"); }
+    $("snap").disabled = false;
+  });
   $("go").addEventListener("click", async () => {
     if (on) { await invoke("dev_video_stop"); return; }
-    const spec = { target: target(), boxes: boxes.filter((b) => b.on).map((b) => b.r), fps: +$("fps").value, quality: +$("quality").value, half: $("size").value === "half" };
-    try { const dir = await invoke("dev_video_start", { spec }); say(`Recording into ${dir}`, "ok"); } catch (e) { say(`Couldn't start: ${e}`, "bad"); }
+    const spec = { target: target(), boxes: onBoxes(), fps: +$("fps").value, quality: +$("quality").value, half: $("size").value === "half" };
+    try { await invoke("dev_video_start", { spec }); say("Recording…", "ok"); } catch (e) { say(`Couldn't start: ${e}`, "bad"); }
   });
   async function poll() {
     try {
       const st = await invoke("dev_video_status");
       const was = on; on = !!st.on;
-      $("go").textContent = on ? `● Stop (${Math.floor(st.secs / 60)}:${String(st.secs % 60).padStart(2, "0")})` : "Start recording";
+      $("go").textContent = on ? `■ Stop ${Math.floor(st.secs / 60)}:${String(st.secs % 60).padStart(2, "0")}` : "● Record";
       $("go").classList.toggle("on", on);
       for (const id of ["source", "fps", "quality", "size", "refresh", "clear"]) $(id).disabled = on;
-      if (on) say(`${st.frames} pictures · ${st.mb.toFixed(1)} MB · ${st.files} file${st.files === 1 ? "" : "s"}`, "ok");
-      else if (was) say(`Saved: ${st.frames} pictures, ${st.mb.toFixed(1)} MB in ${st.files} files (vid-…).`, "ok");
+      if (on) say(`Recording: ${st.frames} pictures · ${st.mb.toFixed(1)} MB · ${st.files} file${st.files === 1 ? "" : "s"}`, "ok");
+      else if (was) say(`Video saved: ${st.frames} pictures, ${st.mb.toFixed(1)} MB in ${st.files} files (vid-…)`, "ok");
       if (was !== on) listBoxes();
     } catch (e) {}
   }
