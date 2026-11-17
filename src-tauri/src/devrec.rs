@@ -201,6 +201,8 @@ pub enum Target {
     /// Monitor's place and size on the desktop (physical pixels).
     Monitor { name: String, x: i32, y: i32, w: u32, h: u32 },
     Client { name: String },
+    /// Every monitor together (the whole desktop): boxes anywhere on any screen.
+    Desktop { x: i32, y: i32, w: u32, h: u32 },
 }
 
 /// Everything there is to take a snapshot of, for the picker window.
@@ -208,6 +210,14 @@ pub enum Target {
 pub fn dev_snapshot_targets(app: AppHandle) -> Vec<serde_json::Value> {
     let mut out = vec![json!({ "label": "This app's window", "target": Target::App })];
     if let Ok(monitors) = app.available_monitors() {
+        if monitors.len() > 1 {
+            let x0 = monitors.iter().map(|m| m.position().x).min().unwrap_or(0);
+            let y0 = monitors.iter().map(|m| m.position().y).min().unwrap_or(0);
+            let x1 = monitors.iter().map(|m| m.position().x + m.size().width as i32).max().unwrap_or(0);
+            let y1 = monitors.iter().map(|m| m.position().y + m.size().height as i32).max().unwrap_or(0);
+            let (w, h) = ((x1 - x0).max(0) as u32, (y1 - y0).max(0) as u32);
+            out.push(json!({ "label": format!("All screens · {w} × {h}"), "target": Target::Desktop { x: x0, y: y0, w, h } }));
+        }
         for (i, m) in monitors.iter().enumerate() {
             let (pos, size) = (m.position(), m.size());
             let name = format!("Monitor {}", i + 1);
@@ -236,6 +246,7 @@ pub async fn dev_snapshot_take(app: AppHandle, target: Target) -> Result<String,
                 (crate::capture::window_picture(handle, 8192)?, format!("eve-{}", safe(name)))
             }
             Target::Monitor { name, x, y, w, h } => (screen_picture(*x, *y, *w, *h)?, safe(name).to_lowercase()),
+            Target::Desktop { x, y, w, h } => (screen_picture(*x, *y, *w, *h)?, "screens".to_string()),
         };
         let mut jpeg = Vec::with_capacity(2 << 20);
         jpeg_encoder::Encoder::new(&mut jpeg, 92)
@@ -347,8 +358,59 @@ fn grab(app: &AppHandle, target: &Target) -> Result<crate::capture::Picture, Str
             let handle = crate::clipboard::open_clients().into_iter().find(|(n, _)| n == name).map(|(_, h)| h).ok_or("that EVE client is closed")?;
             crate::capture::window_picture(handle, 8192)
         }
-        Target::Monitor { x, y, w, h, .. } => screen_picture(*x, *y, *w, *h),
+        Target::Monitor { x, y, w, h, .. } | Target::Desktop { x, y, w, h } => screen_picture(*x, *y, *w, *h),
     }
+}
+
+/// One piece of a capture: which box, where in the source, its size and pixels (BGRA).
+struct Piece {
+    k: usize,
+    rect: [u32; 4],
+    w: u32,
+    h: u32,
+    px: Vec<u8>,
+}
+
+/// The boxes (none: all of it) out of a source, at full or half size, and the source's size.
+/// On screens each box is read straight off the screen, so small boxes on three 4K monitors cost
+/// only their own pixels.
+fn pieces(app: &AppHandle, target: &Target, boxes: &[[u32; 4]], half: bool) -> Result<((u32, u32), Vec<Piece>), String> {
+    let screen = match target {
+        Target::Monitor { x, y, w, h, .. } | Target::Desktop { x, y, w, h } => Some((*x, *y, *w, *h)),
+        _ => None,
+    };
+    if let (Some((sx, sy, sw, sh)), false) = (screen, boxes.is_empty()) {
+        let mut out = Vec::new();
+        for (k, b) in boxes.iter().enumerate() {
+            let (bx, by) = (b[0].min(sw), b[1].min(sh));
+            let (bw, bh) = (b[2].min(sw - bx), b[3].min(sh - by));
+            if bw < 8 || bh < 8 {
+                continue;
+            }
+            let pic = screen_picture(sx + bx as i32, sy + by as i32, bw, bh)?;
+            if let Some((w, h, px)) = cut(&pic, [0, 0, bw, bh], half) {
+                out.push(Piece { k, rect: [bx, by, bw, bh], w, h, px });
+            }
+        }
+        return Ok(((sw, sh), out));
+    }
+    let pic = grab(app, target)?;
+    let all = if boxes.is_empty() { vec![[0, 0, pic.width, pic.height]] } else { boxes.to_vec() };
+    let out = all
+        .iter()
+        .enumerate()
+        .filter_map(|(k, b)| cut(&pic, *b, half).map(|(w, h, px)| Piece { k, rect: *b, w, h, px }))
+        .collect();
+    Ok(((pic.width, pic.height), out))
+}
+
+/// Open the app's recordings folder (snapshots and videos) in Explorer.
+#[tauri::command]
+pub fn dev_open_recordings(app: AppHandle) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = folder(&app)?;
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())?;
+    Ok(dir.display().to_string())
 }
 
 /// One box out of a picture (clipped to it), at full or half size, BGRA.
@@ -472,21 +534,19 @@ fn video_loop(app: AppHandle, dir: PathBuf, stamp: u64, spec: VideoSpec) {
                 }
             }
         }
-        match grab(&app, &spec.target) {
-            Ok(pic) => {
-                let boxes = if spec.boxes.is_empty() { vec![[0, 0, pic.width, pic.height]] } else { spec.boxes.clone() };
+        match pieces(&app, &spec.target, &spec.boxes, spec.half) {
+            Ok((source, got)) => {
                 let details = details_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(1));
                 if details {
                     details_at = Some(Instant::now());
                 }
-                for (k, b) in boxes.iter().enumerate() {
-                    let Some((w, h, px)) = cut(&pic, *b, spec.half) else { continue };
+                for (n, p) in got.iter().enumerate() {
                     let mut jpeg = Vec::with_capacity(256 * 1024);
-                    if jpeg_encoder::Encoder::new(&mut jpeg, quality).encode(&px, w as u16, h as u16, jpeg_encoder::ColorType::Bgra).is_err() {
+                    if jpeg_encoder::Encoder::new(&mut jpeg, quality).encode(&p.px, p.w as u16, p.h as u16, jpeg_encoder::ColorType::Bgra).is_err() {
                         continue;
                     }
-                    let mut note = json!({ "ms": started.elapsed().as_millis() as u64, "at": now_secs(), "box": k, "rect": b, "w": w, "h": h, "source": [pic.width, pic.height] });
-                    if details && k == 0 {
+                    let mut note = json!({ "ms": started.elapsed().as_millis() as u64, "at": now_secs(), "box": p.k, "rect": p.rect, "w": p.w, "h": p.h, "source": [source.0, source.1] });
+                    if details && n == 0 {
                         note["page"] = json!(page_url(&app));
                         note["scan"] = scan_status(&app);
                     }
@@ -545,22 +605,22 @@ const VIDEO_WINDOW: &str = "video";
 pub async fn dev_snapshot_boxes(app: AppHandle, target: Target, boxes: Vec<[u32; 4]>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let dir = folder(&app)?;
-        let pic = grab(&app, &target)?;
         // Unique even when pressed several times a second.
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-        let all = if boxes.is_empty() { vec![[0, 0, pic.width, pic.height]] } else { boxes.clone() };
+        let (source, got) = pieces(&app, &target, &boxes, false)?;
         let mut files = Vec::new();
-        for (k, b) in all.iter().enumerate() {
-            let Some((w, h, px)) = cut(&pic, *b, false) else { continue };
+        let mut rects = Vec::new();
+        for p in &got {
             let mut jpeg = Vec::with_capacity(1 << 20);
-            jpeg_encoder::Encoder::new(&mut jpeg, 92).encode(&px, w as u16, h as u16, jpeg_encoder::ColorType::Bgra).map_err(|e| e.to_string())?;
-            let name = format!("snap-{stamp}-{}.jpg", k + 1);
+            jpeg_encoder::Encoder::new(&mut jpeg, 92).encode(&p.px, p.w as u16, p.h as u16, jpeg_encoder::ColorType::Bgra).map_err(|e| e.to_string())?;
+            let name = format!("snap-{stamp}-{}.jpg", p.k + 1);
             std::fs::write(dir.join(&name), jpeg).map_err(|e| e.to_string())?;
             files.push(name);
+            rects.push(p.rect);
         }
         let s = crate::settings::load(&app);
         let details = json!({
-            "at": stamp / 1000, "of": target, "boxes": all, "files": files, "source": [pic.width, pic.height],
+            "at": stamp / 1000, "of": target, "boxes": rects, "files": files, "source": [source.0, source.1],
             "version": app.package_info().version.to_string(), "channel": s.channel(&app).as_str(),
             "page": page_url(&app), "scan": scan_status(&app), "log": crate::commands::read_log(app.clone()),
         });

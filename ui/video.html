@@ -40,6 +40,7 @@
       <select id="quality" title="Quality (file size)"><option value="55">Low</option><option value="75" selected>Medium</option><option value="90">High (sharp text)</option></select>
       <select id="size" title="Full or half size"><option value="full" selected>Full size</option><option value="half">Half size</option></select>
       <button id="clear" title="Remove every box">Clear boxes</button>
+      <button id="folder" title="Open the folder the snapshots and videos go to">Open folder</button>
     </span>
   </div>
   <div id="boxes"></div>
@@ -50,11 +51,12 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
   const $ = (id) => document.getElementById(id);
   const canvas = $("still"), ctx = canvas.getContext("2d");
-  let targets = [], still = null, src = { w: 1, h: 1 }, boxes = [], drag = null, on = false;
+  // cur: the source the boxes shown belong to (they're kept per source, by its name).
+  let targets = [], still = null, src = { w: 1, h: 1 }, boxes = [], drag = null, on = false, cur = null;
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem("dev-video") || "{}") || {}; } catch (e) { saved = {}; }
   function keep() {
-    saved.source = targets[+$("source").value] ? targets[+$("source").value].label : saved.source;
+    saved.source = cur || saved.source;
     saved.fps = $("fps").value; saved.quality = $("quality").value; saved.size = $("size").value; saved.more = document.body.classList.contains("more");
     saved.boxes = saved.boxes || {}; if (saved.source) saved.boxes[saved.source] = boxes;
     try { localStorage.setItem("dev-video", JSON.stringify(saved)); } catch (e) {}
@@ -67,6 +69,7 @@
     $("source").innerHTML = targets.map((t, i) => `<option value="${i}">${t.label.replace(/</g, "&lt;")}</option>`).join("");
     const at = targets.findIndex((t) => t.label === saved.source);
     if (at >= 0) $("source").value = String(at);
+    cur = targets[+$("source").value] ? targets[+$("source").value].label : null;
     for (const k of ["fps", "quality", "size"]) if (saved[k]) $(k).value = saved[k];
     document.body.classList.toggle("more", !!saved.more);
   }
@@ -79,7 +82,7 @@
       const img = new Image();
       img.onload = () => { still = img; canvas.width = img.width; canvas.height = img.height; fit(); draw(); };
       img.src = "data:image/jpeg;base64," + r.jpeg;
-      boxes = ((saved.boxes || {})[targets[+$("source").value].label] || []).map((b) => ({ ...b }));
+      boxes = ((saved.boxes || {})[cur] || []).map((b) => ({ ...b }));
       listBoxes();
       if (!$("said").className) say(`${r.w} × ${r.h}: drag on the still to draw a box.`);
     } catch (e) { say(`Couldn't take a still: ${e}`, "bad"); }
@@ -139,10 +142,16 @@
     if (w > 16 && h > 16) { boxes.push({ r: [x, y, w, h], on: true }); keep(); listBoxes(); }
     draw();
   });
-  $("source").addEventListener("change", () => { say(""); keep(); loadStill(); });
+  $("source").addEventListener("change", () => {
+    keep();
+    cur = targets[+$("source").value] ? targets[+$("source").value].label : null;
+    boxes = ((saved.boxes || {})[cur] || []).map((b) => ({ ...b }));
+    keep(); listBoxes(); say(""); loadStill();
+  });
   for (const id of ["fps", "quality", "size"]) $(id).addEventListener("change", keep);
   $("refresh").addEventListener("click", loadStill);
   $("opts").addEventListener("click", () => { document.body.classList.toggle("more"); keep(); fit(); });
+  $("folder").addEventListener("click", () => invoke("dev_open_recordings").then((d) => say(`Saved in ${d}`)).catch((e) => say(String(e), "bad")));
   $("clear").addEventListener("click", () => { boxes = []; keep(); listBoxes(); draw(); });
   $("snap").addEventListener("click", async () => {
     $("snap").disabled = true;

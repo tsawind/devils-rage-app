@@ -375,6 +375,7 @@ pub fn run() {
             devrec::dev_snapshot_targets,
             devrec::dev_snapshot_take,
             devrec::dev_snapshot_boxes,
+            devrec::dev_open_recordings,
             devrec::dev_video_still,
             devrec::dev_video_start,
             devrec::dev_video_stop,
