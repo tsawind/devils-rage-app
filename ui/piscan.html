@@ -161,7 +161,7 @@
       <h3>Resources <span class="state" id="s6"></span></h3>
       <div class="small muted">Once the planet map and sky are done: click each resource in EVE's scan list. The app sees which one is lit, scans it while you spin the planet, and saves it at 99 %.</div>
       <div id="resList"></div>
-      <div class="row"><button class="btn" id="saveRes" title="Save this resource for the corp now, even under 99 %">Save it now</button><button class="btn" id="stopRes" title="Stop this resource's scan (nothing saved)">Stop</button></div>
+      <div class="row"><button class="btn" id="saveRes" title="Save this resource for the corp now, even under 99 %">Save it now</button><button class="btn" id="stopRes" title="Stop this resource's scan (nothing saved)">Stop</button><button class="btn" id="rescanRes" title="Scan this planet's resources again (a fresh before/after scan): the ones done so far count as not done">Scan all again</button></div>
     </div></div>
 
     <div class="step"><div class="n" id="n5">5</div><div>
@@ -707,12 +707,14 @@
     const base = s.base_map || {}, own = s.sky && s.sky.own;
     return (base.coverage || 0) >= 0.999 && (own ? own.done || 0 : 0) >= 0.999;
   }
-  /** Resources done on this planet: in this session, or saved to SeAT in the last 12 hours. */
+  /** Resources done on this planet: in this session, or saved to SeAT in the last 12 hours (and
+   *  since "Scan all again" was pressed for it, if it was). */
   function resDone(p) {
     const out = new Set(resDoneNow.get(p.planet_id) || []);
+    const since = Math.max(Date.now() / 1000 - 12 * 3600, ((settings.rescan || {})[p.planet_id]) || 0);
     for (const r of resourcesOf(p)) {
       const sc = scanInfo(p, r);
-      if (sc && sc.at && Date.now() / 1000 - sc.at < 12 * 3600 && (sc.coverage || 0) >= 0.95) out.add(r);
+      if (sc && sc.at && sc.at > since && (sc.coverage || 0) >= 0.95) out.add(r);
     }
     return out;
   }
@@ -738,6 +740,7 @@
     const next = names.find((n) => !done.has(n));
     if (!next) {
       const np = nextPlanetForResources();
+      also.push("To scan them again (before/after), press Scan all again (6).");
       return [`${planet.name}: all ${names.length} resources scanned.${np ? ` Next: open ${np.name} in EVE and pick it on the left.` : " Every planet here is scanned."}`, also, true];
     }
     if (picked >= 1 && done.has(names[picked - 1])) also.push(`${names[picked - 1]} is done already.`);
@@ -772,6 +775,7 @@
     }).join("");
     setState(6, planet ? `${done.size} of ${names.length}` : "", done.size >= names.length && names.length ? "ok" : run && run.resource && !run.done ? "warn" : "muted", names.length > 0 && done.size >= names.length);
     $("saveRes").hidden = !(run && run.resource && !run.done);
+    $("rescanRes").hidden = !planet || done.size === 0 || !!(run && run.resource && !run.done);
     $("stopRes").hidden = !(run && run.resource && !run.done);
     $("tabRes").hidden = !(run && run.resource);
     if (run && run.resource && !run.done && run.resource + ":" + (planet && planet.planet_id) !== shownRun) {
@@ -917,6 +921,15 @@
     });
   };
   twice("forgetSky", "Record again", () => { invoke("planetscan_forget_sky", { planetId: planet.planet_id }); log(`${planet.name}: its own sky is forgotten; it starts again as you turn.`, "warn"); });
+  twice("rescanRes", "Scan all again", () => {
+    settings.rescan = settings.rescan || {};
+    settings.rescan[planet.planet_id] = Math.floor(Date.now() / 1000);
+    keep();
+    resDoneNow.delete(planet.planet_id);
+    shownRun = null;
+    invoke("planetscan_scan", { resource: null, row: null });
+    log(`${planet.name}: its resources are scanned again from the first one (the earlier scans stay in SeAT's history).`, "warn");
+  });
   twice("forgetRings", "Measure the rings again", () => { invoke("planetscan_forget_rings", { planetId: planet.planet_id }); log(`${planet.name}: its rings are measured again (from over the top, then the bottom); its sky starts again after.`, "warn"); });
   twice("forgetBase", "Start over", () => { invoke("planetscan_forget_base", { planetId: planet.planet_id }); mapImg = null; drawMap(); log(`${planet.name}: its planet map starts over.`, "warn"); });
   $("baseOn").addEventListener("change", () => invoke("planetscan_base", { on: $("baseOn").checked }));
