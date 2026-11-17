@@ -118,10 +118,10 @@ pub fn unmix_any(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> 
     }
 }
 
-/// How bright EVE's light can make a gas giant's own colour against its planet map. EVE lights
-/// the planet from the top of the picture whichever way it's turned, so the same place is dimmer
-/// low in the picture and brighter high up than the planet map has it. Kept narrow: from 1.3 up,
-/// VIII's replayed Base Metals belt started losing real readings to "no resource".
+/// How bright EVE's light can make a gas giant's own colour against its planet map: the light
+/// moves over the disc with the camera, so the same place is dimmer in one picture and brighter
+/// in another than the planet map has it. Kept narrow: from 1.3 up, VIII's replayed Base Metals
+/// belt started losing real readings to "no resource".
 const GAS_LIGHT: (f32, f32) = (0.8, 1.15);
 
 /// A gas giant: EVE lays its colours only where the resource is (on planet VIII a belt round the
