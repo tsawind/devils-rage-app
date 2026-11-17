@@ -763,6 +763,127 @@ pub fn picked_row(pic: &Pic, spot: &ListSpot) -> Option<usize> {
     Some(best)
 }
 
+/// EVE's colour range slider, just above "No filter" in the resource list: where its two small
+/// triangle handles sit along the bar, as fractions 0 … 1 of the bar (lowest level shown, highest
+/// level shown). (0, 1) = both right out, the full range: only then are two scans' colours the
+/// same levels. None when the two handles aren't both seen (panel closed or moved, Build tab).
+///
+/// The bar's place comes from the list spot: its ends 1.93 rows left and 6.19 rows right of the
+/// names' x (measured on Tsa's 1918 × 1024 window at 90 % UI scale), so a list spot clicked far
+/// along the names shifts the reading; the handles themselves are found from the picture.
+pub fn slider_handles(pic: &Pic, spot: &ListSpot) -> Option<(f64, f64)> {
+    let found = slider_boxes(pic, spot)?;
+    if found.contrast < 14.0 {
+        return None;
+    }
+    let gap = (spot.y5 - spot.y0) / 5.0;
+    let (t0, t1) = (spot.x - 1.93 * gap, spot.x + 6.19 * gap);
+    // Within a pixel and a half of an end counts as right out.
+    let snap = 1.5 / (t1 - t0);
+    let at = |x: f64| {
+        let v = ((x - t0) / (t1 - t0)).clamp(0.0, 1.0);
+        if v < snap {
+            0.0
+        } else if v > 1.0 - snap {
+            1.0
+        } else {
+            v
+        }
+    };
+    // Each handle points at the bar with its upright side.
+    Some((at((found.left + found.side) as f64), at(found.right as f64)))
+}
+
+/// The slider's two handles as found in the picture: each one's little box (left edge x, their
+/// top y, the box's side) and how clearly the fainter of the two stands out (grey levels).
+#[derive(Clone, Copy, Debug)]
+pub struct SliderBoxes {
+    pub left: usize,
+    pub right: usize,
+    pub top: usize,
+    pub side: usize,
+    pub contrast: f64,
+}
+
+/// The handles are light triangles about 0.28 rows across: the left one "◢", the right one "◣",
+/// upright sides towards the bar. Each is found by its shape: the lit half of its box against the
+/// other half, and against the strip just outside its slanted side (dark for a handle; lit for
+/// the colour band's own edge), so neither the band nor a bright sky behind the see-through panel
+/// reads as a handle. Both must sit on the same line.
+pub fn slider_boxes(pic: &Pic, spot: &ListSpot) -> Option<SliderBoxes> {
+    let gap = (spot.y5 - spot.y0) / 5.0;
+    if gap < 12.0 {
+        return None;
+    }
+    let n = ((0.28 * gap).round() as usize).max(4);
+    let xa = (spot.x - 2.6 * gap).floor().max(4.0) as usize;
+    let xb = ((spot.x + 6.9 * gap).ceil().max(0.0) as usize).min(pic.w.saturating_sub(4));
+    let ya = (spot.y0 - 1.15 * gap).floor().max(0.0) as usize;
+    let yb = ((spot.y0 - 0.45 * gap).ceil().max(0.0) as usize).min(pic.h);
+    if xb < xa + 4 * n || yb < ya + n {
+        return None;
+    }
+    let mut best: Option<SliderBoxes> = None;
+    for top in ya..=yb - n {
+        let mut scores: Vec<(f64, f64)> = Vec::with_capacity(xb - xa);
+        for x in xa..=xb - n {
+            // Row by row (the top and bottom rows left out, and the slant itself, which is half
+            // lit): the lit run against the dark run. A handle shows the step in every row; the
+            // colour band's edges and its white end, far brighter than a handle, only in some.
+            // So the second-weakest row counts.
+            let (mut rows_l, mut rows_r) = (Vec::with_capacity(n), Vec::with_capacity(n));
+            let (mut lit_l, mut lit_r) = ((0.0f64, 0.0f64), (0.0f64, 0.0f64));
+            // The three columns just outside each side of the box (the brightest of them counts).
+            let (mut out_l, mut out_r) = ([0.0f64; 3], [0.0f64; 3]);
+            for j in 0..n {
+                if j >= 1 && j + 1 < n {
+                    let (mut ll, mut dl, mut lr, mut dr) = ((0.0f64, 0.0f64), (0.0f64, 0.0f64), (0.0f64, 0.0f64), (0.0f64, 0.0f64));
+                    for i in 0..n {
+                        let v = pic.lum(x + i, top + j) as f64;
+                        // "◢": lit right of its slant.
+                        if i + j >= n {
+                            ll = (ll.0 + v, ll.1 + 1.0);
+                        } else if i + j + 1 < n {
+                            dl = (dl.0 + v, dl.1 + 1.0);
+                        }
+                        // "◣": lit left of its slant.
+                        if j > i {
+                            lr = (lr.0 + v, lr.1 + 1.0);
+                        } else if j < i {
+                            dr = (dr.0 + v, dr.1 + 1.0);
+                        }
+                    }
+                    rows_l.push(ll.0 / ll.1.max(1.0) - dl.0 / dl.1.max(1.0));
+                    rows_r.push(lr.0 / lr.1.max(1.0) - dr.0 / dr.1.max(1.0));
+                    lit_l = (lit_l.0 + ll.0, lit_l.1 + ll.1);
+                    lit_r = (lit_r.0 + lr.0, lit_r.1 + lr.1);
+                }
+                for k in 0..3 {
+                    out_l[k] += pic.lum(x - 2 - k, top + j) as f64;
+                    out_r[k] += pic.lum(x + n + 1 + k, top + j) as f64;
+                }
+            }
+            let (out_l, out_r) = (out_l.iter().cloned().fold(0.0, f64::max) / n as f64, out_r.iter().cloned().fold(0.0, f64::max) / n as f64);
+            rows_l.sort_by(f64::total_cmp);
+            rows_r.sort_by(f64::total_cmp);
+            let (lit_l, lit_r) = (lit_l.0 / lit_l.1.max(1.0), lit_r.0 / lit_r.1.max(1.0));
+            // Outside a handle's slanted side it's dark; past the left handle's upright side too
+            // (the band starts with its darkest colour there; at the right handle it ends white).
+            let left = rows_l[1.min(rows_l.len() - 1)].min(lit_l - out_l).min(lit_l - out_r);
+            let right = rows_r[1.min(rows_r.len() - 1)].min(lit_r - out_r);
+            scores.push((left, right));
+        }
+        let Some((li, l)) = scores.iter().map(|s| s.0).enumerate().max_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
+        // The right handle is right of the left one.
+        let Some((ri, r)) = scores.iter().map(|s| s.1).enumerate().skip(li + 2 * n).max_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
+        let contrast = l.min(r);
+        if best.is_none_or(|b| contrast > b.contrast) {
+            best = Some(SliderBoxes { left: xa + li, right: xa + ri, top, side: n, contrast });
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1054,6 +1175,72 @@ mod tests {
         // One picked, another under the mouse: can't tell, so none.
         let px = list_picture(w, h, |_, _| 20, &[1, 2]);
         assert_eq!(picked_row(&Pic { w, h, bgra: &px }, &spot), None);
+    }
+
+    /// EVE's colour range slider as on Tsa's pictures, for a list at x 140, y0 60, y5 186: a ruler
+    /// line, the colour band between the handles (dark at the low end, a white block at the high
+    /// end, far brighter than the handles), the two see-through triangle handles, a few stars.
+    fn slider_picture(w: usize, h: usize, sky: impl Fn(usize, usize) -> u8, handles: Option<(f64, f64)>) -> Vec<u8> {
+        let (t0, t1) = (140.0 - 1.93 * 25.2, 140.0 + 6.19 * 25.2);
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let mut c = [sky(x, y) as f32 * 0.6 + 12.0; 3];
+                if (x * 7 + y * 13) % 211 == 0 {
+                    c = [170.0; 3]; // a star
+                }
+                if y == 27 && (83..306).contains(&x) {
+                    c = [150.0; 3]; // the ruler
+                }
+                if let Some((lo, hi)) = handles {
+                    let (a, b) = ((t0 + lo * (t1 - t0)).round() as usize, (t0 + hi * (t1 - t0)).round() as usize);
+                    let (i, j) = (x as i64, y as i64 - 37);
+                    // The band: between the handles, rows 37 … 42.
+                    if (0..6).contains(&j) && x > a && x + 1 < b {
+                        let t = (x - a) as f32 / (b - a) as f32;
+                        let band = if t > 0.94 { [200.0; 3] } else { [20.0 + 180.0 * t, 14.0 + 90.0 * (1.0 - (2.0 * t - 1.0).abs()), 25.0] };
+                        for k in 0..3 {
+                            c[k] = 0.3 * c[k] + band[k];
+                        }
+                    }
+                    // The handles: 7 × 7, rows 37 … 43, the left one's upright side at a − 1, the
+                    // right one's at b.
+                    let lit = (0..7).contains(&j) && ((i >= a as i64 - 7 && i < a as i64 && (i - (a as i64 - 7)) + j >= 6) || (i >= b as i64 && i < b as i64 + 7 && j >= i - b as i64));
+                    if lit {
+                        for v in c.iter_mut() {
+                            *v += 0.5 * (255.0 - *v);
+                        }
+                    }
+                }
+                let k = (y * w + x) * 4;
+                px[k..k + 4].copy_from_slice(&[c[2].clamp(0.0, 255.0) as u8, c[1].clamp(0.0, 255.0) as u8, c[0].clamp(0.0, 255.0) as u8, 255]);
+            }
+        }
+        px
+    }
+
+    /// The slider's handles are read where they are: right out reads (0, 1) exactly, pulled in
+    /// reads how far, on a dark sky and with a bright nebula behind the panel; no handles, none.
+    #[test]
+    fn slider_handles_are_read() {
+        let (w, h) = (420usize, 260usize);
+        let spot = ListSpot { x: 140.0, y0: 60.0, y5: 186.0 };
+        let dark = |_: usize, _: usize| 10u8;
+        let nebula = |x: usize, y: usize| (120.0 + 80.0 * ((x as f64 / 60.0).sin() * (y as f64 / 45.0).cos())) as u8;
+        for (name, sky) in [("dark sky", &dark as &dyn Fn(usize, usize) -> u8), ("nebula", &nebula)] {
+            let px = slider_picture(w, h, sky, Some((0.0, 1.0)));
+            assert_eq!(slider_handles(&Pic { w, h, bgra: &px }, &spot), Some((0.0, 1.0)), "right out, {name}");
+            for want in [(0.25, 0.8), (0.0, 0.5), (0.4, 1.0), (0.3, 0.45)] {
+                let px = slider_picture(w, h, sky, Some(want));
+                let got = slider_handles(&Pic { w, h, bgra: &px }, &spot).unwrap_or((-1.0, -1.0));
+                assert!((got.0 - want.0).abs() < 0.012 && (got.1 - want.1).abs() < 0.012, "{want:?} on {name}: read {got:?}");
+                assert!(got != (0.0, 1.0));
+            }
+            let px = slider_picture(w, h, sky, None);
+            assert_eq!(slider_handles(&Pic { w, h, bgra: &px }, &spot), None, "no handles, {name}");
+        }
+        // No room for a list: none.
+        assert_eq!(slider_handles(&Pic { w: 40, h: 40, bgra: &vec![0u8; 40 * 40 * 4] }, &ListSpot { x: 10.0, y0: 5.0, y5: 30.0 }), None);
     }
 
     /// A bright patch of nebula behind the list (brightest round "No filter" and Heavy Metals)

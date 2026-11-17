@@ -422,6 +422,7 @@ pub fn run() {
             planetscan::planetscan_find,
             planetscan::planetscan_scan,
             planetscan::planetscan_save,
+            planetscan::planetscan_keep,
             planetscan::planetscan_list,
             planetscan::planetscan_skymap,
             planetscan::planetscan_map,
