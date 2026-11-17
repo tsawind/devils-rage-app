@@ -18,6 +18,14 @@ pub const PAINT_FACING: f64 = 0.8;
 /// 1° grid, so a bit more of each picture counts and a planet fills in faster.
 pub const RESOURCE_FACING: f64 = 0.7;
 const SETTLED: f32 = 0.97;
+/// A planet map colour this bright (glowing lava) can't be seen through: EVE's resource colours
+/// laid over it read as nothing.
+pub const GLOW: f32 = 215.0;
+/// A cell with only unreadable looks this face-on, at least this many over at least this many
+/// pictures (about 1.5 s: not one blink of EVE's colours fading in), can't be read either.
+const BLIND_FACING: f32 = 0.85;
+const BLIND_LOOKS: u16 = 6;
+const BLIND_SPAN: u32 = 45;
 
 /// EVE's scan colours to heat 0..1 when the bare planet isn't known (blue .2 → red .8 → white 1).
 pub fn heat(r: u8, g: u8, b: u8) -> f32 {
@@ -94,7 +102,7 @@ pub fn band_rgb(level: f32) -> [u8; 3] {
 /// planet is too bright to see through (glowing lava). Every 4th step of the band first, then
 /// the steps round the best (a third of the work of trying them all, the same answer).
 pub fn unmix(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
-    if br.max(bg).max(bb) > 215.0 {
+    if br.max(bg).max(bb) > GLOW {
         return None;
     }
     let k = 1.0 - OVERLAY;
@@ -172,6 +180,17 @@ pub struct Map {
     /// Each picture's sums per cell (r, g, b, count, level) and how face-on, kept between pictures.
     scratch: Vec<[f32; 5]>,
     square: Vec<f32>,
+    /// How face-on this picture's unreadable looks at each cell were.
+    failed: Vec<f32>,
+    /// Cells EVE's colours can't be read through (glowing lava): unreadable looks so far (MAX =
+    /// glows on the planet map), and the pictures of the first and the last of them. They don't
+    /// count as still to see.
+    blind: Vec<u16>,
+    blind_span: Vec<(u32, u32)>,
+    pictures: u32,
+    /// The coverage worked out last, and the version it was for (+1; 0 = none yet): it's asked
+    /// for many times a second and only changes when cells are painted.
+    cov_cache: (std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU64),
 }
 
 impl Map {
@@ -181,15 +200,88 @@ impl Map {
     /// A map on a w × h grid (rows from the north pole, longitude round).
     pub fn with_size(bare: bool, w: usize, h: usize) -> Map {
         let n = w * h;
-        Map { bare, w, h, value: vec![0.0; if bare { n * 3 } else { n }], raw: if bare { Vec::new() } else { vec![0.0; n * 3] }, seen: vec![false; n], best: vec![0.0; n], version: 0, scratch: vec![[0.0; 5]; n], square: vec![0.0; n] }
+        Map {
+            bare,
+            w,
+            h,
+            value: vec![0.0; if bare { n * 3 } else { n }],
+            raw: if bare { Vec::new() } else { vec![0.0; n * 3] },
+            seen: vec![false; n],
+            best: vec![0.0; n],
+            version: 0,
+            scratch: vec![[0.0; 5]; n],
+            square: vec![0.0; n],
+            failed: vec![0.0; n],
+            blind: vec![0; n],
+            blind_span: vec![(0, 0); n],
+            pictures: 0,
+            cov_cache: Default::default(),
+        }
+    }
+    /// Seen, or can't be seen (glowing lava): nothing more to do there.
+    #[inline]
+    pub fn known(&self, i: usize) -> bool {
+        self.seen[i] || self.blind_cell(i)
+    }
+    #[inline]
+    fn blind_cell(&self, i: usize) -> bool {
+        let b = self.blind[i];
+        b == u16::MAX || (b >= BLIND_LOOKS && self.blind_span[i].1 - self.blind_span[i].0 >= BLIND_SPAN)
+    }
+    /// Cells the planet map shows glowing (lava too bright to see EVE's colours through, the same
+    /// rule the reading uses): they can never be read, so they aren't left to see. Returns their
+    /// share of the planet.
+    pub fn mark_glow(&mut self, bare: &Map) -> f64 {
+        if self.bare || bare.w != self.w || bare.h != self.h {
+            return 0.0;
+        }
+        let (mut hot, mut all) = (0.0, 0.0);
+        for row in 0..self.h {
+            let w = ((row as f64 + 0.5) / self.h as f64 * PI).sin();
+            for col in 0..self.w {
+                let i = row * self.w + col;
+                all += w;
+                if bare.bare_rgb(i).is_some_and(|(r, g, b)| r.max(g).max(b) > GLOW) {
+                    self.blind[i] = u16::MAX;
+                    hot += w;
+                }
+            }
+        }
+        self.version += 1;
+        hot / all
+    }
+    /// The share of the planet that can't be read (glowing lava).
+    pub fn blind_share(&self) -> f64 {
+        let (mut hot, mut all) = (0.0, 0.0);
+        for row in 0..self.h {
+            let w = ((row as f64 + 0.5) / self.h as f64 * PI).sin();
+            for col in 0..self.w {
+                let i = row * self.w + col;
+                all += w;
+                if !self.seen[i] && self.blind_cell(i) {
+                    hot += w;
+                }
+            }
+        }
+        hot / all
     }
     pub fn coverage(&self) -> f64 {
+        use std::sync::atomic::Ordering::Relaxed;
+        if self.cov_cache.0.load(Relaxed) == self.version + 1 {
+            return f64::from_bits(self.cov_cache.1.load(Relaxed));
+        }
+        let cov = self.coverage_now();
+        self.cov_cache.1.store(cov.to_bits(), Relaxed);
+        self.cov_cache.0.store(self.version + 1, Relaxed);
+        cov
+    }
+    fn coverage_now(&self) -> f64 {
         let (mut seen, mut all) = (0.0, 0.0);
         for row in 0..self.h {
             let w = ((row as f64 + 0.5) / self.h as f64 * PI).sin();
             for col in 0..self.w {
                 all += w;
-                if self.seen[row * self.w + col] || self.gap(row, col) {
+                if self.known(row * self.w + col) || self.gap(row, col) {
                     seen += w;
                 }
             }
@@ -211,7 +303,7 @@ impl Map {
                 }
                 let r = (row as i64 + dr) as usize;
                 let c = (col as i64 + dc).rem_euclid(self.w as i64) as usize;
-                if self.seen[r * self.w + c] {
+                if self.known(r * self.w + c) {
                     n += 1;
                 }
             }
@@ -234,7 +326,7 @@ impl Map {
         let (y0, y1) = ((disc.cy - disc.r).floor().max(0.0) as usize, ((disc.cy + disc.r).ceil() as usize).min(pic.h - 1));
         let (x0, x1) = ((disc.cx - disc.r).floor().max(0.0) as usize, ((disc.cx + disc.r).ceil() as usize).min(pic.w - 1));
         let rows: Vec<usize> = (y0..=y1).step_by(every).collect();
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 8);
+        let threads = super::sky::paint_cores();
         let chunk = rows.len().div_ceil(threads).max(1);
         let is_bare = self.bare;
         let (gw, gh) = (self.w, self.h);
@@ -245,6 +337,7 @@ impl Map {
                 .chunks(chunk)
                 .map(|band| {
                     sc.spawn(move || {
+                        super::sky::background_thread();
                         let mut out = Vec::with_capacity(band.len() * (x1 - x0) / every + 1);
                         for &y in band {
                             let mut x = x0;
@@ -264,9 +357,8 @@ impl Map {
                                         } else {
                                             Some(heat(r, g, b))
                                         };
-                                        if let Some(level) = level {
-                                            out.push((cell as u32, [r as f32, g as f32, b as f32, level], f as f32));
-                                        }
+                                        // Unreadable (glowing lava under EVE's colours): kept as such.
+                                        out.push((cell as u32, [r as f32, g as f32, b as f32, level.unwrap_or(f32::NAN)], f as f32));
                                     }
                                 }
                                 x += every;
@@ -280,12 +372,17 @@ impl Map {
         });
         // This picture's own look at each cell: sums and how face-on.
         let mut touched: Vec<usize> = Vec::new();
+        self.pictures += 1;
         for part in &looks {
             for &(cell, c, f) in part {
                 let cell = cell as usize;
                 let s = &mut self.scratch[cell];
-                if s[3] == 0.0 {
+                if s[3] == 0.0 && self.failed[cell] == 0.0 {
                     touched.push(cell);
+                }
+                if c[3].is_nan() {
+                    self.failed[cell] = self.failed[cell].max(f).max(1e-6);
+                    continue;
                 }
                 s[0] += c[0];
                 s[1] += c[1];
@@ -296,9 +393,24 @@ impl Map {
             }
         }
         let mut painted = 0;
+        let mut blinded = false;
         for cell in touched {
             let s = std::mem::replace(&mut self.scratch[cell], [0.0; 5]);
             let square = std::mem::replace(&mut self.square[cell], 0.0);
+            let failed = std::mem::replace(&mut self.failed[cell], 0.0);
+            if s[3] == 0.0 {
+                // Only unreadable looks this picture.
+                if failed >= BLIND_FACING && self.blind[cell] != u16::MAX {
+                    if self.blind[cell] == 0 {
+                        self.blind_span[cell].0 = self.pictures;
+                    }
+                    let was = self.blind_cell(cell);
+                    self.blind[cell] = (self.blind[cell] + 1).min(u16::MAX - 1);
+                    self.blind_span[cell].1 = self.pictures;
+                    blinded |= !was && self.blind_cell(cell);
+                }
+                continue;
+            }
             if self.best[cell] >= SETTLED || square <= self.best[cell] + 0.02 {
                 continue;
             }
@@ -316,7 +428,7 @@ impl Map {
             self.seen[cell] = true;
             painted += 1;
         }
-        if painted > 0 {
+        if painted > 0 || blinded {
             self.version += 1;
         }
         painted
@@ -339,7 +451,7 @@ impl Map {
     }
     /// The cells still to see (for the green targets): not seen, and not a gap between pixels.
     pub fn missing(&self) -> Vec<bool> {
-        (0..self.w * self.h).map(|i| !self.seen[i] && !self.gap(i / self.w, i % self.w)).collect()
+        (0..self.w * self.h).map(|i| !self.known(i) && !self.gap(i / self.w, i % self.w)).collect()
     }
     /// The levels on SeAT's 1° grid: each 1° cell the mean of the seen cells in it (0 where none).
     pub fn cells_1deg(&self) -> Vec<u8> {
@@ -450,7 +562,7 @@ impl Map {
             let lat = (row as f64 + 0.5) / self.h as f64 * PI;
             let w = lat.sin();
             for col in (0..self.w).step_by(k) {
-                if self.seen[row * self.w + col] {
+                if self.known(row * self.w + col) {
                     continue;
                 }
                 let v = apply(q, &planet_vector(lat, (col as f64 + 0.5) / self.w as f64 * 2.0 * PI, mirrored));
@@ -540,39 +652,57 @@ pub struct ListSpot {
 }
 
 /// Which row is lit up: 0 = No filter, 1 … 5 = the resources top to bottom. None when no row
-/// stands out (the panel is closed or moved).
+/// stands out (the panel is closed or moved, or two rows are lit: one picked, one under the mouse).
+///
+/// EVE lights the picked row with a box the width of the list and 0.88 rows tall. Its top and
+/// bottom edges are sharp steps, where a bright nebula behind the see-through list only changes
+/// slowly: so each row is judged by those two steps, not by how bright it is (a bright patch of
+/// sky behind one row once read as that row being picked).
 pub fn picked_row(pic: &Pic, spot: &ListSpot) -> Option<usize> {
     let gap = (spot.y5 - spot.y0) / 5.0;
     if gap < 6.0 {
         return None;
     }
-    let half_h = (gap * 0.2).max(1.0);
-    let mut levels = Vec::with_capacity(6);
-    for row in 0..6 {
-        let yc = spot.y0 + gap * row as f64;
-        let mut vals = Vec::new();
-        let mut y = yc - half_h;
-        while y <= yc + half_h {
-            let mut x = spot.x - gap * 2.4;
-            while x <= spot.x + gap * 1.6 {
-                if x >= 0.0 && y >= 0.0 && (x as usize) < pic.w && (y as usize) < pic.h {
-                    vals.push(pic.lum(x as usize, y as usize));
-                }
-                x += 2.0;
-            }
-            y += 1.0;
-        }
-        if vals.is_empty() {
+    let half = 0.44 * gap;
+    let (xa, xb) = ((spot.x - gap * 2.2).max(0.0) as usize, ((spot.x + gap * 6.6).max(0.0) as usize).min(pic.w));
+    if xb <= xa + 8 {
+        return None;
+    }
+    // Each picture row's middle brightness across the list (text and bars are a small part of it).
+    let top = (spot.y0 - half - 10.0).floor().max(0.0) as usize;
+    let bottom = ((spot.y5 + half + 10.0).ceil() as usize).min(pic.h);
+    if bottom <= top + 4 {
+        return None;
+    }
+    let mut vals = Vec::with_capacity((xb - xa) / 2 + 1);
+    let mut line = vec![None; bottom - top];
+    for (i, y) in (top..bottom).enumerate() {
+        vals.clear();
+        vals.extend((xa..xb).step_by(2).map(|x| pic.lum(x, y)));
+        vals.sort_unstable();
+        line[i] = Some(vals[vals.len() / 2] as f64);
+    }
+    let at = |y: f64| -> Option<f64> {
+        let y = y.round();
+        if y < top as f64 {
             return None;
         }
-        vals.sort_unstable();
-        levels.push(vals[vals.len() / 2] as f64);
+        line.get(y as usize - top).copied().flatten()
+    };
+    let mut score = [f64::NEG_INFINITY; 6];
+    for (row, s) in score.iter_mut().enumerate() {
+        let yc = spot.y0 + gap * row as f64;
+        for o in -6..=6 {
+            let (yt, yb) = (yc + o as f64 - half, yc + o as f64 + half);
+            // Each step across 3 pixels, so a box a pixel taller or shorter still shows both.
+            if let (Some(t_in), Some(t_out), Some(b_in), Some(b_out)) = (at(yt + 1.0), at(yt - 2.0), at(yb - 1.0), at(yb + 2.0)) {
+                *s = s.max((t_in - t_out).min(b_in - b_out));
+            }
+        }
     }
-    let (best, &top) = levels.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1))?;
-    let mut rest: Vec<f64> = levels.iter().enumerate().filter(|(i, _)| *i != best).map(|(_, v)| *v).collect();
-    rest.sort_by(f64::total_cmp);
-    let second = rest[rest.len() - 1];
-    if top - second < 18.0 || top < 45.0 {
+    let (best, &top_score) = score.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1))?;
+    let second = score.iter().enumerate().filter(|(i, _)| *i != best).map(|(_, v)| *v).fold(f64::NEG_INFINITY, f64::max);
+    if top_score < 10.0 || top_score - second < 8.0 {
         return None;
     }
     Some(best)
@@ -618,6 +748,73 @@ mod tests {
         assert_eq!(m.paint(&Pic { w, h, bgra: &px }, &disc, &pose_q(0.4, 0.3), false, 1, Some(&bare)), 0);
     }
 
+    /// Glowing lava on the planet map can't be read through: those cells aren't left to see, so a
+    /// lava planet's scan reaches 99 % (planet II stopped at 98.9 % with 1.4 % of it glowing).
+    #[test]
+    fn glowing_lava_is_not_left_to_see() {
+        let glows = |i: usize| (80..90).contains(&(i / GRID_W)) && (100..130).contains(&(i % GRID_W));
+        let bytes: Vec<u8> = (0..GRID_W * GRID_H).flat_map(|i| if glows(i) { [240u8, 200, 60] } else { [90u8, 80, 70] }).collect();
+        let bare = Map::from_bare_bytes(&bytes).unwrap();
+        let mut m = Map::new(false);
+        let mut plain = Map::new(false);
+        for i in 0..GRID_W * GRID_H {
+            if !glows(i) {
+                m.seen[i] = true;
+                plain.seen[i] = true;
+            }
+        }
+        m.version += 1;
+        plain.version += 1;
+        assert!(plain.coverage() < 0.995, "{}", plain.coverage());
+        let share = m.mark_glow(&bare);
+        assert!(share > 0.005 && share < 0.01, "{share}");
+        assert!(m.coverage() > 0.9999, "{}", m.coverage());
+        assert!(!m.missing().iter().any(|&x| x));
+        assert!((m.blind_share() - share).abs() < 1e-9);
+        // Cells that glow get no level (SeAT gets nothing there, as for unseen).
+        assert_eq!(m.cells_1deg()[85 * GRID_W + 110], 0);
+    }
+
+    /// Looks that can't be read (EVE's colours not matching the planet's) count only when they go
+    /// on for a while: a moment of them (EVE's colours fading in) leaves the cells to see.
+    #[test]
+    fn unreadable_only_after_a_while() {
+        use crate::planetscan::geom::{pose_q, Disc};
+        let bytes: Vec<u8> = (0..GRID_W * GRID_H).flat_map(|_| [90u8, 80, 70]).collect();
+        let bare = Map::from_bare_bytes(&bytes).unwrap();
+        let (w, h) = (640usize, 400usize);
+        let disc = Disc::with_lens(320.0, 200.0, 100.0, 375.0);
+        // Pure white over the whole planet: no level of EVE's band reads as that.
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                if (x as f64 - 320.0).hypot(y as f64 - 200.0) < 100.0 {
+                    px[(y * w + x) * 4..(y * w + x) * 4 + 4].copy_from_slice(&[255, 255, 255, 255]);
+                }
+            }
+        }
+        let pic = Pic { w, h, bgra: &px };
+        let (front, back) = (pose_q(0.4, 0.3), pose_q(0.4 + PI, 0.3));
+        let mut m = Map::new(false);
+        for _ in 0..6 {
+            assert_eq!(m.paint(&pic, &disc, &front, false, 1, Some(&bare)), 0);
+        }
+        let middle = {
+            // The cell straight in front.
+            let v = crate::planetscan::geom::apply(&crate::planetscan::geom::transpose(&front), &[0.0, 0.0, 1.0]);
+            let (lat, lon) = lat_lon(&v, false);
+            ((lat / PI * GRID_H as f64) as usize).min(GRID_H - 1) * GRID_W + ((lon / (2.0 * PI) * GRID_W as f64) as usize).min(GRID_W - 1)
+        };
+        assert!(!m.known(middle), "six quick looks");
+        for _ in 0..40 {
+            m.paint(&pic, &disc, &back, false, 1, Some(&bare));
+        }
+        assert!(!m.known(middle), "no new looks there");
+        m.paint(&pic, &disc, &front, false, 1, Some(&bare));
+        assert!(m.known(middle) && !m.seen[middle], "unreadable looks spread over a while");
+        assert!(m.blind_share() > 0.03, "{}", m.blind_share());
+    }
+
     /// The quick unmixing gives the same level as trying every step, on real-looking colours:
     /// planet colours with the band laid over them at every level, plus a little noise.
     #[test]
@@ -655,6 +852,7 @@ mod tests {
         assert!((m.coverage() - 1.0).abs() < 1e-9);
         // A lone unseen cell among seen ones is a gap, not a target.
         m.seen[100 * RES_W + 50] = false;
+        m.version += 1;
         assert!((m.coverage() - 1.0).abs() < 1e-9 && !m.missing()[100 * RES_W + 50]);
     }
 
@@ -670,22 +868,69 @@ mod tests {
         assert!(unmix(250, 250, 250, 230.0, 230.0, 230.0).is_none());
     }
 
-    #[test]
-    fn picked_row_finds_the_lit_row() {
-        let (w, h) = (400usize, 300usize);
-        let mut px = vec![20u8; w * h * 4];
-        // Row 3 lit up (spacing 25, No filter at y 60).
-        for y in 130..140 {
-            for x in 60..300 {
+    /// A list like EVE's: dark see-through panel, a name and a bar on each row, the picked row's
+    /// box 0.88 rows tall.
+    fn list_picture(w: usize, h: usize, sky: impl Fn(usize, usize) -> u8, lit: &[usize]) -> Vec<u8> {
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let mut v = sky(x, y) as f32 * 0.6 + 12.0;
+                for row in 0..6 {
+                    let yc = 63.0 + 25.2 * row as f32;
+                    let dy = y as f32 - yc;
+                    if dy.abs() < 4.0 && (106..180).contains(&x) && (x / 3 + y) % 4 == 0 {
+                        v = 200.0; // a name's letters
+                    }
+                    if row > 0 && dy.abs() < 4.0 && (208..208 + 20 * row).contains(&x) {
+                        v = 240.0; // its bar
+                    }
+                    if lit.contains(&row) && dy.abs() <= 11.0 && (80..310).contains(&x) {
+                        v += 0.35 * (255.0 - v);
+                    }
+                }
                 let k = (y * w + x) * 4;
-                px[k] = 110;
-                px[k + 1] = 110;
-                px[k + 2] = 110;
+                let v = v.clamp(0.0, 255.0) as u8;
+                px[k..k + 4].copy_from_slice(&[v, v, v, 255]);
             }
         }
-        let pic = Pic { w, h, bgra: &px };
-        assert_eq!(picked_row(&pic, &ListSpot { x: 150.0, y0: 60.0, y5: 185.0 }), Some(3));
-        let dark = vec![20u8; w * h * 4];
-        assert_eq!(picked_row(&Pic { w, h, bgra: &dark }, &ListSpot { x: 150.0, y0: 60.0, y5: 185.0 }), None);
+        px
+    }
+
+    #[test]
+    fn picked_row_finds_the_lit_row() {
+        let (w, h) = (420usize, 260usize);
+        let spot = ListSpot { x: 140.0, y0: 60.0, y5: 186.0 };
+        for row in 0..6 {
+            let px = list_picture(w, h, |_, _| 20, &[row]);
+            assert_eq!(picked_row(&Pic { w, h, bgra: &px }, &spot), Some(row), "row {row} on a dark sky");
+        }
+        // Nothing lit: none.
+        let px = list_picture(w, h, |_, _| 20, &[]);
+        assert_eq!(picked_row(&Pic { w, h, bgra: &px }, &spot), None);
+        // One picked, another under the mouse: can't tell, so none.
+        let px = list_picture(w, h, |_, _| 20, &[1, 2]);
+        assert_eq!(picked_row(&Pic { w, h, bgra: &px }, &spot), None);
+    }
+
+    /// A bright patch of nebula behind the list (brightest round "No filter" and Heavy Metals)
+    /// doesn't make those rows read as picked: the picked row is still the one with the box.
+    #[test]
+    fn picked_row_on_a_bright_nebula() {
+        let (w, h) = (420usize, 260usize);
+        let spot = ListSpot { x: 140.0, y0: 60.0, y5: 186.0 };
+        let glow = |x: usize, y: usize| -> u8 {
+            let d0 = ((x as f64 - 150.0).powi(2) + (y as f64 - 60.0).powi(2)).sqrt();
+            let d3 = ((x as f64 - 260.0).powi(2) + (y as f64 - 140.0).powi(2)).sqrt();
+            (250.0 * (-d0 / 90.0).exp() + 230.0 * (-d3 / 70.0).exp()).min(255.0) as u8
+        };
+        for row in [1, 5] {
+            let px = list_picture(w, h, glow, &[row]);
+            let got = picked_row(&Pic { w, h, bgra: &px }, &spot);
+            assert!(got == Some(row) || got.is_none(), "row {row}: read {got:?}");
+            assert_ne!(got, Some(3));
+            assert_ne!(got, Some(0));
+        }
+        let px = list_picture(w, h, glow, &[1]);
+        assert_eq!(picked_row(&Pic { w, h, bgra: &px }, &spot), Some(1));
     }
 }

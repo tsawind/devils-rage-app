@@ -194,6 +194,12 @@
 (() => {
   "use strict";
   const $ = (id) => document.getElementById(id);
+  // Text and markup are only rewritten when they change: the page is updated many times a second
+  // and rewriting the same text still costs the browser a layout.
+  function setText(el, v) { if (el.textContent !== v) el.textContent = v; }
+  const htmlNow = new WeakMap();
+  const pageTiming = { fps: 0, worst_gap_ms: 0, work_ms: 0, worst_work_ms: 0 };
+  function setHtml(el, v) { if (htmlNow.get(el) !== v) { htmlNow.set(el, v); el.innerHTML = v; } }
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
   const RESOURCES = {
     barren: ["Aqueous Liquids", "Base Metals", "Carbon Compounds", "Microorganisms", "Noble Metals"],
@@ -511,25 +517,36 @@
     } catch (e) { /* next time */ }
     mapBusy = false;
   }
+  // The map itself (scaled to the box, with its grid) is drawn once into a layer whenever it, the
+  // box or the zoom changes; each status only copies that and draws the cross and the targets.
+  const mapLayer = document.createElement("canvas"), lctx = mapLayer.getContext("2d");
+  let layerKey = null;
   function drawMap() {
     sizeCanvas(mapCanvas, $("mapBox"));
     const W = mapCanvas.width, H = mapCanvas.height, dpr = window.devicePixelRatio || 1;
-    mctx.fillStyle = "#08080b"; mctx.fillRect(0, 0, W, H);
     const iw = mapImg ? mapImg.width : 2048, ih = mapImg ? mapImg.height : 1024;
     const f = fitWithZoom(mapCanvas, iw, ih, zMap);
-    if (mapImg) {
-      mctx.imageSmoothingEnabled = mapKind === "resource" || f.k < 1.5;
-      mctx.imageSmoothingQuality = "high";
-      mctx.drawImage(mapImg, f.x, f.y, iw * f.k, ih * f.k);
-    } else {
-      mctx.fillStyle = "#0e0e14"; mctx.fillRect(f.x, f.y, iw * f.k, ih * f.k);
-      mctx.fillStyle = "#8a8a92"; mctx.font = `${13 * dpr}px Segoe UI, sans-serif`; mctx.textAlign = "center";
-      mctx.fillText(mapKind === "planet" ? "No planet map yet: it paints in as you spin the planet (EVE on No filter)." : mapKind === "resource" ? (status && status.run && status.run.resource ? `${status.run.resource}: a blank canvas. Spin the planet to paint it in.` : "No resource being scanned: click one in EVE's scan list.") : "No sky yet: turn the planet sideways in EVE.", W / 2, H / 2);
+    const empty = mapImg ? "" : mapKind === "planet" ? "No planet map yet: it paints in as you spin the planet (EVE on No filter)." : mapKind === "resource" ? (status && status.run && status.run.resource ? `${status.run.resource}: a blank canvas. Spin the planet to paint it in.` : "No resource being scanned: click one in EVE's scan list.") : "No sky yet: turn the planet sideways in EVE.";
+    const key = [mapImg, W, H, f.x, f.y, f.k, mapKind, empty, dpr];
+    if (!layerKey || key.some((v, i) => v !== layerKey[i])) {
+      layerKey = key;
+      if (mapLayer.width !== W || mapLayer.height !== H) { mapLayer.width = W; mapLayer.height = H; }
+      lctx.fillStyle = "#08080b"; lctx.fillRect(0, 0, W, H);
+      if (mapImg) {
+        lctx.imageSmoothingEnabled = mapKind === "resource" || f.k < 1.5;
+        lctx.imageSmoothingQuality = "high";
+        lctx.drawImage(mapImg, f.x, f.y, iw * f.k, ih * f.k);
+      } else {
+        lctx.fillStyle = "#0e0e14"; lctx.fillRect(f.x, f.y, iw * f.k, ih * f.k);
+        lctx.fillStyle = "#8a8a92"; lctx.font = `${13 * dpr}px Segoe UI, sans-serif`; lctx.textAlign = "center";
+        lctx.fillText(empty, W / 2, H / 2);
+      }
+      // 30° grid.
+      lctx.strokeStyle = "rgba(255,255,255,.08)"; lctx.lineWidth = 1;
+      for (let lon = 0; lon <= 360; lon += 30) { const x = f.x + (lon / 360) * iw * f.k; lctx.beginPath(); lctx.moveTo(x, f.y); lctx.lineTo(x, f.y + ih * f.k); lctx.stroke(); }
+      for (let lat = 0; lat <= 180; lat += 30) { const y = f.y + (lat / 180) * ih * f.k; lctx.beginPath(); lctx.moveTo(f.x, y); lctx.lineTo(f.x + iw * f.k, y); lctx.stroke(); }
     }
-    // 30° grid.
-    mctx.strokeStyle = "rgba(255,255,255,.08)"; mctx.lineWidth = 1;
-    for (let lon = 0; lon <= 360; lon += 30) { const x = f.x + (lon / 360) * iw * f.k; mctx.beginPath(); mctx.moveTo(x, f.y); mctx.lineTo(x, f.y + ih * f.k); mctx.stroke(); }
-    for (let lat = 0; lat <= 180; lat += 30) { const y = f.y + (lat / 180) * ih * f.k; mctx.beginPath(); mctx.moveTo(f.x, y); mctx.lineTo(f.x + iw * f.k, y); mctx.stroke(); }
+    mctx.drawImage(mapLayer, 0, 0);
     mapDrawnAt = Date.now();
     // Where the camera looks: the planet's middle on the planet map, the view's middle on the sky.
     const s = status;
@@ -582,12 +599,12 @@
       mctx.strokeStyle = s.pose.placed ? "#ff5a4a" : "#f0c040"; mctx.lineWidth = 2 * dpr;
       mctx.beginPath(); mctx.moveTo(x - 9 * dpr, y); mctx.lineTo(x + 9 * dpr, y); mctx.moveTo(x, y - 9 * dpr); mctx.lineTo(x, y + 9 * dpr); mctx.stroke();
     }
-    $("mapZoom").textContent = (zMap.k > 1 ? `${zMap.k.toFixed(1)}× · ` : "") + (mapKind === "sky" ? "the sky round this planet" : mapKind === "resource" ? `${(status && status.run && status.run.resource) || "resource"}: EVE's colours, low → high · north at the top` : "north at the top");
+    setText($("mapZoom"), (zMap.k > 1 ? `${zMap.k.toFixed(1)}× · ` : "") + (mapKind === "sky" ? "the sky round this planet" : mapKind === "resource" ? `${(status && status.run && status.run.resource) || "resource"}: EVE's colours, low → high · north at the top` : "north at the top"));
   }
 
   // ---------- reading the status: steps, tips, events ----------
   function setState(n, text, cls, done) {
-    $("s" + n).textContent = text || ""; $("s" + n).className = "state " + (cls || "muted");
+    setText($("s" + n), text || ""); $("s" + n).className = "state " + (cls || "muted");
     $("n" + n).classList.toggle("done", !!done);
     $("n" + n).closest(".step").classList.toggle("done", !!done);
   }
@@ -620,11 +637,20 @@
       if (ev.kind === "error" && ev.map) popup("Not saved", ev.text, "Press Save now to try again.", true);
     }
   }
+  // Each status (up to 30 a second): the log, the live picture's and the map's marks. The words,
+  // lists and buttons 10 times a second (nobody reads faster, and it keeps the page smooth).
+  let pageAt = 0;
   function onStatus(s) {
     status = s;
-    const cap = s.capture || {}, proc = s.proc || {};
-    $("rates").innerHTML = s.client ? `EVE <b>${Math.round(cap.fps || 0)}</b> fps · app <b>${Math.round(proc.fps || 0)}</b> fps · ${Math.round(proc.ms || 0)} ms · ${s.size ? s.size.join("×") : ""} · ${esc(cap.method || "starting")}` : "";
     onEvents(s);
+    const now = performance.now();
+    if (now - pageAt >= 100) { pageAt = now; updatePage(s); }
+    refreshMap(false);
+    drawMap();
+  }
+  function updatePage(s) {
+    const cap = s.capture || {}, proc = s.proc || {};
+    setHtml($("rates"), s.client ? `EVE <b>${Math.round(cap.fps || 0)}</b> fps · app <b>${Math.round(proc.fps || 0)}</b> fps · ${Math.round(proc.ms || 0)} ms · page <b>${pageTiming.fps}</b> fps · ${s.size ? s.size.join("×") : ""} · ${esc(cap.method || "starting")}` : "");
     const pose = s.pose, own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed, base = s.base_map || {};
     // 1, 2
     setState(1, planet ? planet.name : "pick one", planet ? "ok" : "warn", !!planet && !!s.client);
@@ -654,47 +680,45 @@
       facts.push(["Rings", rg.phase ? `measuring from the ${rg.phase}: ${pct(rg.progress)}` : bands ? `${bands} planet radii, cut out of the sky` : "none"]);
       if (!rg.phase && s.sky && s.sky.reach != null && s.sky.reach < 0.999) facts.push(["Can be seen", `${pct(s.sky.reach)} of the sky (the rest is behind the rings from every side; 99.9 % counts of what can be seen)`]);
     }
-    $("skyFacts").innerHTML = facts.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
+    setHtml($("skyFacts"), facts.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join(""));
     $("newSky").hidden = !!(s.sky && s.sky.own_each) || !(bor || (!own && pose));
     $("forgetSky").hidden = !own;
     $("forgetRings").hidden = !(rg && !rg.phase);
     $("forgetBase").hidden = !((s.base_map || {}).coverage > 0);
     // 4: the planet map
     const bc = base.coverage || 0;
-    $("basePct").textContent = pct(bc); $("baseMeter").style.width = `${Math.round(bc * 100)}%`;
-    $("baseSaid").textContent = base.done ? "done" : !base.on ? "not recording" : base.paused ? `paused: ${base.paused}` : pose && pose.placed ? "recording" : "";
+    setText($("basePct"), pct(bc)); $("baseMeter").style.width = `${Math.round(bc * 100)}%`;
+    setText($("baseSaid"), base.done ? "done" : !base.on ? "not recording" : base.paused ? `paused: ${base.paused}` : pose && pose.placed ? "recording" : "");
     $("baseSaid").className = "small " + (base.done ? "ok" : base.paused ? "warn" : "muted");
     setState(4, base.done ? "done" : base.paused && pose ? "paused" : pct(bc), base.done ? "ok" : base.paused && pose ? "warn" : "muted", !!base.done);
     $("baseOn").checked = base.on !== false;
     const picked = s.list ? s.list.picked : null;
-    $("listSaid").textContent = picked == null ? (s.list && s.list.guessed ? "not seen" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`;
+    setText($("listSaid"), picked == null ? (s.list && s.list.guessed ? "not seen" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`);
     $("listSaid").className = picked === 0 ? "ok" : "warn";
     // 6: resources
     drawResources(s);
     // 5
     setState(5, s.recording ? "recording" : s.autosave ? "autosave on" : "autosave off", s.recording ? "bad" : s.autosave ? "ok" : "warn");
     const rec = s.recording;
-    $("recordBtn").textContent = rec ? "Stop recording" : "Record for testing";
+    setText($("recordBtn"), rec ? "Stop recording" : "Record for testing");
     $("recordBtn").classList.toggle("on", !!rec);
-    $("recSaid").textContent = rec ? `● ${Math.floor(rec.secs / 60)}:${String(rec.secs % 60).padStart(2, "0")} · ${rec.frames} pictures` : "";
+    setText($("recSaid"), rec ? `● ${Math.floor(rec.secs / 60)}:${String(rec.secs % 60).padStart(2, "0")} · ${rec.frames} pictures` : "");
     $("recSaid").className = "small " + (rec ? "bad" : "muted");
     // Do now.
     if (!pose && (own || (bor && bor.loaded))) lookingSince = lookingSince || Date.now(); else lookingSince = null;
     const [say, also, ok, ask] = tips(s);
-    $("say").textContent = say; $("say").className = "say" + (ok ? " ok" : "");
+    setText($("say"), say); $("say").className = "say" + (ok ? " ok" : "");
     $("ask").hidden = !ask;
     $("startBtn").hidden = !!countdown || ask === "res";
     $("cancelStart").hidden = !countdown || ask === "res";
     const nextRes = ask === "res" ? nextResource(s) : null;
     $("startRes").hidden = !nextRes;
-    if (nextRes) $("startRes").textContent = `Start ${nextRes}`;
+    if (nextRes) setText($("startRes"), `Start ${nextRes}`);
     autoStartResource(s);
-    $("also").innerHTML = also.map((t) => `<li>${esc(t)}</li>`).join("");
+    setHtml($("also"), also.map((t) => `<li>${esc(t)}</li>`).join(""));
     const badge = $("badge");
-    badge.textContent = !s.started ? "Waiting for Start" : rg && rg.phase ? `Measuring the rings · ${pct(rg.progress)}` : pose ? (pose.placed ? (pose.by_planet ? "On the planet map (too little sky past the rings)" : `On the sky · stars ${pct(pose.stars)}`) : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
+    setText(badge, !s.started ? "Waiting for Start" : rg && rg.phase ? `Measuring the rings · ${pct(rg.progress)}` : pose ? (pose.placed ? (pose.by_planet ? "On the planet map (too little sky past the rings)" : `On the sky · stars ${pct(pose.stars)}`) : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet");
     badge.className = "badge " + (s.started && !(rg && rg.phase) && pose && pose.placed ? "ok" : "warn");
-    refreshMap(false);
-    if (Date.now() - mapDrawnAt > 30) drawMap();
     drawCard(s);
     const said = say + (also.length ? " | " + also.join(" | ") : "");
     if (said !== lastSaid) { lastSaid = said; invoke("planetscan_say", { text: said }).catch(() => {}); }
@@ -735,6 +759,7 @@
       if (run.paused) return [`Scanning ${run.resource}: paused (${run.paused}).`, also];
       const miss = run.missing ? `; the rest is ${run.missing.split(":")[0]}` : "";
       also.push("Bring the red cross onto the green circles to fill the last spots.");
+      if (run.unreadable > 0.002) also.push(`${pct(run.unreadable)} of the planet glows too bright to read through (lava): it's left out, not a spot to fill.`);
       return [`Scanning ${run.resource}: ${pct(run.coverage)}${miss}. Spin the planet every side and over both poles; it saves at 99 %.`, also];
     }
     const next = names.find((n) => !done.has(n));
@@ -767,12 +792,12 @@
   }
   function drawResources(s) {
     const names = planet ? resourcesOf(planet) : [], done = planet ? resDone(planet) : new Set(), run = s.run;
-    $("resList").innerHTML = names.map((r) => {
+    setHtml($("resList"), names.map((r) => {
       const now = run && run.resource === r;
       const sc = planet ? scanInfo(planet, r) : null;
       const said = now && !run.done ? `scanning ${pct(run.coverage)}${run.paused ? " · paused" : ""}` : done.has(r) ? (sc && sc.at ? `done ${ago(sc.at)}` : "done") : sc && sc.at ? `last ${ago(sc.at)}` : "–";
       return `<span class="${now && !run.done ? "now" : done.has(r) ? "on" : ""}">${esc(r)}</span><span class="${now && !run.done ? "now" : done.has(r) ? "on" : "muted"}">${esc(said)}</span>`;
-    }).join("");
+    }).join(""));
     setState(6, planet ? `${done.size} of ${names.length}` : "", done.size >= names.length && names.length ? "ok" : run && run.resource && !run.done ? "warn" : "muted", names.length > 0 && done.size >= names.length);
     $("saveRes").hidden = !(run && run.resource && !run.done);
     $("rescanRes").hidden = !planet || done.size === 0 || !!(run && run.resource && !run.done);
@@ -802,11 +827,11 @@
     if (complete && Date.now() - card.doneAt > 10000) { card.hiddenFor.add(planet.planet_id); card.hidden = true; box.hidden = true; return; }
     const next = nextPlanet();
     const rest = (m) => (m ? ` (the rest is ${m.split(":")[0]})` : "");
-    $("cardTitle").textContent = complete ? `Done: ${planet.name} is complete` : card.saving || s.autosave ? "99 %: saved for the corp" : "Planet map at 99 %";
-    $("cardNums").textContent = `Planet map ${pct(map)} · Sky ${pct(sky)}`;
-    $("cardText").textContent = complete
+    setText($("cardTitle"), complete ? `Done: ${planet.name} is complete` : card.saving || s.autosave ? "99 %: saved for the corp" : "Planet map at 99 %");
+    setText($("cardNums"), `Planet map ${pct(map)} · Sky ${pct(sky)}`);
+    setText($("cardText"), complete
       ? (next ? `Do ${next.name} now: open it in EVE and pick it on the left.` : "Every planet here is mapped.")
-      : `Keep turning to 99.9 %: bring the red cross onto the green circles${map < 0.999 ? rest(base.missing) : rest(s.sky && s.sky.missing)}.`;
+      : `Keep turning to 99.9 %: bring the red cross onto the green circles${map < 0.999 ? rest(base.missing) : rest(s.sky && s.sky.missing)}.`);
     box.classList.toggle("done", complete);
     box.hidden = false;
   }
@@ -927,7 +952,7 @@
     keep();
     resDoneNow.delete(planet.planet_id);
     shownRun = null;
-    invoke("planetscan_scan", { resource: null, row: null });
+    invoke("planetscan_scan", { resource: null, row: null, fresh: true });
     log(`${planet.name}: its resources are scanned again from the first one (the earlier scans stay in SeAT's history).`, "warn");
   });
   twice("forgetRings", "Measure the rings again", () => { invoke("planetscan_forget_rings", { planetId: planet.planet_id }); log(`${planet.name}: its rings are measured again (from over the top, then the bottom); its sky starts again after.`, "warn"); });
@@ -950,6 +975,20 @@
   $("cardHide").addEventListener("click", () => { if (planet) card.hiddenFor.add(planet.planet_id); card.hidden = true; $("card").hidden = true; });
 
   // ---------- the loop: picture + status in one call ----------
+  // How smooth the page is (shown at the top, and kept in recordings): pictures drawn a second,
+  // the longest wait between two, and the time spent drawing.
+  let tick = { n: 0, from: performance.now(), last: performance.now(), gap: 0, work: 0, worstWork: 0 };
+  function timeTick(work) {
+    const now = performance.now();
+    tick.n += 1; tick.gap = Math.max(tick.gap, now - tick.last); tick.last = now;
+    tick.work += work; tick.worstWork = Math.max(tick.worstWork, work);
+    if (now - tick.from >= 1000) {
+      const secs = (now - tick.from) / 1000;
+      Object.assign(pageTiming, { fps: Math.round(tick.n / secs), worst_gap_ms: Math.round(tick.gap), work_ms: +(tick.work / Math.max(1, tick.n)).toFixed(1), worst_work_ms: Math.round(tick.worstWork) });
+      tick = { n: 0, from: now, last: now, gap: 0, work: 0, worstWork: 0 };
+      invoke("planetscan_page_timing", { timing: pageTiming }).catch(() => {});
+    }
+  }
   async function pollLoop() {
     while (alive) {
       try {
@@ -965,8 +1004,10 @@
           picture = bmp;
           seq = msg.seq;
         }
+        const t0 = performance.now();
         if (msg.s && msg.s.size) onStatus(msg.s);
         drawShot();
+        timeTick(performance.now() - t0);
       } catch (e) {
         await new Promise((r) => setTimeout(r, 300));
       }

@@ -410,6 +410,7 @@ pub fn run() {
             planetscan::planetscan_record,
             planetscan::planetscan_forget_rings,
             planetscan::planetscan_say,
+            planetscan::planetscan_page_timing,
             planetscan::planetscan_options,
             planetscan::planetscan_pose,
             planetscan::planetscan_hold,

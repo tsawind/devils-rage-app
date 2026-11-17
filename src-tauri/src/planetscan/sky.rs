@@ -489,14 +489,43 @@ pub fn points_on(view: &View, level: usize, gap: f64, cores: usize) -> Vec<Pt> {
     }
     let chunk = rows.len().div_ceil(cores);
     std::thread::scope(|sc| {
-        let handles: Vec<_> = rows.chunks(chunk).map(|ys| sc.spawn(move || band(ys))).collect();
+        let handles: Vec<_> = rows
+            .chunks(chunk)
+            .map(|ys| {
+                sc.spawn(move || {
+                    background_thread();
+                    band(ys)
+                })
+            })
+            .collect();
         handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
     })
 }
 
-/// Cores to paint with (leaving one for the rest of the app).
+/// Threads to paint with: one per real core (half the logical ones), at most 6, so EVE, the
+/// page and the live picture always have room.
 pub fn paint_cores() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).saturating_sub(1).clamp(1, 8)
+    (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2) / 2).clamp(1, 6)
+}
+
+/// The calling thread gives way to EVE and the app's page (Windows: below normal priority). For
+/// the scan's own work (painting, the sky search, recording): it still runs as fast as there are
+/// free cores, but never makes EVE or the live picture stutter.
+pub fn background_thread() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetCurrentThread() -> *mut core::ffi::c_void;
+            fn SetThreadPriority(thread: *mut core::ffi::c_void, priority: i32) -> i32;
+        }
+        const THREAD_PRIORITY_BELOW_NORMAL: i32 = -1;
+        // SAFETY: changes the priority of the calling thread only (a pseudo-handle, nothing to
+        // close); lowering a priority can't fail in a way that matters.
+        unsafe {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -674,6 +703,7 @@ impl Sky {
                 .filter(|(k, _)| levels.contains(k))
                 .map(|(level, m)| {
                     sc.spawn(move || {
+                        background_thread();
                         // The fine level is most of the points: its rows over most of the cores.
                         let pts = points_on(view, level, SPECS[level].paint, if level == FINE { cores } else { 1 });
                         for p in &pts {

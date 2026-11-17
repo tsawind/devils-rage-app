@@ -93,6 +93,7 @@ struct Pose {
 }
 
 struct Run {
+    planet: u64,
     /// "" = the bare planet (EVE on No filter).
     resource: String,
     /// EVE's list row this resource sits in (1 … 5; 0 = No filter), to check against EVE.
@@ -102,6 +103,8 @@ struct Run {
     done: bool,
     paused: Option<&'static str>,
     painted_frames: u64,
+    /// When it was last scanned (a run put aside is dropped after a while).
+    touched: Instant,
 }
 
 /// Starting a sky from nothing: the pictures watched (about 4 a second while the planet turns
@@ -181,8 +184,15 @@ struct Session {
     mask: Option<((i64, i64, i64, u64, i64), SkyMask)>,
     list: Option<ListSpot>,
     list_guessed: bool,
+    /// The row EVE's list shows, once read the same 4 times running (switches the resource).
     picked: Option<usize>,
+    /// The newest reading and how many times running it's been read (any reading that isn't the
+    /// run's row pauses the run at once; only a steady one switches).
+    pick_read: (Option<usize>, u32),
     run: Option<Run>,
+    /// Resources started and left before 99 % (EVE switched to another, or another planet):
+    /// picked up where they were when that resource is scanned again.
+    kept_runs: Vec<Run>,
     autosave: bool,
     auto_planet: bool,
     events: Vec<serde_json::Value>,
@@ -258,9 +268,10 @@ struct Session {
     base_targets: Vec<base::Target>,
     sky_targets: Vec<base::Target>,
     run_targets: Vec<base::Target>,
+    /// The share of the planet the resource scan can't read (glowing lava), worked out with the
+    /// targets.
+    run_blind: f64,
     targets_at: Option<Instant>,
-    /// What the page's Do now box says (kept with each recorded picture).
-    page_say: String,
     /// Where the time goes per picture (ms, smoothed): view, facing, sky, resource, planet map, rest.
     timing: [f64; 6],
     /// The "the rest is …" hints (sky, planet map, resource), worked out a few times a second.
@@ -311,6 +322,8 @@ impl Default for Session {
             list: None,
             list_guessed: true,
             picked: None,
+            pick_read: (None, 0),
+            kept_runs: Vec::new(),
             run: None,
             autosave: true,
             auto_planet: false,
@@ -364,8 +377,8 @@ impl Default for Session {
             base_targets: Vec::new(),
             sky_targets: Vec::new(),
             run_targets: Vec::new(),
+            run_blind: 0.0,
             targets_at: None,
-            page_say: String::new(),
             timing: [0.0; 6],
             hints: [None, None, None],
             hints_at: None,
@@ -386,6 +399,11 @@ pub struct Inner {
     cap_fps: AtomicU64,
     preview_width: AtomicUsize,
     jobs: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Job>>>,
+    /// What the page's Do now box says, and how smooth the page is (its own count, once a
+    /// second): kept with each recorded picture. Their own locks: the page sets them often and
+    /// must never wait for a picture being worked on.
+    page_say: Mutex<String>,
+    page_timing: Mutex<serde_json::Value>,
 }
 
 #[derive(Clone)]
@@ -405,6 +423,8 @@ impl Default for Engine {
             cap_fps: AtomicU64::new(0),
             preview_width: AtomicUsize::new(1280),
             jobs: Mutex::new(None),
+            page_say: Mutex::new(String::new()),
+            page_timing: Mutex::new(serde_json::Value::Null),
         }))
     }
 }
@@ -530,7 +550,8 @@ impl Session {
         if !due {
             return;
         }
-        let note = json!({ "ms": ms, "frame": f.n, "w": f.w, "h": f.h, "say": self.page_say, "status": self.status(engine) }).to_string();
+        let say = engine.page_say.lock().unwrap().clone();
+        let note = json!({ "ms": ms, "frame": f.n, "w": f.w, "h": f.h, "say": say, "status": self.status(engine) }).to_string();
         let Some(rec) = self.recorder.as_mut() else { return };
         rec.last = Some(Instant::now());
         rec.frames += 1;
@@ -639,7 +660,17 @@ impl Session {
             }
         }
         if self.frames % 3 == 0 {
-            self.picked = self.list.as_ref().and_then(|s| scan::picked_row(&pic, s));
+            let read = self.list.as_ref().and_then(|s| scan::picked_row(&pic, s));
+            if read == self.pick_read.0 {
+                self.pick_read.1 += 1;
+            } else {
+                self.pick_read = (read, 1);
+            }
+            // A third of a second of the same reading: one odd picture (a bright patch of sky
+            // behind the see-through list) never switches the resource.
+            if self.pick_read.1 >= 4 {
+                self.picked = read;
+            }
         }
 
         // The edge: zoomed all the way out every planet is the same size (0.26 lens lengths), so
@@ -975,6 +1006,7 @@ impl Session {
                     b.job = std::thread::Builder::new()
                         .name("planetscan-boot".into())
                         .spawn(move || -> Option<sky::Boot> {
+                            sky::background_thread();
                             let (first, later) = pts.split_first()?;
                             sky::boot(first, later, boot_rings)
                         })
@@ -1046,16 +1078,16 @@ impl Session {
         t_mark = time_part(&mut self.timing, 2, t_mark);
         // ---- scanning ----
         let placed = self.pose.as_ref().is_some_and(|p| p.placed);
-        let picked = self.picked;
-        // Only a list the pilot pointed out stops a scan (a guessed spot could read the wrong row).
-        let list_known = !self.list_guessed;
+        // Any reading of another row pauses at once (EVE's colours are another resource's from
+        // that picture on); only a steady reading switches the resource.
+        let (picked, read) = (self.picked, self.pick_read.0);
         if let (Some(run), Some(pose)) = (self.run.as_mut(), self.pose.as_ref()) {
             if !run.done {
                 run.paused = None;
                 if !placed {
                     run.paused = Some("not on the sky");
-                } else if let (Some(want), true) = (run.row, list_known) {
-                    if picked.is_some_and(|p| p != want) {
+                } else if let Some(want) = run.row {
+                    if picked.is_some_and(|p| p != want) || read.is_some_and(|p| p != want) {
                         run.paused = Some("EVE shows another resource");
                     }
                 }
@@ -1069,6 +1101,7 @@ impl Session {
                     let every = (disc.r / per).round().max(1.0) as usize;
                     run.map.paint(&pic, &disc, &q, pose.mirrored, every, if run.resource.is_empty() { None } else { bare });
                     run.painted_frames += 1;
+                    run.touched = Instant::now();
                 }
             }
         }
@@ -1084,7 +1117,7 @@ impl Session {
                 None => self.base_paused = Some("not on the sky"),
                 Some((yaw, pitch, by_planet)) => {
                     let at = (yaw, pitch);
-                    self.base_paused = if self.picked.is_some_and(|r| r != 0) {
+                    self.base_paused = if self.picked.is_some_and(|r| r != 0) || self.pick_read.0.is_some_and(|r| r != 0) {
                         Some("EVE shows a resource: set it to No filter")
                     } else if !self.rim_ok.0 {
                         Some("zoomed in: zoom all the way out")
@@ -1157,6 +1190,7 @@ impl Session {
                 Some(r) if !r.done && r.map.coverage() >= 0.9 => base::patches(r.map.w, r.map.h, &r.map.missing(), 6),
                 _ => Vec::new(),
             };
+            self.run_blind = self.run.as_ref().map(|r| r.map.blind_share()).unwrap_or(0.0);
             let reach = self.reach.filter(|_| gas);
             let done = self.sky_done();
             self.sky_targets = match self.planet_id().and_then(|pid| self.skies.get(&pid)) {
@@ -1276,6 +1310,20 @@ impl Session {
         }
     }
 
+    /// Put the resource being scanned aside (unfinished, with something on it) to pick up again
+    /// when that resource is scanned next; at most 10 kept, none older than 2 hours.
+    fn keep_run(&mut self) {
+        if let Some(run) = self.run.take() {
+            if !run.done && !run.resource.is_empty() && run.painted_frames > 0 {
+                self.kept_runs.retain(|k| !(k.planet == run.planet && k.resource == run.resource));
+                self.kept_runs.push(run);
+            }
+        }
+        self.kept_runs.retain(|k| k.touched.elapsed() < Duration::from_secs(2 * 3600));
+        while self.kept_runs.len() > 10 {
+            self.kept_runs.remove(0);
+        }
+    }
     /// 99 % (or Save now): the bare map is kept for the planet; a resource map is cleaned up and
     /// (with autosave) saved for the corp.
     fn finish(&mut self, jobs: &mut Vec<Job>) {
@@ -1367,14 +1415,15 @@ impl Session {
         let own = self.planet_id().and_then(|id| self.skies.get(&id));
         let run = self.run.as_ref().map(|r| {
             let hint = self.hints[2].clone().filter(|_| !r.done);
-            json!({ "resource": r.resource, "row": r.row, "coverage": r.map.coverage(), "done": r.done, "paused": r.paused, "secs": r.started.elapsed().as_secs_f64(), "frames": r.painted_frames, "version": r.map.version, "missing": hint,
+            json!({ "resource": r.resource, "row": r.row, "coverage": r.map.coverage(), "done": r.done, "paused": r.paused, "secs": r.started.elapsed().as_secs_f64(), "frames": r.painted_frames, "version": r.map.version, "missing": hint, "unreadable": self.run_blind,
                 "targets": self.run_targets.iter().map(|t| [t.lat, t.lon, t.radius]).collect::<Vec<_>>() })
         });
         json!({
             "client": self.client,
             "size": [self.size.0, self.size.1],
             "capture": { "fps": engine.cap_fps.load(Ordering::Relaxed) as f64 / 100.0, "method": self.method, "trouble": self.trouble },
-            "proc": { "fps": self.proc.per_second, "ms": self.step_ms, "cores": sky::paint_cores() + 1,
+            "page": engine.page_timing.lock().unwrap().clone(),
+            "proc": { "fps": self.proc.per_second, "ms": self.step_ms, "cores": sky::paint_cores(),
                 "parts": { "view": self.timing[0], "facing": self.timing[1], "sky": self.timing[2], "resource": self.timing[3], "map": self.timing[4], "rest": self.timing[5] } },
             "edge": self.edge_r.map(|r| json!({ "r": r, "auto_zoom": self.auto_zoom })),
             "disc": self.disc().map(|d| json!({ "cx": d.cx, "cy": d.cy, "r": d.r, "D": d.d })),
@@ -1505,6 +1554,7 @@ fn capture_loop(inner: Arc<Inner>, gen: u64, client: String) {
 }
 
 fn process_loop(inner: Arc<Inner>, gen: u64) {
+    sky::background_thread();
     let mut buf = ViewBuffers::default();
     let mut last = 0u64;
     let mut status_at = Instant::now() - Duration::from_secs(1);
@@ -1800,7 +1850,7 @@ pub async fn planetscan_planet(app: AppHandle, engine: tauri::State<'_, Engine>,
         }
         if s.planet_id() != Some(planet.id) {
             s.pose = None;
-            s.run = None;
+            s.keep_run();
             s.compare = None;
             s.lost_since = None;
             s.mask = None;
@@ -1957,6 +2007,7 @@ pub fn planetscan_record(app: AppHandle, engine: tauri::State<'_, Engine>, on: b
 /// (LE) length then the bytes. Ends when the recording stops.
 fn record_loop(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<(Arc<Frame>, String)>, path: PathBuf) {
     use std::io::Write;
+    sky::background_thread();
     let stem = path.with_extension("");
     let part_path = |k: u32| PathBuf::from(format!("{}-{k:03}.bin", stem.display()));
     let (mut part, mut n, mut bytes, mut files) = (0u32, 0u32, 0u64, 0u32);
@@ -2002,9 +2053,19 @@ fn record_loop(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<(Arc<Frame>, Str
 }
 
 /// What the page's Do now box says (kept with each recorded picture).
+/// Async (off the window's own thread) and never waits for the scanner: it was sent several times
+/// a second and made the whole window stutter while it waited for each picture to be worked on.
 #[tauri::command]
-pub fn planetscan_say(engine: tauri::State<'_, Engine>, text: String) {
-    engine.0.state.lock().unwrap().page_say = text;
+pub async fn planetscan_say(engine: tauri::State<'_, Engine>, text: String) -> Result<(), String> {
+    *engine.0.page_say.lock().unwrap() = text;
+    Ok(())
+}
+
+/// The page's own smoothness (pictures drawn a second, the longest wait, drawing time).
+#[tauri::command]
+pub async fn planetscan_page_timing(engine: tauri::State<'_, Engine>, timing: serde_json::Value) -> Result<(), String> {
+    *engine.0.page_timing.lock().unwrap() = timing;
+    Ok(())
 }
 
 /// The planet's edge: `find` looks for it in the newest picture; `r` sets it (picture pixels,
@@ -2098,10 +2159,16 @@ pub fn planetscan_find(engine: tauri::State<'_, Engine>) {
 }
 
 /// Start a scan of the resource EVE shows ("" = the bare planet on No filter; row = its place in
-/// EVE's list, 0 … 5), or stop one (resource None).
+/// EVE's list, 0 … 5), or stop one (resource None). A resource left unfinished earlier carries on
+/// where it was (switching resources never throws a scan away); `fresh` drops this planet's
+/// unfinished ones first (Scan all again).
 #[tauri::command]
-pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String>, row: Option<usize>) -> Result<(), String> {
+pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String>, row: Option<usize>, fresh: Option<bool>) -> Result<(), String> {
     let mut s = engine.0.state.lock().unwrap();
+    let pid = s.planet_id().unwrap_or(0);
+    if fresh == Some(true) {
+        s.kept_runs.retain(|k| k.planet != pid);
+    }
     match resource {
         None => s.run = None,
         Some(resource) => {
@@ -2112,7 +2179,6 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
             // A resource is read against the planet's own colours: from its planet map (the
             // same frame as the facings), which has to be done first.
             if !bare {
-                let pid = s.planet_id().unwrap_or(0);
                 let own = if s.base_cov.0 >= 0.9 { s.base.as_ref().map(|b| b.bare_map(scan::RES_W, scan::RES_H)) } else { None };
                 match own {
                     Some(m) => {
@@ -2121,8 +2187,36 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
                     None => return Err("map the planet first (its planet map to 99 %): resources are read against its own colours".into()),
                 }
             }
-            let map = if bare { Map::new(true) } else { Map::with_size(false, scan::RES_W, scan::RES_H) };
-            s.run = Some(Run { resource, row, map, started: Instant::now(), done: false, paused: None, painted_frames: 0 });
+            if s.run.as_ref().is_some_and(|r| r.planet == pid && r.resource == resource && !r.done) {
+                // Already scanning it.
+                if let Some(r) = s.run.as_mut() {
+                    r.row = row.or(r.row);
+                }
+                return Ok(());
+            }
+            s.keep_run();
+            let at = s.kept_runs.iter().position(|k| k.planet == pid && k.resource == resource);
+            let kept = at.map(|i| s.kept_runs.remove(i));
+            let mut run = match kept {
+                Some(mut k) => {
+                    let pct = k.map.coverage() * 100.0;
+                    s.event(json!({ "kind": "info", "text": format!("{resource}: carrying on from {pct:.1} % (scanned earlier, left unfinished).") }));
+                    k.row = row.or(k.row);
+                    k.paused = None;
+                    k.touched = Instant::now();
+                    k
+                }
+                None => {
+                    let map = if bare { Map::new(true) } else { Map::with_size(false, scan::RES_W, scan::RES_H) };
+                    Run { planet: pid, resource, row, map, started: Instant::now(), done: false, paused: None, painted_frames: 0, touched: Instant::now() }
+                }
+            };
+            // Glowing lava can't be read: not left as places to see.
+            if let Some(b) = s.bares.get(&pid) {
+                run.map.mark_glow(b);
+            }
+            s.run_blind = run.map.blind_share();
+            s.run = Some(run);
         }
     }
     Ok(())
