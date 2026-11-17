@@ -178,7 +178,7 @@
       <div class="more">
       <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (the planet map and its sky)</label>
       <div class="row"><button class="btn" id="saveMaps" title="Save this planet's sky and map for the corp now, even under 99 %">Save now</button></div>
-      <div class="row" style="align-items: baseline"><button class="btn" id="recordBtn" title="Keep EVE's pictures (5 a second, in 30 s files, until you stop it, at most an hour) with everything the app showed, in the app's recordings folder, for fixing things. Nothing leaves the PC.">Record for testing</button><span class="small muted" id="recSaid"></span></div>
+      <div class="small muted" title="Record and Snapshot are in the top bar (on the Dev channel): the whole app window and EVE's pictures with every detail, in the app's recordings folder. Nothing leaves the PC.">Recording: <span id="recSaid"></span></div>
       </div>
     </div></div>
   </div>
@@ -730,9 +730,7 @@
     // 5
     setState(5, s.recording ? "recording" : s.autosave ? "autosave on" : "autosave off", s.recording ? "bad" : s.autosave ? "ok" : "warn");
     const rec = s.recording;
-    setText($("recordBtn"), rec ? "Stop recording" : "Record for testing");
-    $("recordBtn").classList.toggle("on", !!rec);
-    setText($("recSaid"), rec ? `● ${Math.floor(rec.secs / 60)}:${String(rec.secs % 60).padStart(2, "0")} · ${rec.frames} pictures` : "");
+    setText($("recSaid"), rec ? `● ${Math.floor(rec.secs / 60)}:${String(rec.secs % 60).padStart(2, "0")} · ${rec.frames} pictures of EVE` : "off (Record is in the top bar)");
     $("recSaid").className = "small " + (rec ? "bad" : "muted");
     // Do now.
     if (!pose && (own || (bor && bor.loaded))) lookingSince = lookingSince || Date.now(); else lookingSince = null;
@@ -984,12 +982,6 @@
     if (status) onStatus(status);
   });
   $("cancelStart").addEventListener("click", () => { stopCountdown(); log("Start cancelled."); if (status) onStatus(status); });
-  $("recordBtn").addEventListener("click", () => {
-    const on = !(status && status.recording);
-    invoke("planetscan_record", { on })
-      .then((path) => { if (on && path) log(`Recording (5 pictures a second, in 30 s files, until you stop it, up to an hour) to ${path.replace(/[\\/][^\\/]*$/, "")}`, "warn"); })
-      .catch((e) => log("Couldn't record: " + e, "bad"));
-  });
   $("clickEdge").addEventListener("click", () => setClick(clickMode === "edge" ? null : "edge", "Click once anywhere on the planet's edge"));
   $("findEdge").addEventListener("click", () => invoke("planetscan_edge", { find: true }).then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok")).catch((e) => log(String(e), "bad")));
   $("pointList").addEventListener("click", () => { listClicks = []; setClick(clickMode === "list" ? null : "list", "Click 'No filter' in EVE's resource list (on the picture)"); });

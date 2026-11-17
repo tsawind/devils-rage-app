@@ -429,6 +429,46 @@ pub struct Inner {
 #[derive(Clone)]
 pub struct Engine(Arc<Inner>);
 
+/// For the developer tools (dev mode: record the whole app, snapshots).
+impl Engine {
+    /// The scan page's whole status as last worked out (JSON text; "{}" when not scanning).
+    pub fn status_text(&self) -> String {
+        self.0.status.lock().unwrap().as_str().to_string()
+    }
+    /// The newest EVE picture being watched (BGRA), if a scan is running.
+    pub fn latest_frame(&self) -> Option<Arc<Frame>> {
+        self.0.frame.lock().unwrap().clone()
+    }
+    /// Recording EVE's pictures, and since when.
+    pub fn recording_since(&self) -> Option<Instant> {
+        self.0.state.lock().unwrap().recorder.as_ref().map(|r| r.started)
+    }
+    /// Start (or stop) recording EVE's pictures with the scan's status. `stamp` names the files
+    /// (scan2-<stamp>-NNN.bin), so they pair with the app window's recording.
+    pub fn set_recording(&self, app: &AppHandle, on: bool, stamp: u64) -> Result<Option<String>, String> {
+        let mut s = self.0.state.lock().unwrap();
+        if !on {
+            s.recorder = None;
+            return Ok(None);
+        }
+        if s.recorder.is_some() {
+            return Ok(None);
+        }
+        let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("recordings");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let path = dir.join(format!("scan2-{stamp}.bin"));
+        let (tx, rx) = std::sync::mpsc::channel::<(Arc<Frame>, String)>();
+        let inner = self.0.clone();
+        let out = path.clone();
+        std::thread::Builder::new()
+            .name("planetscan-record".into())
+            .spawn(move || record_loop(inner, rx, out))
+            .map_err(|e| e.to_string())?;
+        s.recorder = Some(Recorder { tx, started: Instant::now(), last: None, frames: 0 });
+        Ok(Some(path.display().to_string()))
+    }
+}
+
 impl Default for Engine {
     fn default() -> Self {
         Engine(Arc::new(Inner {
@@ -2029,27 +2069,8 @@ pub fn planetscan_go(engine: tauri::State<'_, Engine>) -> Result<f64, String> {
 /// most 3 minutes), or stop. Kept in the app's recordings folder; nothing leaves the PC.
 #[tauri::command]
 pub fn planetscan_record(app: AppHandle, engine: tauri::State<'_, Engine>, on: bool) -> Result<Option<String>, String> {
-    let mut s = engine.0.state.lock().unwrap();
-    if !on {
-        s.recorder = None;
-        return Ok(None);
-    }
-    if s.recorder.is_some() {
-        return Ok(None);
-    }
-    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("recordings");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let path = dir.join(format!("scan2-{stamp}.bin"));
-    let (tx, rx) = std::sync::mpsc::channel::<(Arc<Frame>, String)>();
-    let inner = engine.0.clone();
-    let out = path.clone();
-    std::thread::Builder::new()
-        .name("planetscan-record".into())
-        .spawn(move || record_loop(inner, rx, out))
-        .map_err(|e| e.to_string())?;
-    s.recorder = Some(Recorder { tx, started: Instant::now(), last: None, frames: 0 });
-    Ok(Some(path.display().to_string()))
+    engine.set_recording(&app, on, stamp)
 }
 
 /// The recorder: files of 30 s each (small enough to fetch quickly), named

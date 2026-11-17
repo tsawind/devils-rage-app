@@ -19,6 +19,7 @@ mod groupsetup;
 mod launch;
 mod clientaudio;
 mod commands;
+mod devrec;
 mod location;
 mod mainwindow;
 mod parsec;
@@ -254,6 +255,22 @@ pub fn bar_action(app: &AppHandle, action: &str) {
         }
         #[cfg(desktop)]
         "updates" => updates::check_now(app.clone()),
+        // Dev mode: record everything (the app window, EVE's pictures when scanning, all the
+        // details) or take one snapshot of it, into the app's recordings folder.
+        "record" => {
+            let on = devrec::recording_secs().is_none();
+            if let Err(e) = devrec::set_recording(app, on) {
+                log::warn!("dev recording: {e}");
+            }
+        }
+        "snapshot" => {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = devrec::snapshot(&app) {
+                    log::warn!("snapshot: {e}");
+                }
+            });
+        }
         "minimize" => {
             if let Some(w) = window {
                 let _ = w.minimize();

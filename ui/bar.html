@@ -17,6 +17,10 @@
   .tab:hover { color: var(--hi); background: #15151a; }
   .tab.on { color: var(--hi); border-bottom-color: var(--red-hi); }
   .drag { flex: 1; }
+  /* Dev mode only: record everything, snapshot. */
+  .dev { display: none; }
+  body.devmode .dev { display: flex; }
+  .tab.rec { color: #ff6a5a; }
   .ver { color: var(--muted); font-size: 11px; display: flex; align-items: center; padding: 0 10px; }
   .win { width: 42px; display: flex; align-items: center; justify-content: center; color: var(--text); }
   .win:hover { background: #222228; color: var(--hi); }
@@ -34,6 +38,8 @@
   <button class="tab" data-act="settings">Settings</button>
   <button class="tab" data-act="reload" title="Reload this page (F5)">Reload</button>
   <button class="tab" data-act="updates">Check for updates</button>
+  <button class="tab dev" data-act="record" id="rec" title="Record everything (dev): the whole app window twice a second and, while a planet scan runs, EVE's pictures 5 a second, with every detail, in 30 s files in the app's recordings folder (up to an hour). Nothing leaves the PC.">Record</button>
+  <button class="tab dev" data-act="snapshot" id="snap" title="Snapshot (dev): the app window, EVE's picture when scanning, and every detail (status, the end of the log) into the app's recordings folder">Snapshot</button>
   <div class="drag" data-drag></div>
   <div class="ver" data-drag id="ver"></div>
   <button class="win" data-act="minimize" title="Minimise" aria-label="Minimise"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
@@ -69,6 +75,11 @@
         const max = document.getElementById("max");
         max.innerHTML = st.maximized ? RESTORE : MAX;
         max.title = st.maximized ? "Restore" : "Maximise";
+        document.body.classList.toggle("devmode", st.channel === "dev");
+        const rec = document.getElementById("rec");
+        rec.classList.toggle("rec", st.recording != null);
+        rec.textContent = st.recording != null ? `● Stop ${Math.floor(st.recording / 60)}:${String(st.recording % 60).padStart(2, "0")}` : "Record";
+        document.getElementById("snap").textContent = st.snapshot ? "Saved ✓" : "Snapshot";
         document.getElementById("ver").textContent = st.channel === "stable" ? st.version : `${st.version} · ${st.channel}`;
       }
     } catch (e) { /* app busy: try again */ }
