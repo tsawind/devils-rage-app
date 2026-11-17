@@ -62,31 +62,7 @@ pub const SPECS: [Spec; 3] = [
 /// The planet's disc plus its glow (lava, atmosphere) isn't sky.
 pub const GLOW: f64 = 1.25;
 
-/// A gas giant's rings: in the planet's equator, from r1 to r2 planet radii.
-#[derive(Clone, Copy, Debug)]
-pub struct Rings {
-    pub r1: f64,
-    pub r2: f64,
-}
-pub const RINGS: Rings = Rings { r1: 1.08, r2: 4.6 };
-
-impl Rings {
-    /// Does a camera ray hit the rings? n = the planet's axis in camera space, d = distance.
-    #[inline]
-    pub fn hit(&self, ray: &[f32; 3], n: &V3, d: f64) -> bool {
-        let nd = n[0] * ray[0] as f64 + n[1] * ray[1] as f64 + n[2] * ray[2] as f64;
-        if nd.abs() < 1e-9 {
-            return false;
-        }
-        let t = -d * n[2] / nd;
-        if t <= 0.0 {
-            return false;
-        }
-        let p = [t * ray[0] as f64, t * ray[1] as f64, d + t * ray[2] as f64];
-        let r = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
-        r >= self.r1 && r <= self.r2
-    }
-}
+pub use super::rings::Rings;
 
 /// The planet's axis in camera space for a pitch (the rings don't care about yaw).
 #[inline]
@@ -99,6 +75,7 @@ pub fn axis_for_pitch(pitch: f64) -> V3 {
 
 /// Blocks of the picture that are EVE's windows: their sharp pixels stay put while the sky
 /// behind moves, or they are bright and don't change at all.
+#[derive(Clone)]
 pub struct UiMask {
     pub size: usize,
     pub bw: usize,
@@ -371,6 +348,10 @@ impl SkyMask {
         }
         SkyMask { w, h, bits }
     }
+    /// Share of the picture that's sky (not the planet, EVE's windows or rings).
+    pub fn share(&self) -> f64 {
+        self.bits.iter().step_by(7).filter(|&&b| b != 0).count() as f64 / self.bits.len().div_ceil(7).max(1) as f64
+    }
 }
 
 /// Measure a picture: brightness and "is sky" summed for quick box averages. lens = focal length
@@ -532,8 +513,16 @@ impl Level {
     }
     /// Share of this level painted (area-weighted).
     pub fn coverage(&self) -> f64 {
+        self.coverage_in(None)
+    }
+    /// The same, counting only the heights of the sky that can be seen at all (a gas giant's
+    /// broad rings hide the rest: `rings::reachable`, by degree above the equator).
+    pub fn coverage_in(&self, heights: Option<&[bool; 181]>) -> f64 {
         let (mut seen, mut all) = (0.0, 0.0);
         for row in 0..self.h {
+            if heights.is_some_and(|ok| !ok[height_index(row, self.h)]) {
+                continue;
+            }
             let wgt = ((row as f64 + 0.5) / self.h as f64 * PI).sin();
             for col in 0..self.w {
                 all += wgt;
@@ -542,8 +531,18 @@ impl Level {
                 }
             }
         }
+        if all == 0.0 {
+            return 1.0;
+        }
         seen / all
     }
+}
+
+/// A map row's height above the planet's equator, as an index into `rings::reachable` (0 … 180).
+#[inline]
+pub fn height_index(row: usize, h: usize) -> usize {
+    let lat = (row as f64 + 0.5) / h as f64 * 180.0;
+    ((90.0 - lat).round() + 90.0).clamp(0.0, 180.0) as usize
 }
 
 pub struct Sky {
@@ -561,10 +560,13 @@ impl Sky {
     }
     /// Where the biggest part of the sky not recorded yet is, seen from the camera at facing Q
     /// (the medium level: the stars): a few words for the pilot.
-    pub fn missing_hint(&self, q: &M3) -> Option<String> {
+    pub fn missing_hint(&self, q: &M3, heights: Option<&[bool; 181]>) -> Option<String> {
         let m = &self.levels[MEDIUM];
         let (mut sx, mut sy, mut sz, mut n) = (0.0, 0.0, 0.0, 0.0);
         for row in (0..m.h).step_by(6) {
+            if heights.is_some_and(|ok| !ok[height_index(row, m.h)]) {
+                continue;
+            }
             let lat = (row as f64 + 0.5) / m.h as f64 * PI;
             let wgt = lat.sin();
             for col in (0..m.w).step_by(6) {
@@ -871,6 +873,7 @@ impl Boot {
 }
 
 /// One picture's points for a start from nothing: for matching and for painting, coarse and medium.
+#[derive(Clone)]
 pub struct BootFrame {
     pub match_coarse: Vec<Pt>,
     pub match_medium: Vec<Pt>,
@@ -889,23 +892,87 @@ impl BootFrame {
     }
 }
 
+/// Points (the same grid place on the screen in every picture) whose value hardly changed over a
+/// start's pictures while the sky turned past: dropped from every picture. A place counts when
+/// it's in at least half the pictures; still when its spread is under 0.3 of the spread of all
+/// values (the sky's places see different stars and nebula as it turns; blank sky drops too,
+/// which costs nothing).
+pub fn drop_still(frames: &mut [BootFrame]) {
+    use std::collections::HashMap;
+    let key = |p: &Pt| ((p.d[0] * 100_000.0) as i32, (p.d[1] * 100_000.0) as i32);
+    let n = frames.len();
+    if n < 4 {
+        return;
+    }
+    fn list(f: &mut BootFrame, pick: usize) -> &mut Vec<Pt> {
+        match pick {
+            0 => &mut f.match_coarse,
+            1 => &mut f.match_medium,
+            2 => &mut f.paint_coarse,
+            _ => &mut f.paint_medium,
+        }
+    }
+    for pick in 0..4 {
+        let mut by: HashMap<(i32, i32), (f64, f64, u32)> = HashMap::new();
+        let (mut all, mut all2, mut count) = (0f64, 0f64, 0f64);
+        for f in frames.iter_mut() {
+            for p in list(f, pick).iter() {
+                let e = by.entry(key(p)).or_insert((0.0, 0.0, 0));
+                let g = p.g as f64;
+                e.0 += g;
+                e.1 += g * g;
+                e.2 += 1;
+                all += g;
+                all2 += g * g;
+                count += 1.0;
+            }
+        }
+        if count < 10.0 {
+            continue;
+        }
+        let spread = (all2 / count - (all / count).powi(2)).max(1e-9).sqrt();
+        let still: std::collections::HashSet<(i32, i32)> = by
+            .iter()
+            .filter(|(_, &(s, s2, c))| c as usize * 2 >= n && ((s2 / c as f64 - (s / c as f64).powi(2)).max(0.0).sqrt()) < 0.3 * spread)
+            .map(|(k, _)| *k)
+            .collect();
+        if still.is_empty() {
+            continue;
+        }
+        for f in frames.iter_mut() {
+            list(f, pick).retain(|p| !still.contains(&key(p)));
+        }
+    }
+}
+
 /// One trial pitch: the pictures in turn, each matched to all the sky placed so far (so the turn
 /// can go on past where the first picture's sky ends) and then added to it. Mean fit, and each
 /// picture's facing and fit.
-fn boot_try(first: &BootFrame, later: &[BootFrame], pitch: f64, medium: bool) -> (f64, Vec<Option<(f64, f64, f64)>>) {
+fn boot_try(first: &BootFrame, later: &[BootFrame], pitch: f64, medium: bool, rings: Option<(Rings, f64)>) -> (f64, Vec<Option<(f64, f64, f64)>>) {
     let mut sky = Sky::new(false);
     let q0 = pose_q(0.0, pitch);
-    sky.paint_points(COARSE, &first.paint_coarse, &q0);
+    // A gas giant: what would be ring at this trial pitch is left out of the painting (the
+    // matching leaves it out at each pitch it tries).
+    let clear = |pts: &[Pt], p: f64| -> Vec<Pt> {
+        match &rings {
+            Some((rg, d)) => {
+                let n = axis_for_pitch(p);
+                pts.iter().copied().filter(|q| !rg.hit(&q.d, &n, *d)).collect()
+            }
+            None => pts.to_vec(),
+        }
+    };
+    sky.paint_points(COARSE, &clear(&first.paint_coarse, pitch), &q0);
     if medium {
-        sky.paint_points(MEDIUM, &first.paint_medium, &q0);
+        sky.paint_points(MEDIUM, &clear(&first.paint_medium, pitch), &q0);
     }
     let mut at = (0.0, pitch);
     let mut total = 0.0;
     let mut out = Vec::with_capacity(later.len());
     for f in later {
-        let coarse = align_box(&f.match_coarse, &mut sky, COARSE, at, (25.0 * DEG, 10.0 * DEG), 2.5 * DEG, 0.25, None);
+        let coarse = align_box(&f.match_coarse, &mut sky, COARSE, at, (25.0 * DEG, 10.0 * DEG), 2.5 * DEG, 0.25, rings);
         let found = match (coarse, medium) {
-            (Some(c), true) if c.score >= 0.3 => align_box(&f.match_medium, &mut sky, MEDIUM, (c.yaw, c.pitch), (1.5 * DEG, 1.5 * DEG), 0.5 * DEG, 0.25, None),
+            (Some(c), true) if c.score >= 0.3 => align_box(&f.match_medium, &mut sky, MEDIUM, (c.yaw, c.pitch), (1.5 * DEG, 1.5 * DEG), 0.5 * DEG, 0.25, rings),
             (c, false) => c,
             _ => None,
         };
@@ -914,9 +981,9 @@ fn boot_try(first: &BootFrame, later: &[BootFrame], pitch: f64, medium: bool) ->
                 total += fd.score;
                 at = (fd.yaw, fd.pitch);
                 let q = pose_q(fd.yaw, fd.pitch);
-                sky.paint_points(COARSE, &f.paint_coarse, &q);
+                sky.paint_points(COARSE, &clear(&f.paint_coarse, fd.pitch), &q);
                 if medium {
-                    sky.paint_points(MEDIUM, &f.paint_medium, &q);
+                    sky.paint_points(MEDIUM, &clear(&f.paint_medium, fd.pitch), &q);
                 }
                 out.push(Some((fd.yaw, fd.pitch, fd.score)));
             }
@@ -927,14 +994,29 @@ fn boot_try(first: &BootFrame, later: &[BootFrame], pitch: f64, medium: bool) ->
 }
 
 /// The first picture's pitch from the later ones (the planet turned sideways in between).
-pub fn boot(first: &BootFrame, later: &[BootFrame]) -> Option<Boot> {
+/// rings: a gas giant's (or everything that could be), left out at each trial pitch: rings turn
+/// with the planet, not with the sky, and would fit "not turned" best.
+pub fn boot(first: &BootFrame, later: &[BootFrame], rings: Option<(Rings, f64)>) -> Option<Boot> {
     if later.is_empty() {
         return None;
     }
+    // What stayed put on the screen while the planet turned isn't sky: a gas giant's rings (round
+    // the axis the camera turns on) or a window the mask doesn't know yet. Left out of all of them.
+    let mut frames: Vec<BootFrame> = std::iter::once(first).chain(later.iter()).map(|f| f.clone()).collect();
+    drop_still(&mut frames);
+    let (first, later) = frames.split_first()?;
+    // How far the fitted pictures turned from the first. A trial pitch whose fit says "hardly
+    // turned" is wrong: what fitted there is what turns with the planet (a gas giant's rings, a
+    // window the mask missed), not the sky, so it scores half.
+    let turned_of = |pitch: f64, poses: &[Option<(f64, f64, f64)>]| poses.iter().flatten().map(|&(y, p, _)| super::geom::apart((0.0, pitch), (y, p))).fold(0.0, f64::max);
+    let judged = |pitch: f64, (score, poses): (f64, Vec<Option<(f64, f64, f64)>>)| {
+        let turned = turned_of(pitch, &poses);
+        (if turned < 8.0 * DEG { score * 0.5 } else { score }, poses)
+    };
     // Every 5°, coarse.
     let trials: Vec<(f64, f64)> = (-17..=17).map(|k| {
         let p = k as f64 * 5.0 * DEG;
-        (p, boot_try(first, later, p, false).0)
+        (p, judged(p, boot_try(first, later, p, false, rings)).0)
     }).collect();
     let (p0, coarse) = trials.iter().copied().max_by(|a, b| a.1.total_cmp(&b.1))?;
     let other = trials.iter().filter(|t| (t.0 - p0).abs() > 8.0 * DEG).map(|t| t.1).fold(0.0, f64::max);
@@ -945,7 +1027,7 @@ pub fn boot(first: &BootFrame, later: &[BootFrame]) -> Option<Boot> {
         let n = (span / step) as i64;
         for k in -n..=n {
             let p = centre + k as f64 * step * DEG;
-            let (score, poses) = boot_try(first, later, p, true);
+            let (score, poses) = judged(p, boot_try(first, later, p, true, rings));
             if score > best.1 {
                 best = (p, score, poses);
             }
@@ -1332,18 +1414,6 @@ mod tests {
         assert_eq!(sky.levels[MEDIUM].sum[5] / sky.levels[MEDIUM].n[5] as f32, 6.0);
         assert_eq!(sky.levels[COARSE].sum[7] / sky.levels[COARSE].n[7] as f32, -4.0);
         assert_eq!(sky.levels[FINE].n.iter().filter(|&&n| n > 0).count(), 0);
-    }
-
-    #[test]
-    fn rings_hit_only_where_the_ring_is() {
-        let axis = axis_for_pitch(20.0 * DEG);
-        // Straight at the planet's middle: the ring plane passes through the centre, inside r1.
-        assert!(!RINGS.hit(&[0.0, 0.0, -1.0], &axis, 4.0));
-        // Edge-on (pitch 0): never.
-        assert!(!RINGS.hit(&[0.3, -0.2, -0.93], &axis_for_pitch(0.0), 4.0));
-        // Looking down past the planet at pitch 20°: the plane, about 2 radii out.
-        let l = (0.0f32 * 0.0 + 0.28 * 0.28 + 1.0).sqrt();
-        assert!(RINGS.hit(&[0.0, -0.28 / l, -1.0 / l], &axis, 4.0));
     }
 
     /// A lit disc of the zoomed-out size, half of it in shadow, with a bright window over one

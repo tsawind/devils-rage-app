@@ -6,8 +6,9 @@
 //! (sharper than the edge-on ones). EVE's planets don't turn and their sun stays put, so a place
 //! looks the same from every side; its night side stays dark.
 
-use super::geom::{apply, facing_of, lat_lon, to_sphere, transpose, Disc, M3};
-use super::sky::Pic;
+use super::geom::{apply, facing_of, pose_q, to_sphere, transpose, Disc, M3};
+use super::rings::Rings;
+use super::sky::{axis_for_pitch, Pic, DEG};
 use std::f64::consts::PI;
 
 pub const BASE_W: usize = 2048;
@@ -26,6 +27,19 @@ pub struct Base {
     pub version: u64,
     /// The planet's pixels for the current edge and picture size: worked out once, not per picture.
     spots: Option<(SpotsKey, Vec<Spot>)>,
+    /// The map's detail (each cell's brightness minus its surroundings), for placing a picture
+    /// on the planet itself; made again once the map has moved on.
+    detail: Option<(u64, Vec<f32>)>,
+}
+
+/// A picture placed on the planet map: the facing, how well it matched (correlation of the
+/// detail), and the share of the planet's points that landed on mapped cells.
+#[derive(Clone, Copy, Debug)]
+pub struct Placed {
+    pub yaw: f64,
+    pub pitch: f64,
+    pub score: f64,
+    pub seen: f64,
 }
 
 /// A picture pixel on the planet, face-on enough to paint: where it is and which way it points
@@ -92,22 +106,33 @@ impl Default for Base {
 impl Base {
     pub fn new() -> Base {
         let n = BASE_W * BASE_H;
-        Base { w: BASE_W, h: BASE_H, sum: vec![[0.0; 3]; n], weight: vec![0.0; n], best: vec![0.0; n], version: 0, spots: None }
+        Base { w: BASE_W, h: BASE_H, sum: vec![[0.0; 3]; n], weight: vec![0.0; n], best: vec![0.0; n], version: 0, spots: None, detail: None }
     }
 
-    #[inline]
+    #[cfg(test)]
     fn cell(&self, lat: f64, lon: f64) -> usize {
         let row = ((lat / PI * self.h as f64) as usize).min(self.h - 1);
         let col = ((lon / (2.0 * PI) * self.w as f64) as usize).min(self.w - 1);
         row * self.w + col
     }
 
-    /// Paint one picture at facing Q. Returns the cells it touched.
-    pub fn paint(&mut self, pic: &Pic, disc: &Disc, q: &M3) -> usize {
-        let key = SpotsKey { w: pic.w, h: pic.h, disc: [disc.cx.to_bits(), disc.cy.to_bits(), disc.r.to_bits(), disc.d.to_bits()] };
+    fn spots(&mut self, w: usize, h: usize, disc: &Disc) {
+        let key = SpotsKey { w, h, disc: [disc.cx.to_bits(), disc.cy.to_bits(), disc.r.to_bits(), disc.d.to_bits()] };
         if self.spots.as_ref().is_none_or(|(k, _)| *k != key) {
-            self.spots = Some((key, spots_for(pic.w, pic.h, disc)));
+            self.spots = Some((key, spots_for(w, h, disc)));
         }
+    }
+
+    /// Paint one picture at facing Q. Returns the cells it touched. rings: a gas giant's rings and
+    /// the pitch, so the parts of the planet behind them aren't painted. poor_only: only cells not
+    /// seen face-on yet (a facing from the planet itself, not the sky, fills gaps but doesn't
+    /// blur what the sky's facings painted).
+    pub fn paint(&mut self, pic: &Pic, disc: &Disc, q: &M3, rings: Option<(&Rings, f64)>, poor_only: bool) -> usize {
+        self.spots(pic.w, pic.h, disc);
+        // Where the camera's ray to a planet point crosses the ring plane first (t in 0 … 1 along
+        // camera → point): behind a ring there, it isn't painted.
+        let ring = rings.filter(|(r, _)| r.any()).map(|(r, pitch)| (*r, axis_for_pitch(pitch)));
+        let d = disc.d;
         let qt = transpose(q);
         let m: [f32; 9] = std::array::from_fn(|i| qt[i] as f32);
         let (wf, hf) = (self.w as f32, self.h as f32);
@@ -116,6 +141,19 @@ impl Base {
         let mut touched = 0;
         for sp in spots {
             let v = sp.v;
+            if let Some((rg, n)) = &ring {
+                let dir = [v[0] as f64, v[1] as f64, v[2] as f64 - d];
+                let nd = n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2];
+                if nd.abs() > 1e-9 {
+                    let t = -d * n[2] / nd;
+                    if t > 0.0 && t < 1.0 {
+                        let x = [t * dir[0], t * dir[1], d + t * dir[2]];
+                        if rg.cut_at((x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt()) {
+                            continue;
+                        }
+                    }
+                }
+            }
             let p = [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
             // As geom::lat_lon(p, false): latitude from the north pole, longitude 0..2π.
             let lat = fast_atan2((p[0] * p[0] + p[1] * p[1]).sqrt(), p[2]);
@@ -128,6 +166,9 @@ impl Base {
             let c = row * w + col;
             let f = sp.facing;
             if self.best[c] >= SETTLED && f < self.best[c] {
+                continue;
+            }
+            if poor_only && self.best[c] >= 0.9 {
                 continue;
             }
             let i = sp.pixel as usize * 4;
@@ -149,6 +190,158 @@ impl Base {
             self.version += 1;
         }
         touched
+    }
+
+    /// The map's detail: each seen cell's brightness minus the mean of the seen cells round it
+    /// (9 × 9; NaN where not seen). Made again when the map has had 40 more pictures.
+    fn detail(&mut self) -> &Vec<f32> {
+        if self.detail.as_ref().is_none_or(|(v, _)| self.version >= v + 40 || self.version < *v) {
+            let (w, h) = (self.w, self.h);
+            let n = w * h;
+            let mut lum = vec![0f32; n];
+            let mut seen = vec![0f32; n];
+            for i in 0..n {
+                let wt = self.weight[i];
+                if wt > 0.0 {
+                    let s = self.sum[i];
+                    lum[i] = (0.299 * s[0] + 0.587 * s[1] + 0.114 * s[2]) / wt;
+                    seen[i] = 1.0;
+                }
+            }
+            // Box sums, one direction at a time (longitude wraps round).
+            let boxed = |src: &[f32], k: usize| -> Vec<f32> {
+                let mut across = vec![0f32; n];
+                for row in 0..h {
+                    let r = &src[row * w..(row + 1) * w];
+                    let mut acc: f32 = (0..=2 * k).map(|j| r[(j + w - k) % w]).sum();
+                    for col in 0..w {
+                        across[row * w + col] = acc;
+                        acc += r[(col + k + 1) % w] - r[(col + w - k) % w];
+                    }
+                }
+                let mut out = vec![0f32; n];
+                for col in 0..w {
+                    for row in 0..h {
+                        let (a, b) = (row.saturating_sub(k), (row + k).min(h - 1));
+                        let mut acc = 0.0;
+                        for r in a..=b {
+                            acc += across[r * w + col];
+                        }
+                        out[row * w + col] = acc;
+                    }
+                }
+                out
+            };
+            // The detail: a 3 × 3 mean minus the 9 × 9 one round it (fine noise and broad shading out).
+            let masked: Vec<f32> = (0..n).map(|i| lum[i] * seen[i]).collect();
+            let (l1, n1, l4, n4) = (boxed(&masked, 1), boxed(&seen, 1), boxed(&masked, 4), boxed(&seen, 4));
+            let out: Vec<f32> = (0..n).map(|i| if n1[i] >= 5.0 && n4[i] >= 40.0 { l1[i] / n1[i] - l4[i] / n4[i] } else { f32::NAN }).collect();
+            self.detail = Some((self.version, out));
+        }
+        &self.detail.as_ref().unwrap().1
+    }
+
+    /// Place a picture on the planet map itself (when too little sky shows, as past a gas giant's
+    /// broad rings): the detail of up to 3000 of the planet's points (face-on enough to paint)
+    /// against the map's, searched round a guess (± span) and refined to 1/16 of a degree. The
+    /// map has to be painted under at least 40 % of the points.
+    pub fn place(&mut self, pic: &Pic, disc: &Disc, around: (f64, f64), span: f64) -> Option<Placed> {
+        self.spots(pic.w, pic.h, disc);
+        // The picture's detail at each point: its brightness minus the box round it, the box about
+        // as wide on the planet as the map's (a pixel near the middle covers (D − 1) / f radians).
+        let f = disc.r * (disc.d * disc.d - 1.0).sqrt();
+        let px_deg = (disc.d - 1.0) / f / DEG;
+        let cells = (180.0 / BASE_H as f64) / px_deg;
+        let k = ((4.0 * cells).round() as i64).clamp(2, 12);
+        let k1 = ((1.0 * cells).round() as i64).clamp(0, 3);
+        let samples: Vec<([f32; 3], f32)> = {
+            let (_, spots) = self.spots.as_ref()?;
+            let every = (spots.len() / 3000).max(1);
+            spots
+                .iter()
+                .step_by(every)
+                .filter_map(|sp| {
+                    let (x, y) = ((sp.pixel as usize % pic.w) as i64, (sp.pixel as usize / pic.w) as i64);
+                    if x < k || y < k || x + k >= pic.w as i64 || y + k >= pic.h as i64 {
+                        return None;
+                    }
+                    let (mut acc, mut near) = (0u32, 0u32);
+                    for yy in y - k..=y + k {
+                        for xx in x - k..=x + k {
+                            let l = pic.lum(xx as usize, yy as usize);
+                            acc += l;
+                            if (xx - x).abs() <= k1 && (yy - y).abs() <= k1 {
+                                near += l;
+                            }
+                        }
+                    }
+                    let mean = acc as f32 / ((2 * k + 1) * (2 * k + 1)) as f32;
+                    Some((sp.v, near as f32 / ((2 * k1 + 1) * (2 * k1 + 1)) as f32 - mean))
+                })
+                .collect()
+        };
+        if samples.len() < 200 {
+            return None;
+        }
+        let (w, h) = (self.w, self.h);
+        let detail = self.detail();
+        let score = |yaw: f64, pitch: f64| -> (f64, f64) {
+            let qt = transpose(&pose_q(yaw, pitch));
+            let m: [f32; 9] = std::array::from_fn(|i| qt[i] as f32);
+            let (mut c, mut sa, mut sb, mut saa, mut sbb, mut sab) = (0f64, 0f64, 0f64, 0f64, 0f64, 0f64);
+            for (v, fv) in &samples {
+                let p = [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]];
+                let lat = fast_atan2((p[0] * p[0] + p[1] * p[1]).sqrt(), p[2]);
+                let mut lon = fast_atan2(p[1], p[0]);
+                if lon < 0.0 {
+                    lon += 2.0 * std::f32::consts::PI;
+                }
+                let row = ((lat / std::f32::consts::PI * h as f32) as usize).min(h - 1);
+                let col = ((lon / (2.0 * std::f32::consts::PI) * w as f32) as usize).min(w - 1);
+                let mv = detail[row * w + col];
+                if mv.is_nan() {
+                    continue;
+                }
+                let (a, b) = (*fv as f64, mv as f64);
+                c += 1.0;
+                sa += a;
+                sb += b;
+                saa += a * a;
+                sbb += b * b;
+                sab += a * b;
+            }
+            let seen = c / samples.len() as f64;
+            if c < 100.0 {
+                return (f64::NAN, seen);
+            }
+            let (va, vb) = (saa - sa * sa / c, sbb - sb * sb / c);
+            if va <= 0.0 || vb <= 0.0 {
+                return (f64::NAN, seen);
+            }
+            ((sab - sa * sb / c) / (va * vb).sqrt(), seen)
+        };
+        let mut best: Option<Placed> = None;
+        let grid = |cy: f64, cp: f64, half: i64, st: f64, best: &mut Option<Placed>| {
+            for j in -half..=half {
+                for i in -half..=half {
+                    let (yaw, pitch) = (cy + i as f64 * st, cp + j as f64 * st);
+                    let (sc, seen) = score(yaw, pitch);
+                    if sc.is_finite() && seen >= 0.4 && best.is_none_or(|b| sc > b.score) {
+                        *best = Some(Placed { yaw, pitch, score: sc, seen });
+                    }
+                }
+            }
+        };
+        let step = 0.5 * DEG;
+        grid(around.0, around.1, (span / step).round().max(1.0) as i64, step, &mut best);
+        let mut st = step / 2.0;
+        for _ in 0..3 {
+            if let Some(b) = best {
+                grid(b.yaw, b.pitch, 1, st, &mut best);
+            }
+            st /= 2.0;
+        }
+        best
     }
 
     /// A cell no picture pixel landed on, but most of its neighbours are seen: a gap between
@@ -323,7 +516,7 @@ pub fn fill_gaps(rgb: &mut [u8], w: usize, h: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::planetscan::geom::pose_q;
+    use crate::planetscan::geom::lat_lon;
 
     #[test]
     fn fast_atan2_is_close() {
@@ -347,7 +540,7 @@ mod tests {
             pic[(py * w + px) * 4..(py * w + px) * 4 + 4].copy_from_slice(&[0, 0, 200, 255]);
             let mut b = Base::new();
             let q = pose_q(yaw, pitch);
-            b.paint(&Pic { w, h, bgra: &pic }, &disc, &q);
+            b.paint(&Pic { w, h, bgra: &pic }, &disc, &q, None, false);
             let v = to_sphere(px as f64 + 0.5, py as f64 + 0.5, &disc).unwrap();
             let (lat, lon) = lat_lon(&apply(&transpose(&q), &v), false);
             let want = b.cell(lat, lon);
@@ -362,7 +555,7 @@ mod tests {
         let (w, h) = (640usize, 400usize);
         let px: Vec<u8> = (0..w * h).flat_map(|i| [(i % 200) as u8 + 20, 90, 40, 255]).collect();
         let disc = Disc::with_lens(320.0, 200.0, 100.0, 375.0);
-        assert!(b.paint(&Pic { w, h, bgra: &px }, &disc, &pose_q(0.3, 0.2)) > 1000);
+        assert!(b.paint(&Pic { w, h, bgra: &px }, &disc, &pose_q(0.3, 0.2), None, false) > 1000);
         let back = Base::from_bytes(&b.to_bytes()).unwrap();
         assert_eq!(back.rgb(), b.rgb());
         assert!((back.coverage() - b.coverage()).abs() < 1e-9);

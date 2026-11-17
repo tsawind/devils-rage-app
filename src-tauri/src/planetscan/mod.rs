@@ -17,6 +17,7 @@
 
 pub mod base;
 pub mod geom;
+pub mod rings;
 pub mod scan;
 pub mod seat;
 pub mod sky;
@@ -27,7 +28,8 @@ use base::Base;
 use geom::{apart, pose_q, Disc};
 use scan::{ListSpot, Map};
 use serde_json::json;
-use sky::{BootFrame, Pic, Rings, Sky, SkyMask, UiMask, ViewBuffers, DEG, RINGS};
+use rings::{PoleRings, RingLearner, Rings};
+use sky::{BootFrame, Pic, Sky, SkyMask, UiMask, ViewBuffers, DEG};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -42,6 +44,10 @@ pub fn lens_for(width: usize) -> f64 {
 
 /// When a resource scan counts as done (Tsa: 99 % of the planet).
 const DONE_AT: f64 = 0.99;
+
+/// A gas giant: under this share of the picture left as sky beside its rings, the sky gives no
+/// facing (with so little, a wrong one is likelier than none).
+const MIN_SKY: f64 = 0.25;
 
 pub struct Frame {
     pub w: usize,
@@ -79,6 +85,8 @@ struct Pose {
     level: usize,
     /// The facing one picture earlier (for predicting the next).
     before: Option<(f64, f64)>,
+    /// Placed on the planet map itself (too little sky past a gas giant's rings), not the sky.
+    by_planet: bool,
 }
 
 struct Run {
@@ -163,7 +171,6 @@ struct Session {
     /// Own sky changed since saved: (on this PC, for the corp, coverage when last sent).
     sky_dirty: HashMap<u64, (bool, bool, f64, Instant)>,
     borrowed: Option<u64>,
-    rings: HashMap<u64, bool>,
     bares: HashMap<u64, Map>,
     ui: Option<UiMask>,
     ui_version: u64,
@@ -219,6 +226,47 @@ struct Session {
     compare_shift: Option<f64>,
     compare_last: Option<(f64, f64, u64)>,
     base_full: bool,
+    /// Watching only after the pilot pressed Start with EVE zoomed all the way out: before that
+    /// nothing is learnt or painted, so EVE's opening zoom can't get into anything.
+    started: bool,
+    /// Since when the planet's edge has been missing (after 3 s: Start again).
+    rim_lost: Option<Instant>,
+    /// A gas giant's rings: the votes, the cut in use (and a number that changes with it),
+    /// whether this planet's sky was started with the cut (else it starts again once they're
+    /// measured), when the cut was last looked at, and the heights of sky that can be seen past it.
+    ring_learner: Option<RingLearner>,
+    /// A gas giant's rings not measured yet: from over its top, then its bottom (before its sky).
+    ring_pole: Option<RingPole>,
+    ring_pole_at: Option<Instant>,
+    ring_cut: Rings,
+    ring_version: u64,
+    ring_clean: bool,
+    ring_at: Option<Instant>,
+    ring_saved: Option<Instant>,
+    reach: Option<[bool; 181]>,
+    /// EVE's windows as loaded (learnt on planets before): what the ring measuring leaves out
+    /// (on a gas giant the live mask also takes in rings while the planet turns sideways).
+    ui_trusted: Option<UiMask>,
+    /// For the whole-sky search on a gas giant (a picture without the ring cut).
+    find_buf: ViewBuffers,
+    /// Recording the pictures for testing.
+    recorder: Option<Recorder>,
+}
+
+/// Measuring a gas giant's rings from over its poles: the top first, then the bottom (with what
+/// the top found).
+enum RingPole {
+    Top(PoleRings),
+    Bottom(Rings, PoleRings),
+}
+
+/// Recording for testing: a picture every 200 ms (full size, JPEG) with a note of what the app
+/// made of it, to one file in the recordings folder; at most 3 minutes. Written by its own thread.
+struct Recorder {
+    tx: std::sync::mpsc::Sender<(Arc<Frame>, String)>,
+    started: Instant,
+    last: Option<Instant>,
+    frames: u32,
 }
 
 impl Default for Session {
@@ -240,7 +288,6 @@ impl Default for Session {
             skies: HashMap::new(),
             sky_dirty: HashMap::new(),
             borrowed: None,
-            rings: HashMap::new(),
             bares: HashMap::new(),
             ui: None,
             ui_version: 0,
@@ -285,6 +332,20 @@ impl Default for Session {
             compare_shift: None,
             compare_last: None,
             base_full: false,
+            started: false,
+            rim_lost: None,
+            ring_learner: None,
+            ring_pole: None,
+            ring_pole_at: None,
+            ring_cut: Rings::none(),
+            ring_version: 0,
+            ring_clean: false,
+            ring_at: None,
+            ring_saved: None,
+            reach: None,
+            ui_trusted: None,
+            find_buf: ViewBuffers::default(),
+            recorder: None,
         }
     }
 }
@@ -364,13 +425,90 @@ impl Session {
     fn is_gas(&self) -> bool {
         self.planet.as_ref().is_some_and(|p| p.kind == "gas")
     }
-    /// Rings to leave out of the sky now: known for this planet, or worth trying on a gas giant.
-    fn rings_now(&self) -> Option<Rings> {
-        let id = self.planet_id()?;
-        match self.rings.get(&id) {
-            Some(true) => Some(RINGS),
-            Some(false) => None,
-            None => self.is_gas().then_some(RINGS),
+    /// A gas giant's measured rings, to leave out of the sky (none until measured).
+    fn ring_cut_now(&self) -> Option<Rings> {
+        (self.is_gas() && self.ring_cut.any()).then_some(self.ring_cut)
+    }
+    /// A new cut: the masks are made again and what sky can be seen past it worked out.
+    fn set_ring_cut(&mut self, cut: Rings) {
+        self.ring_cut = cut;
+        self.ring_version += 1;
+        self.mask = None;
+        self.reach = match (cut.any(), self.disc()) {
+            (true, Some(disc)) => Some(rings::reachable(&cut, &disc, self.size.0, self.size.1, self.lens())),
+            _ => None,
+        };
+        self.sky_cov.1 = None;
+    }
+    /// This planet's rings from the PC (kept between sessions): the cut measured over its poles,
+    /// and what turning it added since. A gas giant without one is measured first.
+    fn load_rings(&mut self) {
+        let read = |kind: &str| self.planet_id().and_then(|pid| self.map_path(pid, kind)).and_then(|p| std::fs::read(p).ok());
+        let measured = read("rings3").and_then(|b| rings::cut_from_bytes(&b));
+        let learner = read("rings2").and_then(|b| RingLearner::from_bytes(&b));
+        let gas = self.is_gas();
+        let mut cut = measured.unwrap_or_default();
+        if let (Some(_), Some(l)) = (measured, learner.as_ref().filter(|l| l.measured())) {
+            cut = cut.union(&l.rings());
+        }
+        self.ring_learner = learner;
+        self.ring_clean = !gas || measured.is_some();
+        self.ring_pole = (gas && measured.is_none()).then(|| RingPole::Top(PoleRings::new()));
+        self.ring_pole_at = None;
+        self.ring_at = None;
+        self.set_ring_cut(cut);
+    }
+    /// A gas giant's rings measured (from over both poles): kept on the PC and cut out from now
+    /// on. Its sky so far was recorded without knowing them, so it starts again; EVE's windows go
+    /// back to the kept ones (over a pole, turning, the rings looked like windows).
+    fn finish_ring_measure(&mut self, cut: Rings, jobs: &mut Vec<Job>) {
+        self.ring_pole = None;
+        self.ring_clean = true;
+        self.ring_learner = Some(RingLearner::new());
+        self.set_ring_cut(cut);
+        if let Some(pid) = self.planet_id() {
+            if let Some(path) = self.map_path(pid, "rings3") {
+                jobs.push(Job::WriteFile { path, bytes: rings::cut_to_bytes(&cut) });
+            }
+            if self.skies.remove(&pid).is_some() {
+                self.sky_dirty.remove(&pid);
+                if let Some(path) = self.map_path(pid, "sky") {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        self.reload_windows();
+        self.pose = None;
+        self.boot = None;
+        self.boot_note = None;
+        self.lost_since = None;
+    }
+    /// What the recording keeps with each picture.
+    fn record(&mut self, f: &Arc<Frame>) {
+        let (expired, due, ms) = match self.recorder.as_ref() {
+            None => return,
+            Some(r) => (r.started.elapsed() > Duration::from_secs(180), r.last.is_none_or(|t| t.elapsed() >= Duration::from_millis(200)), r.started.elapsed().as_millis() as u64),
+        };
+        if expired {
+            self.recorder = None;
+            self.event(json!({ "kind": "warn", "text": "Recording stopped after 3 minutes." }));
+            return;
+        }
+        if !due {
+            return;
+        }
+        let note = json!({
+            "ms": ms, "w": f.w, "h": f.h, "planet": self.planet.as_ref().map(|p| json!({ "id": p.id, "name": p.name, "type": p.kind })),
+            "started": self.started, "edge": self.edge_r, "rim_ok": self.rim_ok.0, "lens": self.lens(),
+            "pose": self.pose.as_ref().map(|p| json!({ "yaw": p.yaw / DEG, "pitch": p.pitch / DEG, "placed": p.placed, "by_planet": p.by_planet, "sky_of": p.sky_of })),
+            "rings": self.ring_cut.bands(), "ring_clean": self.ring_clean, "picked": self.picked,
+        })
+        .to_string();
+        let Some(rec) = self.recorder.as_mut() else { return };
+        rec.last = Some(Instant::now());
+        rec.frames += 1;
+        if rec.tx.send((f.clone(), note)).is_err() {
+            self.recorder = None;
         }
     }
     fn ui_path(&self) -> Option<PathBuf> {
@@ -392,8 +530,7 @@ impl Session {
         self.size = (w, h);
         self.mask = None;
         // EVE's windows rarely cover more than a third of the picture: a saved mask that does is wrong.
-        self.ui = self.ui_path().and_then(|p| std::fs::read(p).ok()).and_then(|b| UiMask::from_bytes(&b, w, h)).filter(|m| m.share() < 0.35).or_else(|| Some(UiMask::new(w, h)));
-        self.ui_version += 1;
+        self.reload_windows();
         let saved = self.list_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| {
             let v: Vec<f64> = t.split_whitespace().filter_map(|x| x.parse().ok()).collect();
             (v.len() == 3).then(|| ListSpot { x: v[0], y0: v[1], y5: v[2] })
@@ -402,6 +539,20 @@ impl Session {
         // EVE's planet panel at 90 % UI scale on a 1918 × 1024 window (Tsa's): No filter at y 216,
         // the fifth resource at 342, names round x 140. Scaled by the window's height.
         self.list = saved.or(Some(ListSpot { x: 140.0 * h as f64 / 1024.0, y0: 216.0 * h as f64 / 1024.0, y5: 342.0 * h as f64 / 1024.0 }));
+    }
+
+    /// EVE's windows from the PC (learnt on planets before; a gas giant's are never kept, as
+    /// the rings would be in them), as the live mask and as the trusted copy.
+    fn reload_windows(&mut self) {
+        let (w, h) = self.size;
+        if w == 0 {
+            return;
+        }
+        let saved = self.ui_path().and_then(|p| std::fs::read(p).ok()).and_then(|b| UiMask::from_bytes(&b, w, h)).filter(|m| m.share() < 0.35);
+        self.ui_trusted = saved.clone().filter(|m| m.ready());
+        self.ui = saved.or_else(|| Some(UiMask::new(w, h)));
+        self.ui_version += 1;
+        self.mask = None;
     }
 
     /// The sky to place this picture with: the planet's own (if it has any), else the borrowed one.
@@ -435,16 +586,24 @@ impl Session {
         }
         self.frames += 1;
         self.proc.tick();
+        self.record(f);
+        // Nothing until Start (pressed with EVE zoomed all the way out on this planet).
+        if !self.started || self.planet.is_none() {
+            self.step_ms = start.elapsed().as_secs_f64() * 1000.0;
+            return;
+        }
         let pic = Pic { w: f.w, h: f.h, bgra: &f.bgra };
         let disc = self.disc();
+        let gas = self.is_gas();
 
-        // EVE's windows (every sixth picture) and which row of EVE's resource list is lit.
+        // EVE's windows (every sixth picture) and which row of EVE's resource list is lit. On a gas
+        // giant they're not kept: turning sideways, its rings stay put on screen like a window.
         if self.frames % 6 == 0 {
             let path = self.ui_path();
             if let Some(ui) = self.ui.as_mut() {
                 if ui.learn(&pic, disc.as_ref()) {
                     self.ui_version += 1;
-                    if ui.ready() && self.ui_saved.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) {
+                    if !gas && ui.ready() && self.ui_saved.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) {
                         self.ui_saved = Some(Instant::now());
                         if let Some(path) = path {
                             jobs.push(Job::WriteFile { path, bytes: ui.to_bytes() });
@@ -498,17 +657,68 @@ impl Session {
             return;
         };
         let lens = self.lens();
+        // Zoomed all the way out still (the edge where it was)? Gone for 3 s: Start again.
+        if self.rim_ok.1.is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
+            self.rim_ok = (sky::rim_still_there(&pic, &disc), Some(Instant::now()));
+        }
+        if self.rim_ok.0 {
+            self.rim_lost = None;
+        } else if self.rim_lost.get_or_insert_with(Instant::now).elapsed() > Duration::from_secs(3) {
+            self.started = false;
+            self.rim_lost = None;
+            self.boot = None;
+            self.event(json!({ "kind": "warn", "text": "The planet's edge isn't where it was (zoomed in, or another planet?): zoom all the way out in EVE, then press Start." }));
+            self.step_ms = start.elapsed().as_secs_f64() * 1000.0;
+            return;
+        }
 
-        // Which pixels are sky (rebuilt when the edge, EVE's windows or the rings' tilt change).
-        let rings = self.rings_now();
+        // ---- a gas giant's rings, from over its poles, before its sky (nothing else meanwhile) ----
+        if gas && self.ring_pole.is_some() {
+            if self.ring_pole_at.is_none_or(|t| t.elapsed() >= Duration::from_millis(180)) {
+                self.ring_pole_at = Some(Instant::now());
+                match self.ring_pole.as_mut() {
+                    Some(RingPole::Top(p)) | Some(RingPole::Bottom(_, p)) => {
+                        p.learn(&pic, &disc, lens, self.ui_trusted.as_ref());
+                    }
+                    None => {}
+                }
+                let bands = |r: &Rings| r.bands().iter().map(|(a, b)| format!("{a:.2}–{b:.2}")).collect::<Vec<_>>().join(", ");
+                match self.ring_pole.take() {
+                    Some(RingPole::Top(p)) if p.measured() => {
+                        let top = p.rings();
+                        let seen = if top.any() { format!("rings at {} planet radii", bands(&top)) } else { "no rings".to_string() };
+                        self.event(json!({ "kind": "locked", "text": format!("From the top: {seen}. Now tilt the camera all the way down (looking up at the planet's bottom) and turn the planet all the way round.") }));
+                        self.ring_pole = Some(RingPole::Bottom(top, PoleRings::new()));
+                    }
+                    Some(RingPole::Bottom(top, p)) if p.measured() => {
+                        let cut = top.union(&p.rings());
+                        self.finish_ring_measure(cut, jobs);
+                        let text = if cut.any() {
+                            format!("Rings measured: {} planet radii, cut out of the sky. Now tilt back until the rings look nearly flat (a thin oval), then turn the planet slowly sideways: the sky starts.", bands(&cut))
+                        } else {
+                            "No rings on this planet. Tilt back to the middle and turn the planet slowly sideways: the sky starts.".to_string()
+                        };
+                        self.event(json!({ "kind": "locked", "text": text }));
+                    }
+                    other => self.ring_pole = other,
+                }
+            }
+            self.step_ms = start.elapsed().as_secs_f64() * 1000.0;
+            return;
+        }
+
+        // Which pixels are sky (rebuilt when the edge, EVE's windows, a gas giant's ring cut or,
+        // with one, the pitch by half a degree change).
+        let rings = self.ring_cut_now();
         let ring_pitch = self.pose.as_ref().map(|p| p.pitch).unwrap_or(0.0);
-        let key = ((disc.r * 4.0) as i64, f.w as i64, f.h as i64, self.ui_version, if rings.is_some() && self.pose.is_some() { (ring_pitch / DEG).round() as i64 } else { i64::MIN });
+        let key = ((disc.r * 4.0) as i64, f.w as i64, f.h as i64, self.ui_version, if rings.is_some() && self.pose.is_some() { ((ring_pitch / (0.5 * DEG)).round() as i64) << 24 | self.ring_version as i64 } else { i64::MIN });
         if self.mask.as_ref().is_none_or(|(k, _)| *k != key) {
             let ui = self.ui.as_ref().filter(|u| u.ready());
             let ring_now = rings.filter(|_| self.pose.is_some()).map(|rg| (rg, sky::axis_for_pitch(ring_pitch), disc.d));
             self.mask = Some((key, SkyMask::new(f.w, f.h, Some(&disc), lens, ui, ring_now)));
         }
         let mask = &self.mask.as_ref().unwrap().1;
+        let sky_share = mask.share();
 
         // ---- Lock on from buildings: the sky is recorded from the very picture they were pointed out on ----
         let mut held_painted = false;
@@ -540,23 +750,21 @@ impl Session {
             d.1 = true;
         }
         let view = sky::view(buf, &pic, mask, lens);
-        let find_rings = |r: Option<Rings>| r.map(|rg| (rg, disc.d));
-        // Zoomed all the way out still (the edge where it was)?
-        if self.rim_ok.1.is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
-            self.rim_ok = (sky::rim_still_there(&pic, &disc), Some(Instant::now()));
-        }
 
         // ---- the facing ----
         let mut locked_said: Option<String> = None;
         let tries = self.skies_to_try();
+        // A gas giant with too little sky left beside its rings: none of it is trusted.
+        let sky_usable = !gas || rings.is_none() || sky_share >= MIN_SKY;
         if let Some(pose) = self.pose.as_mut() {
             pose.placed = false;
+            pose.by_planet = false;
             let predicted = match pose.before {
                 Some(b) => (2.0 * pose.yaw - b.0, 2.0 * pose.pitch - b.1),
                 None => (pose.yaw, pose.pitch),
             };
             let now = (pose.yaw, pose.pitch);
-            for id in &tries {
+            for id in tries.iter().filter(|_| sky_usable) {
                 let Some(sky) = self.skies.get_mut(id) else { continue };
                 if sky.mirrored != pose.mirrored {
                     continue;
@@ -576,6 +784,21 @@ impl Session {
                     break;
                 }
             }
+            // Past a gas giant's broad rings (too little sky): placed on its own planet map, from
+            // the last facing, where the map is painted enough round it.
+            if !pose.placed && gas && rings.is_some() && self.ring_clean && self.base_cov.0 >= 0.3 {
+                if let Some(base) = self.base.as_mut() {
+                    if let Some(pl) = base.place(&pic, &disc, predicted, 1.5 * DEG).filter(|p| p.score >= 0.5) {
+                        pose.before = Some(now);
+                        pose.yaw = pl.yaw;
+                        pose.pitch = pl.pitch;
+                        pose.placed = true;
+                        pose.by_planet = true;
+                        pose.coarse = pl.score;
+                        pose.stars = 0.0;
+                    }
+                }
+            }
             if pose.placed {
                 self.lost_since = None;
             } else if self.lost_since.is_none() {
@@ -585,34 +808,33 @@ impl Session {
         let lost_long = self.lost_since.is_some_and(|t| t.elapsed() > Duration::from_millis(400));
         if (self.pose.is_none() || lost_long) && !tries.is_empty() && self.last_find.is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
             self.last_find = Some(Instant::now());
-            // A gas giant: try with and without its rings left out (and remember which works).
-            let ring_options: Vec<Option<Rings>> = match (self.is_gas(), self.planet_id().and_then(|id| self.rings.get(&id).copied())) {
-                (true, None) => vec![None, Some(RINGS)],
-                (true, Some(true)) => vec![Some(RINGS)],
-                _ => vec![None],
-            };
-            let mut best: Option<(sky::Find, u64, Option<Rings>)> = None;
+            // A gas giant with its rings measured: the whole picture, the rings left out at each
+            // pitch tried, and a find kept only where enough sky is left beside them.
+            let free = rings.map(|_| SkyMask::new(f.w, f.h, Some(&disc), lens, self.ui.as_ref().filter(|u| u.ready()), None));
+            let free_view = free.as_ref().map(|m| sky::view(&mut self.find_buf, &pic, m, lens));
+            let mut best: Option<(sky::Find, u64)> = None;
             for id in &tries {
                 let Some(sky) = self.skies.get_mut(id) else { continue };
-                for rg in &ring_options {
-                    if let Some(found) = sky::find(&view, sky, find_rings(*rg)) {
-                        if best.as_ref().is_none_or(|b| found.coarse + found.stars > b.0.coarse + b.0.stars) {
-                            best = Some((found, *id, *rg));
-                        }
+                let found = match (&free_view, rings) {
+                    (Some(v), Some(rg)) => sky::find(v, sky, Some((rg, disc.d))),
+                    _ => sky::find(&view, sky, None),
+                };
+                if let Some(found) = found {
+                    if best.as_ref().is_none_or(|b| found.coarse + found.stars > b.0.coarse + b.0.stars) {
+                        best = Some((found, *id));
                     }
                 }
             }
-            self.last_find_note = best.as_ref().map(|(f, id, rg)| json!({ "coarse": f.coarse, "stars": f.stars, "margin": f.margin, "sure": f.sure(), "sky": id, "rings": rg.is_some() }));
-            if let Some((found, id, rg)) = best.filter(|b| b.0.sure()) {
+            let enough = |f: &sky::Find| match rings {
+                Some(rg) => SkyMask::new(pic.w, pic.h, Some(&disc), lens, self.ui.as_ref().filter(|u| u.ready()), Some((rg, sky::axis_for_pitch(f.pitch), disc.d))).share() >= MIN_SKY,
+                None => true,
+            };
+            self.last_find_note = best.as_ref().map(|(f, id)| json!({ "coarse": f.coarse, "stars": f.stars, "margin": f.margin, "sure": f.sure(), "sky": id }));
+            if let Some((found, id)) = best.filter(|b| b.0.sure() && enough(&b.0)) {
                 let mirrored = self.skies.get(&id).map(|s| s.mirrored).unwrap_or(true);
                 let was_none = self.pose.is_none();
-                self.pose = Some(Pose { yaw: found.yaw, pitch: found.pitch, mirrored, sky_of: Some(id), placed: true, coarse: found.coarse, stars: found.stars, level: found.level, before: None });
+                self.pose = Some(Pose { yaw: found.yaw, pitch: found.pitch, mirrored, sky_of: Some(id), placed: true, coarse: found.coarse, stars: found.stars, level: found.level, before: None, by_planet: false });
                 self.lost_since = None;
-                if let Some(pid) = self.planet_id() {
-                    if self.is_gas() {
-                        self.rings.insert(pid, rg.is_some());
-                    }
-                }
                 if was_none {
                     let whose = if Some(id) == self.planet_id() { "this planet's own sky".to_string() } else { format!("{}'s sky", self.planet_name(id)) };
                     locked_said = Some(format!("Locked on by {whose}."));
@@ -639,14 +861,19 @@ impl Session {
                         let mut tmp = ViewBuffers::default();
                         let mut at = (0.0, r.pitch);
                         let all = [sky::COARSE, sky::MEDIUM, sky::FINE];
+                        // A gas giant's rings, once measured, are left out at each picture's pitch.
+                        let ring_mask = |pitch: f64| rings.map(|rg| SkyMask::new(f.w, f.h, Some(&disc), lens, self.ui.as_ref().filter(|u| u.ready()), Some((rg, sky::axis_for_pitch(pitch), disc.d))));
+                        let mut placed_frames: Vec<(usize, (f64, f64))> = Vec::new();
                         for (k, fr) in b.frames.iter().enumerate() {
                             let pose = if k == 0 { Some((0.0, r.pitch)) } else { r.later.get(k - 1).copied().flatten().filter(|x| x.2 >= 0.5).map(|x| (x.0, x.1)) };
                             let Some(p) = pose else { continue };
                             if (fr.w, fr.h) != (f.w, f.h) {
                                 continue;
                             }
-                            let v = sky::view(&mut tmp, &Pic { w: fr.w, h: fr.h, bgra: &fr.bgra }, mask, lens);
+                            let rm = ring_mask(p.1);
+                            let v = sky::view(&mut tmp, &Pic { w: fr.w, h: fr.h, bgra: &fr.bgra }, rm.as_ref().unwrap_or(mask), lens);
                             fresh.paint(&v, &pose_q(p.0, p.1), &all);
+                            placed_frames.push((k, p));
                             at = p;
                         }
                         // The pictures that came in meanwhile: each fitted to the sky so far, then added.
@@ -658,12 +885,22 @@ impl Session {
                             let m = c.and_then(|c| sky::align_box(&bf.match_medium, &mut fresh, sky::MEDIUM, (c.yaw, c.pitch), (1.5 * DEG, 1.5 * DEG), 0.5 * DEG, 0.25, None)).filter(|m| m.score >= 0.45);
                             if let Some(m) = m {
                                 at = (m.yaw, m.pitch);
-                                let v = sky::view(&mut tmp, &Pic { w: fr.w, h: fr.h, bgra: &fr.bgra }, mask, lens);
+                                let rm = ring_mask(m.pitch);
+                                let v = sky::view(&mut tmp, &Pic { w: fr.w, h: fr.h, bgra: &fr.bgra }, rm.as_ref().unwrap_or(mask), lens);
                                 fresh.paint(&v, &pose_q(m.yaw, m.pitch), &all);
                             }
                         }
                         let cov = fresh.coverage();
                         self.skies.insert(pid, fresh);
+                        // A gas giant (rings measured over its poles): the start's pictures, turning
+                        // sideways, add to what's known of them.
+                        if gas {
+                            let learner = self.ring_learner.get_or_insert_with(RingLearner::new);
+                            for (k, p) in &placed_frames {
+                                let fr = &b.frames[*k];
+                                learner.learn(&Pic { w: fr.w, h: fr.h, bgra: &fr.bgra }, &disc, lens, p.0, p.1, self.ui_trusted.as_ref());
+                            }
+                        }
                         // A fresh sky puts longitude 0 somewhere new: a map made on an older sky no longer fits.
                         if self.base.as_ref().is_some_and(|b| b.version > 0) {
                             self.base = None;
@@ -673,7 +910,7 @@ impl Session {
                             self.base_dirty = (false, false, 0.0, Instant::now());
                             base_restarted = true;
                         }
-                        self.pose = Some(Pose { yaw: at.0, pitch: at.1, mirrored: false, sky_of: Some(pid), placed: false, coarse: r.coarse, stars: 0.0, level: sky::MEDIUM, before: None });
+                        self.pose = Some(Pose { yaw: at.0, pitch: at.1, mirrored: false, sky_of: Some(pid), placed: false, coarse: r.coarse, stars: 0.0, level: sky::MEDIUM, before: None, by_planet: false });
                         self.lost_since = None;
                         self.last_paint = Some((at.0, at.1, Instant::now()));
                         self.sky_dirty.insert(pid, (true, true, 0.0, Instant::now()));
@@ -703,11 +940,12 @@ impl Session {
                 b.at = Instant::now();
                 if b.frames.len() > BOOT_PICTURES {
                     let pts = std::mem::take(&mut b.points);
+                    let boot_rings = rings.map(|rg| (rg, disc.d));
                     b.job = std::thread::Builder::new()
                         .name("planetscan-boot".into())
                         .spawn(move || -> Option<sky::Boot> {
                             let (first, later) = pts.split_first()?;
-                            sky::boot(first, later)
+                            sky::boot(first, later, boot_rings)
                         })
                         .ok();
                 }
@@ -715,14 +953,18 @@ impl Session {
         }
 
         if self.sky_cov.1.is_none_or(|t| t.elapsed() > Duration::from_secs(1)) {
-            let levels = self.planet_id().and_then(|pid| self.skies.get(&pid)).map(|sk| [sk.levels[0].coverage(), sk.levels[1].coverage(), sk.levels[2].coverage()]).unwrap_or([0.0; 3]);
+            let reach = self.reach.filter(|_| gas);
+            let levels = self.planet_id().and_then(|pid| self.skies.get(&pid)).map(|sk| [sk.levels[0].coverage_in(reach.as_ref()), sk.levels[1].coverage_in(reach.as_ref()), sk.levels[2].coverage_in(reach.as_ref())]).unwrap_or([0.0; 3]);
             self.sky_cov = (levels, Some(Instant::now()));
         }
 
         // ---- recording this planet's own sky ----
         let fresh_buildings = !self.paint_held && self.pose.as_ref().is_some_and(|p| p.sky_of.is_none());
-        if let (Some(pid), Some(pose)) = (self.planet_id(), self.pose.as_ref()) {
-            if (pose.placed || fresh_buildings) && self.ui.as_ref().is_some_and(|u| u.ready()) {
+        // A gas giant's sky is recorded only once its rings are measured and cut out, and only
+        // from facings the sky gave.
+        let sky_records = !gas || (self.ring_clean && sky_usable);
+        if let (Some(pid), Some(pose), true) = (self.planet_id(), self.pose.as_ref(), sky_records) {
+            if ((pose.placed && !pose.by_planet) || fresh_buildings) && self.ui.as_ref().is_some_and(|u| u.ready()) {
                 let moved = self.last_paint.is_none_or(|(y, p, t)| apart((y, p), (pose.yaw, pose.pitch)) > 0.6 * DEG && t.elapsed() > Duration::from_millis(120));
                 let own = self.skies.get(&pid);
                 let want = own.is_none() || self.sky_done() < 0.999;
@@ -800,19 +1042,24 @@ impl Session {
         // ---- the planet's own colours (EVE on No filter): the base map ----
         self.base_paused = None;
         if self.base_on && self.base_cov.0 < 0.9995 && self.planet.is_some() {
-            match self.pose.as_ref().filter(|p| p.placed).map(|p| (p.yaw, p.pitch)) {
+            match self.pose.as_ref().filter(|p| p.placed).map(|p| (p.yaw, p.pitch, p.by_planet)) {
                 None => self.base_paused = Some("not on the sky"),
-                Some(at) => {
+                Some((yaw, pitch, by_planet)) => {
+                    let at = (yaw, pitch);
                     self.base_paused = if self.picked.is_some_and(|r| r != 0) {
                         Some("EVE shows a resource: set it to No filter")
                     } else if !self.rim_ok.0 {
                         Some("zoomed in: zoom all the way out")
+                    } else if gas && !self.ring_clean {
+                        Some("measuring the rings first")
                     } else {
                         None
                     };
                     if self.base_paused.is_none() && self.base_last.is_none_or(|l| apart(l, at) > 0.15 * DEG) {
+                        let cut = self.ring_cut;
                         let base = self.base.get_or_insert_with(Base::new);
-                        base.paint(&pic, &disc, &pose_q(at.0, at.1));
+                        // Placed on the planet itself: only cells not seen face-on yet.
+                        base.paint(&pic, &disc, &pose_q(at.0, at.1), cut.any().then_some((&cut, pitch)), by_planet);
                         self.base_last = Some(at);
                         self.base_dirty.0 = true;
                         self.base_dirty.1 = true;
@@ -845,6 +1092,35 @@ impl Session {
             }
             // To the corp at 99 %, on Save now, or when switching planets: not every few minutes (6 MB).
             self.base_dirty = (false, self.base_dirty.1, self.base_dirty.2, Instant::now());
+        }
+        // ---- a gas giant's rings: what turning sideways shows adds to the cut (never takes away:
+        // what was recorded without a ring stays right). A few looks a second. ----
+        if gas && self.ring_clean {
+            if self.ring_pole_at.is_none_or(|t| t.elapsed() >= Duration::from_millis(250)) {
+                if let Some((yaw, pitch)) = self.pose.as_ref().filter(|p| p.placed && !p.by_planet).map(|p| (p.yaw, p.pitch)) {
+                    self.ring_pole_at = Some(Instant::now());
+                    let learner = self.ring_learner.get_or_insert_with(RingLearner::new);
+                    learner.learn(&pic, &disc, lens, yaw, pitch, self.ui_trusted.as_ref());
+                }
+            }
+            if self.ring_at.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+                self.ring_at = Some(Instant::now());
+                if let Some(cut) = self.ring_learner.as_ref().filter(|l| l.measured()).map(|l| l.rings()) {
+                    let more = self.ring_cut.union(&cut);
+                    if more != self.ring_cut {
+                        self.set_ring_cut(more);
+                        if let Some(path) = self.planet_id().and_then(|pid| self.map_path(pid, "rings3")) {
+                            jobs.push(Job::WriteFile { path, bytes: rings::cut_to_bytes(&more) });
+                        }
+                    }
+                }
+                if self.ring_saved.is_none_or(|t| t.elapsed() > Duration::from_secs(30)) {
+                    if let (Some(path), Some(l)) = (self.planet_id().and_then(|pid| self.map_path(pid, "rings2")), self.ring_learner.as_ref()) {
+                        self.ring_saved = Some(Instant::now());
+                        jobs.push(Job::WriteFile { path, bytes: l.to_bytes() });
+                    }
+                }
+            }
         }
         if let Some(text) = boot_said.or(locked_said) {
             self.event(json!({ "kind": "locked", "text": text }));
@@ -981,13 +1257,28 @@ impl Session {
         } else {
             serde_json::Value::Null
         };
-        let sky_missing = self.pose.as_ref().filter(|_| self.sky_done() < 0.999).and_then(|p| self.planet_id().and_then(|id| self.skies.get(&id)).and_then(|s| s.missing_hint(&pose_q(p.yaw, p.pitch))));
+        let reach = self.reach.filter(|_| self.is_gas());
+        let rings_status = if self.is_gas() {
+            let (phase, progress) = match self.ring_pole.as_ref() {
+                Some(RingPole::Top(p)) => (Some("top"), p.progress()),
+                Some(RingPole::Bottom(_, p)) => (Some("bottom"), p.progress()),
+                None => (None, 1.0),
+            };
+            json!({
+                "phase": phase, "progress": progress, "measured": self.ring_clean,
+                "bands": self.ring_cut.bands().iter().map(|(a, b)| [*a, *b]).collect::<Vec<_>>(),
+                "sky_share": self.mask.as_ref().map(|m| m.1.share()),
+            })
+        } else {
+            serde_json::Value::Null
+        };
+        let sky_missing = self.pose.as_ref().filter(|_| self.sky_done() < 0.999).and_then(|p| self.planet_id().and_then(|id| self.skies.get(&id)).and_then(|s| s.missing_hint(&pose_q(p.yaw, p.pitch), reach.as_ref())));
         let base_missing = self.pose.as_ref().filter(|_| !self.base_done).and_then(|p| self.base.as_ref().and_then(|b| b.missing_hint(&pose_q(p.yaw, p.pitch))));
         let pose = self.pose.as_ref().map(|p| {
             json!({
                 "yaw": p.yaw / DEG, "pitch": p.pitch / DEG, "mirrored": p.mirrored, "placed": p.placed,
                 "q": pose_q(p.yaw, p.pitch), "coarse": p.coarse, "stars": p.stars, "level": sky::SPECS[p.level].name,
-                "sky_of": p.sky_of, "sky_name": p.sky_of.map(|id| self.planet_name(id)),
+                "sky_of": p.sky_of, "sky_name": p.sky_of.map(|id| self.planet_name(id)), "by_planet": p.by_planet,
             })
         });
         let own = self.planet_id().and_then(|id| self.skies.get(&id));
@@ -1014,7 +1305,7 @@ impl Session {
                 "compare": self.compare_last.map(|(tilt, shift, b)| json!({ "tilt": tilt, "shift": shift, "with": self.planet_name(b) })),
                 "own_each": self.own_sky_each,
                 "missing": sky_missing,
-                "rings": self.planet_id().and_then(|id| self.rings.get(&id).copied()),
+                "reach": reach.map(|r| rings::reachable_share(&r)),
                 "recording": self.last_paint.is_some_and(|(_, _, t)| t.elapsed() < Duration::from_millis(800)),
                 "unsent": self.planet_id().and_then(|id| self.sky_dirty.get(&id)).is_some_and(|d| d.1),
             },
@@ -1036,6 +1327,9 @@ impl Session {
             "new_sky": self.new_sky,
             "rim_ok": self.rim_ok.0,
             "edge_seek": edge_seek,
+            "started": self.started,
+            "rings": rings_status,
+            "recording": self.recorder.as_ref().map(|r| json!({ "frames": r.frames, "secs": r.started.elapsed().as_secs() })),
         })
     }
 }
@@ -1406,6 +1700,9 @@ pub async fn planetscan_planet(app: AppHandle, engine: tauri::State<'_, Engine>,
                 }
             }
             s.sky_dirty.remove(&old);
+            if let (Some(path), Some(l)) = (s.map_path(old, "rings2"), s.ring_learner.as_ref()) {
+                jobs.push(Job::WriteFile { path, bytes: l.to_bytes() });
+            }
             if s.base.is_some() && (s.base_dirty.0 || s.base_dirty.1) {
                 let corp = s.autosave && s.base_dirty.1 && s.base_cov.0 > 0.05;
                 let mut more = Vec::new();
@@ -1432,6 +1729,10 @@ pub async fn planetscan_planet(app: AppHandle, engine: tauri::State<'_, Engine>,
             s.compare_shift = None;
             s.compare_last = None;
             s.compare = None;
+            // Nothing until Start on this planet (EVE's opening zoom is under way).
+            s.started = false;
+            s.rim_lost = None;
+            s.last_paint = None;
         }
         s.planet = Some(planet.clone());
         s.system = system.clone();
@@ -1442,6 +1743,10 @@ pub async fn planetscan_planet(app: AppHandle, engine: tauri::State<'_, Engine>,
         if s.dir.is_none() {
             s.dir = app.path().app_local_data_dir().ok().map(|d| d.join("planetscan"));
         }
+        // EVE's windows as kept (a gas giant's rings may have got into the live mask), and this
+        // planet's rings if it has been measured before.
+        s.reload_windows();
+        s.load_rings();
         s.dir.clone()
     };
     send_jobs(&engine, jobs);
@@ -1503,6 +1808,93 @@ pub async fn planetscan_load_bares(app: AppHandle, engine: tauri::State<'_, Engi
     Ok(n)
 }
 
+/// Start (EVE zoomed all the way out on the picked planet): the edge from the newest picture,
+/// then the app watches. Pressed again after a planet change or once the edge was lost.
+#[tauri::command]
+pub fn planetscan_go(engine: tauri::State<'_, Engine>) -> Result<f64, String> {
+    let frame = engine.0.frame.lock().unwrap().clone();
+    let f = frame.ok_or("no picture from EVE yet")?;
+    let found = sky::rim_radius(&Pic { w: f.w, h: f.h, bgra: &f.bgra }, Some(sky::ZOOMED_OUT_RIM * lens_for(f.w)), lens_for(f.w), None)
+        .ok_or("no planet edge at the zoomed-out size: zoom all the way out in EVE (mouse wheel back as far as it goes) and press Start again")?;
+    let mut s = engine.0.state.lock().unwrap();
+    if s.planet.is_none() {
+        return Err("pick the planet first".into());
+    }
+    let changed = s.edge_r.is_none_or(|r| (r - found).abs() > found * 0.01);
+    s.edge_seen.clear();
+    s.edge_missing = None;
+    s.edge_auto = true;
+    if changed {
+        s.edge_r = Some(found);
+        s.mask = None;
+        // The ring cut's reach depends on the planet's size on screen.
+        let cut = s.ring_cut;
+        s.set_ring_cut(cut);
+    }
+    s.started = true;
+    s.rim_lost = None;
+    s.rim_ok = (true, Some(Instant::now()));
+    Ok(found)
+}
+
+/// Record the pictures for testing (a picture every 200 ms with what the app made of it, at
+/// most 3 minutes), or stop. Kept in the app's recordings folder; nothing leaves the PC.
+#[tauri::command]
+pub fn planetscan_record(app: AppHandle, engine: tauri::State<'_, Engine>, on: bool) -> Result<Option<String>, String> {
+    let mut s = engine.0.state.lock().unwrap();
+    if !on {
+        s.recorder = None;
+        return Ok(None);
+    }
+    if s.recorder.is_some() {
+        return Ok(None);
+    }
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("recordings");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let path = dir.join(format!("scan2-{stamp}.bin"));
+    let (tx, rx) = std::sync::mpsc::channel::<(Arc<Frame>, String)>();
+    let inner = engine.0.clone();
+    let out = path.clone();
+    std::thread::Builder::new()
+        .name("planetscan-record".into())
+        .spawn(move || record_loop(inner, rx, out))
+        .map_err(|e| e.to_string())?;
+    s.recorder = Some(Recorder { tx, started: Instant::now(), last: None, frames: 0 });
+    Ok(Some(path.display().to_string()))
+}
+
+/// The recorder: "REC2", then for each picture its note and its JPEG, each as a u32 (LE) length
+/// then the bytes. Ends when the recording stops (or at 700 MB).
+fn record_loop(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<(Arc<Frame>, String)>, path: PathBuf) {
+    use std::io::Write;
+    let Ok(file) = std::fs::File::create(&path) else {
+        inner.state.lock().unwrap().event(json!({ "kind": "error", "text": format!("Couldn't start a recording at {}", path.display()) }));
+        return;
+    };
+    let mut out = std::io::BufWriter::new(file);
+    let _ = out.write_all(b"REC2");
+    let (mut n, mut bytes) = (0u32, 4u64);
+    while let Ok((f, note)) = rx.recv() {
+        let mut jpeg = Vec::with_capacity(512 * 1024);
+        if jpeg_encoder::Encoder::new(&mut jpeg, 90).encode(&f.bgra, f.w as u16, f.h as u16, jpeg_encoder::ColorType::Bgra).is_err() {
+            continue;
+        }
+        let ok = out.write_all(&(note.len() as u32).to_le_bytes()).is_ok() && out.write_all(note.as_bytes()).is_ok() && out.write_all(&(jpeg.len() as u32).to_le_bytes()).is_ok() && out.write_all(&jpeg).is_ok();
+        if !ok {
+            break;
+        }
+        n += 1;
+        bytes += 8 + note.len() as u64 + jpeg.len() as u64;
+        if bytes > 700 << 20 {
+            inner.state.lock().unwrap().recorder = None;
+            break;
+        }
+    }
+    let _ = out.flush();
+    inner.state.lock().unwrap().event(json!({ "kind": "saved", "text": format!("Recording saved: {n} pictures, {} MB, in {}", bytes >> 20, path.display()) }));
+}
+
 /// The planet's edge: `find` looks for it in the newest picture; `r` sets it (picture pixels,
 /// from a click); neither clears it (found again by itself).
 #[tauri::command]
@@ -1560,7 +1952,7 @@ pub fn planetscan_options(engine: tauri::State<'_, Engine>, options: Options) {
 #[tauri::command]
 pub fn planetscan_pose(engine: tauri::State<'_, Engine>, yaw: f64, pitch: f64, mirrored: bool) {
     let mut s = engine.0.state.lock().unwrap();
-    s.pose = Some(Pose { yaw: yaw * DEG, pitch: pitch * DEG, mirrored, sky_of: None, placed: true, coarse: 0.0, stars: 0.0, level: 0, before: None });
+    s.pose = Some(Pose { yaw: yaw * DEG, pitch: pitch * DEG, mirrored, sky_of: None, placed: true, coarse: 0.0, stars: 0.0, level: 0, before: None, by_planet: false });
     s.lost_since = None;
     s.last_paint = None;
     s.paint_held = s.held.is_some();
@@ -1744,6 +2136,34 @@ pub fn planetscan_forget_sky(engine: tauri::State<'_, Engine>, planet_id: u64) {
     send_jobs(&engine, jobs);
 }
 
+/// A gas giant's rings measured again from over its poles (Tsa: when tracking is lost, start
+/// over). Its sky goes too (recorded with the old cut); its planet map stays until a fresh sky
+/// moves longitude 0.
+#[tauri::command]
+pub fn planetscan_forget_rings(engine: tauri::State<'_, Engine>, planet_id: u64) {
+    let mut jobs = Vec::new();
+    {
+        let mut s = engine.0.state.lock().unwrap();
+        for kind in ["rings3", "rings2", "sky"] {
+            if let Some(path) = s.map_path(planet_id, kind) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        s.skies.remove(&planet_id);
+        s.sky_dirty.remove(&planet_id);
+        jobs.push(Job::DeleteMap { planet: planet_id, kind: "sky" });
+        if s.planet_id() == Some(planet_id) {
+            s.ring_learner = None;
+            s.load_rings();
+            s.pose = None;
+            s.boot = None;
+            s.boot_note = None;
+            s.lost_since = None;
+        }
+    }
+    send_jobs(&engine, jobs);
+}
+
 /// Record the base map (the planet's own colours) while on the sky and EVE shows No filter, or not.
 #[tauri::command]
 pub fn planetscan_base(engine: tauri::State<'_, Engine>, on: bool) {
@@ -1812,7 +2232,7 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
         // Inside the lock only a quick copy: the scanner keeps going while the picture is made.
         enum Snapshot {
             Planet(usize, usize, Vec<u8>),
-            Sky { w: usize, h: usize, sum: Vec<f32>, n: Vec<u16>, mw: usize, mh: usize, msum: Vec<f32>, mn: Vec<u16> },
+            Sky { w: usize, h: usize, sum: Vec<f32>, n: Vec<u16>, mw: usize, mh: usize, msum: Vec<f32>, mn: Vec<u16>, reach: Option<[bool; 181]> },
             None,
         }
         let copy = {
@@ -1827,7 +2247,7 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
                 match id.and_then(|id| s.skies.get(&id)) {
                     Some(sky) => {
                         let (m, mm) = (&sky.levels[sky::FINE], &sky.levels[sky::MEDIUM]);
-                        Snapshot::Sky { w: m.w, h: m.h, sum: m.sum.clone(), n: m.n.clone(), mw: mm.w, mh: mm.h, msum: mm.sum.clone(), mn: mm.n.clone() }
+                        Snapshot::Sky { w: m.w, h: m.h, sum: m.sum.clone(), n: m.n.clone(), mw: mm.w, mh: mm.h, msum: mm.sum.clone(), mn: mm.n.clone(), reach: s.reach.filter(|_| s.is_gas()) }
                     }
                     None => Snapshot::None,
                 }
@@ -1845,7 +2265,7 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
                 }
                 (w, h, rgb)
             }
-            Snapshot::Sky { w, h, sum, n, mw, mh, msum, mn } => {
+            Snapshot::Sky { w, h, sum, n, mw, mh, msum, mn, reach } => {
                 let scale = sky::SPECS[sky::FINE].scale * 0.8;
                 let mscale = sky::SPECS[sky::MEDIUM].scale * 0.8;
                 let mut out = vec![0u8; w * h * 3];
@@ -1860,6 +2280,9 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
                         if mn[k] > 0 {
                             let v = (40.0 + mscale * msum[k] / mn[k] as f32).clamp(0.0, 255.0) as u8;
                             [v / 2, v / 2, v / 2 + 30]
+                        } else if reach.is_some_and(|ok| !ok[sky::height_index(row, h)]) {
+                            // Behind a gas giant's rings from every side: can't be recorded.
+                            if (row / 6 + col / 6) % 2 == 0 { [44, 44, 52] } else { [34, 34, 40] }
                         } else {
                             [96, 0, 88]
                         }

@@ -134,7 +134,7 @@
       <div class="meter sky"><i id="skyMeter"></i></div>
       <div class="kv" id="skyFacts"></div>
       <label class="tog" title="Every planet starts its own sky from what it sees; other planets' skies are only compared with it"><input type="checkbox" id="ownSkyEach" checked> Each planet starts its own sky (compare them)</label>
-      <div class="row"><button class="btn" id="newSky" title="Don't use another planet's sky: start this planet's own from what it sees">Start its own sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button></div>
+      <div class="row"><button class="btn" id="newSky" title="Don't use another planet's sky: start this planet's own from what it sees">Start its own sky</button><button class="btn" id="forgetSky" title="Forget this planet's own sky (here and the corp's copy) and record it again">Record again</button><button class="btn" id="forgetRings" title="Measure this gas giant's rings again from over its poles (its sky starts again too)" hidden>Measure the rings again</button></div>
       </div>
     </div></div>
 
@@ -152,6 +152,7 @@
       <h3>Save for the corp <span class="state" id="s5"></span></h3>
       <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (the planet map and its sky)</label>
       <div class="row"><button class="btn" id="saveMaps" title="Save this planet's sky and map for the corp now, even under 99 %">Save now</button></div>
+      <div class="row" style="align-items: baseline"><button class="btn" id="recordBtn" title="Keep EVE's pictures (5 a second, up to 3 minutes) with what the app made of them, in the app's recordings folder, for fixing things. Nothing leaves the PC.">Record for testing</button><span class="small muted" id="recSaid"></span></div>
     </div></div>
   </div>
 
@@ -163,7 +164,7 @@
     </div>
     <div id="panel">
       <div class="card now"><h2>Do now</h2><div class="say" id="say">Starting…</div>
-        <div class="row" id="ask" hidden><button class="btn go" id="zoomYes">Yes, zoomed all the way out</button></div>
+        <div class="row" id="ask" hidden><button class="btn go" id="startBtn" title="EVE zoomed all the way out on this planet: the app starts watching after a 5 second countdown">Start</button><button class="btn" id="cancelStart" hidden>Cancel</button></div>
         <ul id="also"></ul></div>
       <div class="card small muted" id="mapNote">Wheel: zoom (on the picture and the map). Drag: move. Double-click: all of it.</div>
       <div class="card" style="flex: 1; display: flex; flex-direction: column; min-height: 0"><div class="small muted" style="margin-bottom: 4px">What happened</div><div id="log"></div></div>
@@ -488,8 +489,8 @@
   }
   for (const h of document.querySelectorAll(".step.fold h3")) h.addEventListener("click", () => h.closest(".step").classList.toggle("open"));
   let firstStatus = true, lastEvent = 0, lookingSince = null, reloadSoon = 0;
-  // Asked once each time a planet is picked: is EVE zoomed all the way out on it?
-  let zoomedOutOn = null;
+  // Start: a 5 s countdown (EVE's opening zoom and any pop-ups settle), then the app watches.
+  let countdown = null;
   function onEvents(s) {
     if (firstStatus) { firstStatus = false; for (const ev of s.events || []) lastEvent = Math.max(lastEvent, ev.id); }
     for (const ev of s.events || []) {
@@ -520,11 +521,14 @@
     // 1, 2
     setState(1, planet ? planet.name : "pick one", planet ? "ok" : "warn", !!planet && !!s.client);
     const seek = s.edge_seek;
-    setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : seek && seek.missing_ms > 1500 ? "zoom all the way out" : `finding it… ${seek ? seek.agree : 0}/4`, s.edge ? "ok" : "warn", !!s.edge);
+    if (!s.started) setState(2, countdown ? `starting in ${countdown.left}…` : "press Start", "warn", false);
+    else setState(2, s.edge ? `radius ${Math.round(s.edge.r)} px` : seek && seek.missing_ms > 1500 ? "zoom all the way out" : `finding it… ${seek ? seek.agree : 0}/4`, s.edge ? "ok" : "warn", !!s.edge);
     // 3: the sky
     const skyCov = own ? own.done || 0 : 0;
     let s3 = "", c3 = "warn";
-    if (pose && pose.placed) { s3 = own && pose.sky_of === (planet && planet.planet_id) ? `on its own sky · ${pct(skyCov)}` : `on ${pose.sky_name || "the"} sky`; c3 = "ok"; }
+    const rg = s.rings;
+    if (rg && rg.phase) s3 = `rings: from the ${rg.phase} · ${pct(rg.progress)}`;
+    else if (pose && pose.placed) { s3 = own && pose.sky_of === (planet && planet.planet_id) ? `on its own sky · ${pct(skyCov)}` : `on ${pose.sky_name || "the"} sky`; c3 = "ok"; }
     else if (pose) s3 = "lost: turn back a little";
     else if (s.boot && s.boot.working) s3 = "working out which way is up…";
     else if (s.boot && s.boot.pictures) s3 = `watching ${s.boot.pictures}/${s.boot.of}`;
@@ -537,10 +541,15 @@
     if (s.sky && s.sky.compare) facts.push(["Same sky?", `vs ${s.sky.compare.with}: tilt ${s.sky.compare.tilt.toFixed(2)}° (0 = same), longitude shift ${s.sky.compare.shift.toFixed(1)}°`]);
     else if (bor && s.sky && s.sky.own_each) facts.push(["Compare", `with ${bor.name}'s sky once this one has 10 %`]);
     if (pose) facts.push(["Match", `nebula ${pct(pose.coarse)} · stars ${pct(pose.stars)}`]);
-    if (s.sky && s.sky.rings != null) facts.push(["Rings", s.sky.rings ? "cut out of the sky" : "none"]);
+    if (rg) {
+      const bands = (rg.bands || []).map(([a, b]) => b >= 10.9 ? `${a.toFixed(2)} out` : `${a.toFixed(2)}–${b.toFixed(2)}`).join(", ");
+      facts.push(["Rings", rg.phase ? `measuring from the ${rg.phase}: ${pct(rg.progress)}` : bands ? `${bands} planet radii, cut out of the sky` : "none"]);
+      if (!rg.phase && s.sky && s.sky.reach != null && s.sky.reach < 0.999) facts.push(["Can be seen", `${pct(s.sky.reach)} of the sky (the rest is behind the rings from every side; 99.9 % counts of what can be seen)`]);
+    }
     $("skyFacts").innerHTML = facts.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
     $("newSky").hidden = !!(s.sky && s.sky.own_each) || !(bor || (!own && pose));
     $("forgetSky").hidden = !own;
+    $("forgetRings").hidden = !(rg && !rg.phase);
     $("forgetBase").hidden = !((s.base_map || {}).coverage > 0);
     // 4: the planet map
     const bc = base.coverage || 0;
@@ -553,16 +562,23 @@
     $("listSaid").textContent = picked == null ? (s.list && s.list.guessed ? "not seen" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`;
     $("listSaid").className = picked === 0 ? "ok" : "warn";
     // 5
-    setState(5, s.autosave ? "autosave on" : "autosave off", s.autosave ? "ok" : "warn");
+    setState(5, s.recording ? "recording" : s.autosave ? "autosave on" : "autosave off", s.recording ? "bad" : s.autosave ? "ok" : "warn");
+    const rec = s.recording;
+    $("recordBtn").textContent = rec ? "Stop recording" : "Record for testing";
+    $("recordBtn").classList.toggle("on", !!rec);
+    $("recSaid").textContent = rec ? `● ${Math.floor(rec.secs / 60)}:${String(rec.secs % 60).padStart(2, "0")} · ${rec.frames} pictures (stops at 3:00)` : "";
+    $("recSaid").className = "small " + (rec ? "bad" : "muted");
     // Do now.
     if (!pose && (own || (bor && bor.loaded))) lookingSince = lookingSince || Date.now(); else lookingSince = null;
     const [say, also, ok, ask] = tips(s);
     $("say").textContent = say; $("say").className = "say" + (ok ? " ok" : "");
     $("ask").hidden = !ask;
+    $("startBtn").hidden = !!countdown;
+    $("cancelStart").hidden = !countdown;
     $("also").innerHTML = also.map((t) => `<li>${esc(t)}</li>`).join("");
     const badge = $("badge");
-    badge.textContent = pose ? (pose.placed ? `On the sky · stars ${pct(pose.stars)}` : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
-    badge.className = "badge " + (pose && pose.placed ? "ok" : "warn");
+    badge.textContent = !s.started ? "Waiting for Start" : rg && rg.phase ? `Measuring the rings · ${pct(rg.progress)}` : pose ? (pose.placed ? (pose.by_planet ? "On the planet map (too little sky past the rings)" : `On the sky · stars ${pct(pose.stars)}`) : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
+    badge.className = "badge " + (s.started && !(rg && rg.phase) && pose && pose.placed ? "ok" : "warn");
     refreshMap(false);
   }
   function tips(s) {
@@ -576,28 +592,47 @@
       if (switchError) return [`Couldn't switch to ${planet.name}: ${switchError}. Press ↻ (1) to try again.`, also];
       return [`Switching to ${planet.name}… loading its maps.`, also];
     }
-    if (zoomedOutOn !== planet.planet_id) return [`Open ${planet.name} in EVE. Is it zoomed all the way out (mouse wheel back as far as it goes)?`, also, false, true];
+    const gas = planet.type === "gas", rg = s.rings;
+    if (!s.started) {
+      if (countdown) return [`Starting in ${countdown.left}… keep ${planet.name} open in EVE, zoomed all the way out.`, also, false, true];
+      if (gas && rg && rg.phase) also.push("A gas giant: after Start the app measures its rings first, from over its top and its bottom.");
+      return [`Open ${planet.name} in EVE and zoom all the way out (mouse wheel back as far as it goes). Then press Start.`, also, false, true];
+    }
     if (!s.edge) {
       const seek = s.edge_seek;
       if (seek && seek.missing_ms > 1500) return [`Zoom all the way out in EVE (mouse wheel, as far as it goes): ${planet.name} looks bigger than a zoomed-out planet.`, also];
       return ["Finding the planet's edge: keep EVE zoomed all the way out and hold still a moment.", also];
     }
     if (s.rim_ok === false) return ["Zoom all the way out in EVE: the planet's edge isn't where it was.", also];
+    if (rg && rg.phase === "top") {
+      also.push("Turning slowly is fine; the rings stay put while the stars wheel round, and that's how they're found.");
+      return [`Rings first: tilt the camera all the way up (as far as it goes, looking down on the top of ${planet.name}), then turn the planet slowly all the way round. Measured ${pct(rg.progress)}.`, also];
+    }
+    if (rg && rg.phase === "bottom") return [`Now tilt the camera all the way down (as far as it goes, looking up at the bottom of ${planet.name}) and turn the planet all the way round again. Measured ${pct(rg.progress)}.`, also];
     if (s.ui && !s.ui.ready) return ["Turn the planet a little: the app learns where EVE's windows are.", also];
     const pose = s.pose, own = s.sky && s.sky.own, bor = s.sky && s.sky.borrowed;
     if (!pose) {
       if (s.boot) {
         if (s.boot.note) also.push(s.boot.note);
         if (s.boot.working) return ["Working out which way is up… keep turning the planet slowly.", also];
+        if (gas) return [`Tilt back until the rings look nearly flat (a thin oval), then turn the planet slowly sideways (left or right): the sky starts. Watching ${s.boot.pictures || 0} of ${s.boot.of} pictures.`, also];
         return [`No sky in this system yet: turn the planet slowly sideways (left or right). Watching ${s.boot.pictures || 0} of ${s.boot.of} pictures.`, also];
       }
       if (own || (bor && bor.loaded)) {
         if (lookingSince && Date.now() - lookingSince > 20000) also.push("Not finding it? Press Start its own sky (3).");
         return ["Looking for this planet on the sky… turn the planet a little.", also];
       }
+      if (gas) return ["Tilt back until the rings look nearly flat (a thin oval), then turn the planet slowly sideways: the app starts the sky from what it sees.", also];
       return ["Turn the planet slowly sideways (left or right): the app starts the sky from what it sees.", also];
     }
-    if (!pose.placed) return ["Lost the sky: turn back a little, a bit slower.", also];
+    if (!pose.placed) {
+      if (gas) {
+        also.push("Still lost after a while? Measure the rings again (3): it starts over from the top.");
+        return ["Lost the sky: tilt back towards level with the rings (more sky shows there), a bit slower.", also];
+      }
+      return ["Lost the sky: turn back a little, a bit slower.", also];
+    }
+    if (pose.by_planet) also.push("Past the rings there's hardly any sky: the app is following the planet's own map here. It records the planet map, not the sky.");
     if (s.fast_turn) also.push("Turning fast: fine, but slow down if it loses the sky.");
     const skyDone = own ? own.done || 0 : 0, mapDone = base.coverage || 0;
     const skyMiss = s.sky && s.sky.missing ? `; the rest is ${s.sky.missing.split(":")[0]}` : "";
@@ -618,16 +653,30 @@
   }
 
   // ---------- commands ----------
-  $("zoomYes").addEventListener("click", () => {
-    if (!planet) return;
-    zoomedOutOn = planet.planet_id;
-    $("ask").hidden = true;
-    // Take the edge from this picture straight away (it's also found by itself).
-    if (status && !status.edge) {
-      invoke("planetscan_edge", { find: true })
-        .then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok"))
-        .catch((e) => log(String(e), "warn"));
-    }
+  function stopCountdown() { if (countdown) { clearInterval(countdown.timer); countdown = null; } }
+  $("startBtn").addEventListener("click", () => {
+    if (!planet || countdown) return;
+    const on = planet.planet_id;
+    countdown = { left: 5, timer: setInterval(() => {
+      if (!countdown) return;
+      if (!planet || planet.planet_id !== on) { stopCountdown(); return; }
+      countdown.left -= 1;
+      if (countdown.left <= 0) {
+        stopCountdown();
+        invoke("planetscan_go")
+          .then((r) => log(`Started on ${planet.name}: edge at ${Math.round(r)} px.`, "ok"))
+          .catch((e) => { log(String(e), "bad"); popup("Not started", String(e), "Zoom all the way out in EVE, then press Start again.", true); });
+      }
+      if (status) onStatus(status);
+    }, 1000) };
+    if (status) onStatus(status);
+  });
+  $("cancelStart").addEventListener("click", () => { stopCountdown(); log("Start cancelled."); if (status) onStatus(status); });
+  $("recordBtn").addEventListener("click", () => {
+    const on = !(status && status.recording);
+    invoke("planetscan_record", { on })
+      .then((path) => { if (on && path) log(`Recording to ${path} (5 pictures a second, up to 3 minutes).`, "warn"); })
+      .catch((e) => log("Couldn't record: " + e, "bad"));
   });
   $("clickEdge").addEventListener("click", () => setClick(clickMode === "edge" ? null : "edge", "Click once anywhere on the planet's edge"));
   $("findEdge").addEventListener("click", () => invoke("planetscan_edge", { find: true }).then((r) => log(`Edge found: radius ${Math.round(r)} px`, "ok")).catch((e) => log(String(e), "bad")));
@@ -642,6 +691,7 @@
     });
   };
   twice("forgetSky", "Record again", () => { invoke("planetscan_forget_sky", { planetId: planet.planet_id }); log(`${planet.name}: its own sky is forgotten; it starts again as you turn.`, "warn"); });
+  twice("forgetRings", "Measure the rings again", () => { invoke("planetscan_forget_rings", { planetId: planet.planet_id }); log(`${planet.name}: its rings are measured again (from over the top, then the bottom); its sky starts again after.`, "warn"); });
   twice("forgetBase", "Start over", () => { invoke("planetscan_forget_base", { planetId: planet.planet_id }); mapImg = null; drawMap(); log(`${planet.name}: its planet map starts over.`, "warn"); });
   $("baseOn").addEventListener("change", () => invoke("planetscan_base", { on: $("baseOn").checked }));
   $("saveMaps").addEventListener("click", () => invoke("planetscan_save_maps").then(() => log("Saving this planet's sky and map for the corp…")).catch((e) => log(String(e), "bad")));
