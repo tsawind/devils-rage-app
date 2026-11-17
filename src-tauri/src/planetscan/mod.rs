@@ -105,7 +105,16 @@ struct Run {
     painted_frames: u64,
     /// When it was last scanned (a run put aside is dropped after a while).
     touched: Instant,
+    /// When it started, carried on, or EVE's list last showed another row: nothing is painted
+    /// for a moment after (EVE's colours are still changing over).
+    switched: Instant,
 }
+
+/// EVE swaps the planet's colours a moment after a row lights up in its list (planet I: the list
+/// had shown the new row for 0.2 s while the planet still wore the last resource's colours, and
+/// they went on drifting for most of a second). A scan that paints at once fills the whole cap
+/// round the cross with the wrong colours, and cells seen face-on are kept for good.
+const COLOUR_SETTLE: Duration = Duration::from_millis(1000);
 
 /// Starting a sky from nothing: the pictures watched (about 4 a second while the planet turns
 /// sideways), then the search in its own thread, then catching up with the pictures since.
@@ -1089,7 +1098,11 @@ impl Session {
                 } else if let Some(want) = run.row {
                     if picked.is_some_and(|p| p != want) || read.is_some_and(|p| p != want) {
                         run.paused = Some("EVE shows another resource");
+                        run.switched = Instant::now();
                     }
+                }
+                if run.paused.is_none() && !run.resource.is_empty() && run.switched.elapsed() < COLOUR_SETTLE {
+                    run.paused = Some("waiting a moment for EVE's colours");
                 }
                 if run.paused.is_none() {
                     let q = pose_q(pose.yaw, pose.pitch);
@@ -2204,11 +2217,12 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
                     k.row = row.or(k.row);
                     k.paused = None;
                     k.touched = Instant::now();
+                    k.switched = Instant::now();
                     k
                 }
                 None => {
                     let map = if bare { Map::new(true) } else { Map::with_size(false, scan::RES_W, scan::RES_H) };
-                    Run { planet: pid, resource, row, map, started: Instant::now(), done: false, paused: None, painted_frames: 0, touched: Instant::now() }
+                    Run { planet: pid, resource, row, map, started: Instant::now(), done: false, paused: None, painted_frames: 0, touched: Instant::now(), switched: Instant::now() }
                 }
             };
             // Glowing lava can't be read: not left as places to see. A gas giant has none: its
