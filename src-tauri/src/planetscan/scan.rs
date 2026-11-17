@@ -123,6 +123,10 @@ pub fn unmix_any(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> 
 /// in another than the planet map has it. Kept narrow: from 1.3 up, VIII's replayed Base Metals
 /// belt started losing real readings to "no resource".
 const GAS_LIGHT: (f32, f32) = (0.8, 1.15);
+/// EVE's band from here up is pink going to grey-white (its top), and from GAS_RED to there
+/// orange and red (level 0.92 is still red; 0.95 already pink).
+const GAS_WHITE: f32 = 0.92;
+const GAS_RED: f32 = 0.7;
 
 /// A gas giant: EVE lays its colours only where the resource is (on planet VIII a belt round the
 /// equator); the rest of the planet shows as it is, not dimmed at all. Read against the band,
@@ -513,6 +517,7 @@ impl Map {
         if (self.w, self.h) == (GRID_W, GRID_H) {
             return self.cells();
         }
+        let value = self.levels();
         let mut sum = vec![(0f32, 0u32); GRID_W * GRID_H];
         for row in 0..self.h {
             let gr = (row * GRID_H / self.h).min(GRID_H - 1);
@@ -521,7 +526,7 @@ impl Map {
                 if self.seen[i] {
                     let gc = (col * GRID_W / self.w).min(GRID_W - 1);
                     let s = &mut sum[gr * GRID_W + gc];
-                    s.0 += self.value[i];
+                    s.0 += value[i];
                     s.1 += 1;
                 }
             }
@@ -574,7 +579,57 @@ impl Map {
     }
     /// SeAT's bytes: 0 = not seen, 1 … 251 = level 0 … 1 (resource maps).
     pub fn cells(&self) -> Vec<u8> {
-        (0..self.w * self.h).map(|i| if self.seen[i] { 1 + (self.value[i].clamp(0.0, 1.0) * 250.0).round() as u8 } else { 0 }).collect()
+        let value = self.levels();
+        (0..self.w * self.h).map(|i| if self.seen[i] { 1 + (value[i].clamp(0.0, 1.0) * 250.0).round() as u8 } else { 0 }).collect()
+    }
+    /// Each cell's level as shown and saved. On a gas giant, the band's white top only where the
+    /// red just under it is near: EVE's band is grey-white at the top, and a gas giant's pale
+    /// clouds seen brighter than its planet map has them (the map caught EVE's shade there) read
+    /// as that white with no resource there at all. A real hot spot is a white middle ringed by
+    /// red (planet VIII's Reactive Gas); a white patch with no red round it is the planet: level 0.
+    /// Planet VIII's Base Metals: 29–38 % of the cells 105–135° from the north pole read as the
+    /// white top, every one of them with no red within 3°.
+    pub fn levels(&self) -> std::borrow::Cow<'_, [f32]> {
+        if !self.reads_bright || self.bare {
+            return std::borrow::Cow::Borrowed(&self.value);
+        }
+        let (w, h) = (self.w, self.h);
+        let reach = (3 * h / 180).max(1) as i64;
+        let red = |v: f32| (GAS_RED..GAS_WHITE).contains(&v);
+        let mut out = self.value.clone();
+        for row in 0..h {
+            for col in 0..w {
+                let i = row * w + col;
+                if !self.seen[i] || self.value[i] < GAS_WHITE {
+                    continue;
+                }
+                let mut near = false;
+                'look: for dr in -reach..=reach {
+                    let r = row as i64 + dr;
+                    if r < 0 || r >= h as i64 {
+                        continue;
+                    }
+                    for dc in -reach..=reach {
+                        let j = r as usize * w + (col as i64 + dc).rem_euclid(w as i64) as usize;
+                        if self.seen[j] && red(self.value[j]) {
+                            near = true;
+                            break 'look;
+                        }
+                    }
+                }
+                if !near {
+                    out[i] = 0.0;
+                }
+            }
+        }
+        std::borrow::Cow::Owned(out)
+    }
+    /// The levels as shown and saved kept for good (before the scan is saved for the corp).
+    pub fn settle_levels(&mut self) {
+        if let std::borrow::Cow::Owned(v) = self.levels() {
+            self.value = v;
+            self.version += 1;
+        }
     }
     /// Bare map bytes: r, g, b a cell (0, 0, 0 = not seen).
     pub fn bare_bytes(&self) -> Vec<u8> {
@@ -1091,6 +1146,44 @@ mod tests {
         m.seen[100 * RES_W + 50] = false;
         m.version += 1;
         assert!((m.coverage() - 1.0).abs() < 1e-9 && !m.missing()[100 * RES_W + 50]);
+    }
+
+    /// On a gas giant, the band's white top counts only with red round it (a hot spot: white
+    /// middle, red ring); a white patch on its own is the planet seen brighter than its map has it
+    /// and reads 0. Rock planets keep every level as read.
+    #[test]
+    fn a_gas_giants_white_needs_red_round_it() {
+        let mut m = Map::with_size(false, RES_W, RES_H);
+        let at = |row: usize, col: usize| row * RES_W + col;
+        // A hot spot: white middle, red ring 2 cells out; and a lone white patch far away.
+        for dr in -3i64..=3 {
+            for dc in -3i64..=3 {
+                let i = at((100 + dr) as usize, (200 + dc) as usize);
+                m.seen[i] = true;
+                m.value[i] = if dr.abs() <= 1 && dc.abs() <= 1 { 0.99 } else { 0.8 };
+                let j = at((250 + dr) as usize, (500 + dc) as usize);
+                m.seen[j] = true;
+                m.value[j] = 0.99;
+            }
+        }
+        // Across the seam at 0° / 360° too.
+        m.seen[at(50, 0)] = true;
+        m.value[at(50, 0)] = 0.99;
+        m.seen[at(50, RES_W - 2)] = true;
+        m.value[at(50, RES_W - 2)] = 0.85;
+        let rock = m.levels().into_owned();
+        assert_eq!(rock[at(250, 500)], 0.99, "rock planets: as read");
+        m.reads_bright = true;
+        let gas = m.levels().into_owned();
+        assert_eq!(gas[at(100, 200)], 0.99, "the hot spot's white middle stays");
+        assert_eq!(gas[at(102, 202)], 0.8, "its red ring stays");
+        assert_eq!(gas[at(250, 500)], 0.0, "a white patch with no red round it is no resource");
+        assert_eq!(gas[at(50, 0)], 0.99, "red just across 0°");
+        // What's shown and what SeAT gets agree, and settling keeps it.
+        assert_eq!(m.cells()[at(250, 500)], 1);
+        m.settle_levels();
+        assert_eq!(m.value[at(250, 500)], 0.0);
+        assert_eq!(m.value[at(100, 200)], 0.99);
     }
 
     /// On a gas giant the planet showing as it is (EVE's colours not laid over it there), a bit

@@ -1399,6 +1399,7 @@ impl Session {
                 }
             }
         } else {
+            run.map.settle_levels();
             run.map.despeckle(0.2);
             let cells = run.map.cells_1deg();
             let resource = run.resource.clone();
