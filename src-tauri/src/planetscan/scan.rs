@@ -105,6 +105,12 @@ pub fn unmix(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
     if br.max(bg).max(bb) > GLOW {
         return None;
     }
+    unmix_any(r, g, b, br, bg, bb)
+}
+
+/// The same without the too-bright rule: for a planet where nothing glows (a gas giant's pale
+/// cloud bands are bright, but EVE's colours lie over them like anywhere else).
+pub fn unmix_any(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
     let k = 1.0 - OVERLAY;
     let d = [k * br - r as f32, k * bg - g as f32, k * bb - b as f32];
     let fine = band_fine();
@@ -188,6 +194,13 @@ pub struct Map {
     blind: Vec<u16>,
     blind_span: Vec<(u32, u32)>,
     pictures: u32,
+    /// A gas giant: nothing on it glows, so its bright cloud bands are read like any colour and
+    /// no cell ever counts as unreadable (planet VIII lost 2.6 % of itself to the lava rule).
+    reads_bright: bool,
+    /// Lava glows somewhere on the planet map: only then can looks that don't read be lava too.
+    /// On a planet with none (barren, ice …) they're a passing thing (EVE's colours fading in
+    /// after a switch) and the cells stay to see.
+    glows: bool,
     /// The coverage worked out last, and the version it was for (+1; 0 = none yet): it's asked
     /// for many times a second and only changes when cells are painted.
     cov_cache: (std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU64),
@@ -215,6 +228,8 @@ impl Map {
             blind: vec![0; n],
             blind_span: vec![(0, 0); n],
             pictures: 0,
+            reads_bright: false,
+            glows: false,
             cov_cache: Default::default(),
         }
     }
@@ -230,9 +245,12 @@ impl Map {
     }
     /// Cells the planet map shows glowing (lava too bright to see EVE's colours through, the same
     /// rule the reading uses): they can never be read, so they aren't left to see. Returns their
-    /// share of the planet.
-    pub fn mark_glow(&mut self, bare: &Map) -> f64 {
-        if self.bare || bare.w != self.w || bare.h != self.h {
+    /// share of the planet. Not on a gas giant (`gas`): nothing glows there, its pale cloud bands
+    /// are only bright, and every cell is read and left to see like on any other planet.
+    pub fn mark_glow(&mut self, bare: &Map, gas: bool) -> f64 {
+        self.reads_bright = gas;
+        self.glows = false;
+        if self.bare || gas || bare.w != self.w || bare.h != self.h {
             return 0.0;
         }
         let (mut hot, mut all) = (0.0, 0.0);
@@ -247,6 +265,7 @@ impl Map {
                 }
             }
         }
+        self.glows = hot > 0.0;
         self.version += 1;
         hot / all
     }
@@ -331,6 +350,7 @@ impl Map {
         let is_bare = self.bare;
         let (gw, gh) = (self.w, self.h);
         let min_facing = if is_bare { PAINT_FACING } else { RESOURCE_FACING };
+        let reads_bright = self.reads_bright;
         // Each pixel: its cell, colour, level and how face-on.
         let looks: Vec<Vec<(u32, [f32; 4], f32)>> = std::thread::scope(|sc| {
             let handles: Vec<_> = rows
@@ -353,7 +373,11 @@ impl Map {
                                         let level = if is_bare {
                                             Some(0.0)
                                         } else if let Some((br, bg, bb)) = bare.and_then(|m| m.bare_rgb(cell)) {
-                                            unmix(r, g, b, br, bg, bb)
+                                            if reads_bright {
+                                                unmix_any(r, g, b, br, bg, bb)
+                                            } else {
+                                                unmix(r, g, b, br, bg, bb)
+                                            }
                                         } else {
                                             Some(heat(r, g, b))
                                         };
@@ -399,8 +423,8 @@ impl Map {
             let square = std::mem::replace(&mut self.square[cell], 0.0);
             let failed = std::mem::replace(&mut self.failed[cell], 0.0);
             if s[3] == 0.0 {
-                // Only unreadable looks this picture.
-                if failed >= BLIND_FACING && self.blind[cell] != u16::MAX {
+                // Only unreadable looks this picture (they only count on a planet with lava).
+                if failed >= BLIND_FACING && self.glows && self.blind[cell] != u16::MAX {
                     if self.blind[cell] == 0 {
                         self.blind_span[cell].0 = self.pictures;
                     }
@@ -766,7 +790,7 @@ mod tests {
         m.version += 1;
         plain.version += 1;
         assert!(plain.coverage() < 0.995, "{}", plain.coverage());
-        let share = m.mark_glow(&bare);
+        let share = m.mark_glow(&bare, false);
         assert!(share > 0.005 && share < 0.01, "{share}");
         assert!(m.coverage() > 0.9999, "{}", m.coverage());
         assert!(!m.missing().iter().any(|&x| x));
@@ -780,7 +804,8 @@ mod tests {
     #[test]
     fn unreadable_only_after_a_while() {
         use crate::planetscan::geom::{pose_q, Disc};
-        let bytes: Vec<u8> = (0..GRID_W * GRID_H).flat_map(|_| [90u8, 80, 70]).collect();
+        // A lava planet: a little of it glows on the planet map (right at the north pole).
+        let bytes: Vec<u8> = (0..GRID_W * GRID_H).flat_map(|i| if i < GRID_W { [240u8, 200, 60] } else { [90u8, 80, 70] }).collect();
         let bare = Map::from_bare_bytes(&bytes).unwrap();
         let (w, h) = (640usize, 400usize);
         let disc = Disc::with_lens(320.0, 200.0, 100.0, 375.0);
@@ -796,6 +821,8 @@ mod tests {
         let pic = Pic { w, h, bgra: &px };
         let (front, back) = (pose_q(0.4, 0.3), pose_q(0.4 + PI, 0.3));
         let mut m = Map::new(false);
+        let pole = m.mark_glow(&bare, false);
+        assert!(pole > 0.0 && pole < 0.001, "{pole}");
         for _ in 0..6 {
             assert_eq!(m.paint(&pic, &disc, &front, false, 1, Some(&bare)), 0);
         }
@@ -813,6 +840,64 @@ mod tests {
         m.paint(&pic, &disc, &front, false, 1, Some(&bare));
         assert!(m.known(middle) && !m.seen[middle], "unreadable looks spread over a while");
         assert!(m.blind_share() > 0.03, "{}", m.blind_share());
+
+        // The same looks on a planet with no lava on its planet map (barren, ice …) or on a gas
+        // giant: nothing there can be unreadable for good, so the cells stay to see.
+        let plain = Map::from_bare_bytes(&(0..GRID_W * GRID_H).flat_map(|_| [90u8, 80, 70]).collect::<Vec<u8>>()).unwrap();
+        for (bare, gas) in [(&plain, false), (&bare, true)] {
+            let mut m = Map::new(false);
+            assert_eq!(m.mark_glow(bare, gas), 0.0);
+            for _ in 0..6 {
+                m.paint(&pic, &disc, &front, false, 1, Some(bare));
+            }
+            for _ in 0..40 {
+                m.paint(&pic, &disc, &back, false, 1, Some(bare));
+            }
+            m.paint(&pic, &disc, &front, false, 1, Some(bare));
+            assert!(!m.known(middle), "gas {gas}: still to see");
+            assert_eq!(m.blind_share(), 0.0);
+            assert!(m.coverage() < 0.5, "{}", m.coverage());
+        }
+    }
+
+    /// A gas giant's pale cloud bands are brighter than the lava rule's limit but don't glow: with
+    /// EVE's band laid over them they read as their level, and every cell counts as to see (planet
+    /// VIII's scans stopped at "99 %" with 2.6 % of it marked as lava and only 97 % read). On any
+    /// other planet the same colours stay unreadable, as before.
+    #[test]
+    fn a_gas_giants_bright_clouds_are_read() {
+        use crate::planetscan::geom::{pose_q, Disc};
+        let bare_rgb = [232.0f32, 226.0, 214.0];
+        let bytes: Vec<u8> = (0..GRID_W * GRID_H).flat_map(|_| [232u8, 226, 214]).collect();
+        let bare = Map::from_bare_bytes(&bytes).unwrap();
+        let level = 0.4f32;
+        let c = band_fine()[(level * (STEPS - 1) as f32).round() as usize];
+        let seen: Vec<u8> = (0..3).map(|k| ((1.0 - OVERLAY) * bare_rgb[k] + c[k]).round().min(255.0) as u8).collect();
+        let (w, h) = (640usize, 400usize);
+        let disc = Disc::with_lens(320.0, 200.0, 100.0, 375.0);
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                if (x as f64 - 320.0).hypot(y as f64 - 200.0) < 100.0 {
+                    px[(y * w + x) * 4..(y * w + x) * 4 + 4].copy_from_slice(&[seen[2], seen[1], seen[0], 255]);
+                }
+            }
+        }
+        let pic = Pic { w, h, bgra: &px };
+        let mut gas = Map::new(false);
+        assert_eq!(gas.mark_glow(&bare, true), 0.0);
+        assert!(gas.paint(&pic, &disc, &pose_q(0.4, 0.3), false, 1, Some(&bare)) > 100);
+        assert_eq!(gas.blind_share(), 0.0);
+        for i in 0..GRID_W * GRID_H {
+            if gas.seen[i] {
+                assert!((gas.value[i] - level).abs() < 0.03, "cell {i}: {}", gas.value[i]);
+            }
+        }
+        // A rock planet that bright all over is lava: nothing read, all of it left out.
+        let mut rock = Map::new(false);
+        assert!(rock.mark_glow(&bare, false) > 0.999);
+        assert_eq!(rock.paint(&pic, &disc, &pose_q(0.4, 0.3), false, 1, Some(&bare)), 0);
+        assert!(rock.coverage() > 0.999);
     }
 
     /// The quick unmixing gives the same level as trying every step, on real-looking colours:

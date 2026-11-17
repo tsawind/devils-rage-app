@@ -2211,9 +2211,11 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
                     Run { planet: pid, resource, row, map, started: Instant::now(), done: false, paused: None, painted_frames: 0, touched: Instant::now() }
                 }
             };
-            // Glowing lava can't be read: not left as places to see.
+            // Glowing lava can't be read: not left as places to see. A gas giant has none: its
+            // bright cloud bands are read like any other colour.
+            let gas = s.is_gas();
             if let Some(b) = s.bares.get(&pid) {
-                run.map.mark_glow(b);
+                run.map.mark_glow(b, gas);
             }
             s.run_blind = run.map.blind_share();
             s.run = Some(run);
