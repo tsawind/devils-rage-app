@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Snapshot of…</title>
+<style>
+  :root { --bg:#0a0a0c; --panel:#121216; --line:#24242c; --text:#c9c9d0; --muted:#6a6a72; --hi:#fff; --red-hi:#d6242c; --ok:#7fd45a; --bad:#ff6a5a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; padding: 14px; }
+  h1 { font-size: 14px; color: var(--hi); margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+  #list { display: flex; flex-direction: column; gap: 6px; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; padding: 9px 12px; text-align: left; cursor: pointer; }
+  button:hover { border-color: var(--red-hi); color: var(--hi); }
+  button:disabled { opacity: .5; cursor: wait; }
+  #said { margin-top: 12px; font-size: 12px; min-height: 18px; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+</style>
+</head>
+<body>
+  <h1>Snapshot of…</h1>
+  <p>Full size, with every detail (the scan's status, the end of the log), into the app's recordings folder. Nothing leaves the PC.</p>
+  <div id="list"></div>
+  <div id="said"></div>
+<script>
+  "use strict";
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args || {});
+  const list = document.getElementById("list"), said = document.getElementById("said");
+  function say(text, cls) { said.textContent = text; said.className = cls || ""; }
+  async function load() {
+    try {
+      const targets = await invoke("dev_snapshot_targets");
+      list.replaceChildren(...targets.map((t) => {
+        const b = document.createElement("button");
+        b.textContent = t.label;
+        b.addEventListener("click", async () => {
+          for (const x of list.querySelectorAll("button")) x.disabled = true;
+          say("Taking it…");
+          try {
+            const file = await invoke("dev_snapshot_take", { target: t.target });
+            say(`Saved ${file}`, "ok");
+          } catch (e) {
+            say(`Couldn't: ${e}`, "bad");
+          }
+          for (const x of list.querySelectorAll("button")) x.disabled = false;
+        });
+        return b;
+      }));
+    } catch (e) {
+      say(`Couldn't list what to take: ${e}`, "bad");
+    }
+  }
+  load();
+  // EVE clients open and close: the list follows.
+  setInterval(() => { if (!list.querySelector("button:disabled")) load(); }, 5000);
+</script>
+</body>
+</html>
