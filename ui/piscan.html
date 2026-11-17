@@ -777,7 +777,8 @@
   }
   function resourceTips(s, also) {
     const run = s.run, names = resourcesOf(planet), done = resDone(planet), picked = s.list ? s.list.picked : null;
-    const sliderOff = sliderWarning(s);
+    // The slider check, first in the list, while a resource is being scanned or one is still to do.
+    const sliderOff = (run && run.resource && !run.done) || names.some((n) => !done.has(n)) ? sliderWarning(s) : null;
     if (sliderOff) also.unshift(sliderOff);
     if (run && run.resource && !run.done && s.keep_going) {
       if (run.paused) return [`Filling in more of ${run.resource}: paused (${run.paused}).`, also];
