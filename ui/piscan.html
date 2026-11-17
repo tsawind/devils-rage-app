@@ -391,6 +391,12 @@
       const [cx, cy] = P(s.disc.cx, s.disc.cy);
       sctx.strokeStyle = "rgba(214,36,44,.8)"; sctx.lineWidth = 1.5 * dpr;
       sctx.beginPath(); sctx.arc(cx, cy, s.disc.r * fit.k, 0, 2 * Math.PI); sctx.stroke();
+      drawShotTargets(s, P, dpr);
+      if (s.pose) {
+        const k = 11 * dpr;
+        sctx.strokeStyle = s.pose.placed ? "#ff5a4a" : "#f0c040"; sctx.lineWidth = 2 * dpr;
+        sctx.beginPath(); sctx.moveTo(cx - k, cy); sctx.lineTo(cx + k, cy); sctx.moveTo(cx, cy - k); sctx.lineTo(cx, cy + k); sctx.stroke();
+      }
     }
     // EVE's resource list rows (while pointing it out, or when the app can't see which is lit).
     if (s.list && s.list.spot && (clickMode === "list" || s.list.picked == null)) {
@@ -402,6 +408,43 @@
       const sp = s.list.spot, gap = (sp.y5 - sp.y0) / 5, [x, y] = P(sp.x, sp.y0 + gap * s.list.picked);
       sctx.strokeStyle = "rgba(173,255,47,.9)"; sctx.lineWidth = 2 * dpr; sctx.strokeRect(x - gap * 2.6 * fit.k, y - gap * 0.5 * fit.k, gap * 4.4 * fit.k, gap * fit.k);
     }
+  }
+  /** The planet map's (or resource's) green targets on the live picture: where each patch is on
+   *  the planet as seen now. In view: a circle on it; round the back: an arrow at the planet's
+   *  edge, the way to turn. The nearest is the brightest. */
+  function drawShotTargets(s, P, dpr) {
+    if (!s.pose || !s.pose.q || !s.disc || mapKind === "sky") return;
+    const targets = (mapKind === "resource" ? s.run && s.run.targets : s.base_map && s.base_map.targets) || [];
+    if (!targets.length) return;
+    const Q = s.pose.q, D = s.disc.D || 4, R = s.disc.r, RAD = Math.PI / 180;
+    const f = R * Math.sqrt(D * D - 1);
+    const look = targets.map((t) => {
+      const a = t[0] * RAD, b = t[1] * RAD;
+      const p = [Math.sin(a) * Math.cos(b), Math.sin(a) * Math.sin(b), Math.cos(a)];
+      const v = [Q[0] * p[0] + Q[1] * p[1] + Q[2] * p[2], Q[3] * p[0] + Q[4] * p[1] + Q[5] * p[2], Q[6] * p[0] + Q[7] * p[1] + Q[8] * p[2]];
+      return { t, v, apart: Math.acos(Math.max(-1, Math.min(1, v[2]))) };
+    });
+    const near = look.reduce((m, l, i) => (l.apart < look[m].apart ? i : m), 0);
+    look.forEach((l, i) => {
+      const bright = i === near;
+      sctx.strokeStyle = bright ? "rgba(140,255,90,.95)" : "rgba(110,200,70,.6)";
+      sctx.fillStyle = sctx.strokeStyle;
+      sctx.lineWidth = (bright ? 3 : 1.5) * dpr;
+      if (l.v[2] > 1 / D) {
+        // In view: where it is on the disc, sized to the patch.
+        const depth = D - l.v[2];
+        const [x, y] = P(s.disc.cx + (f * l.v[0]) / depth, s.disc.cy - (f * l.v[1]) / depth);
+        const r = Math.max(6 * dpr, (Math.max(1, l.t[2]) * RAD * f / depth) * fit.k);
+        sctx.beginPath(); sctx.arc(x, y, r, 0, 2 * Math.PI); sctx.stroke();
+        if (bright) { sctx.globalAlpha = 0.12; sctx.fill(); sctx.globalAlpha = 1; }
+      } else {
+        // Round the back: an arrow just outside the edge, pointing the way it is.
+        const L = Math.hypot(l.v[0], l.v[1]) || 1, dx = l.v[0] / L, dy = -l.v[1] / L;
+        const [cx, cy] = P(s.disc.cx, s.disc.cy), rr = R * fit.k + 16 * dpr, a = (bright ? 11 : 7) * dpr;
+        const x = cx + dx * rr, y = cy + dy * rr;
+        sctx.beginPath(); sctx.moveTo(x + dx * a, y + dy * a); sctx.lineTo(x - dy * a * 0.6, y + dx * a * 0.6); sctx.lineTo(x + dy * a * 0.6, y - dx * a * 0.6); sctx.closePath(); sctx.fill();
+      }
+    });
   }
   function toFrame(e) {
     const r = shot.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -452,7 +495,8 @@
     if (!s || mapBusy) return;
     const version = mapKind === "planet" ? (s.base_map ? s.base_map.version : 0) : mapKind === "resource" ? (s.run ? s.run.version : -3) : (s.sky && s.sky.own ? s.sky.own.frames : -2);
     if (!force && version === mapVersion && Date.now() - mapAt < 15000) return;
-    if (!force && Date.now() - mapAt < (mapKind === "planet" ? 1000 : 2500)) return;
+    // The resource canvas a few times a second (it's being painted), the planet map about once.
+    if (!force && Date.now() - mapAt < (mapKind === "resource" ? 300 : mapKind === "planet" ? 700 : 2500)) return;
     mapBusy = true;
     try {
       const raw = await invoke("planetscan_mapview", { kind: mapKind });
@@ -474,12 +518,13 @@
     const iw = mapImg ? mapImg.width : 2048, ih = mapImg ? mapImg.height : 1024;
     const f = fitWithZoom(mapCanvas, iw, ih, zMap);
     if (mapImg) {
-      mctx.imageSmoothingEnabled = f.k < 1.5;
+      mctx.imageSmoothingEnabled = mapKind === "resource" || f.k < 1.5;
+      mctx.imageSmoothingQuality = "high";
       mctx.drawImage(mapImg, f.x, f.y, iw * f.k, ih * f.k);
     } else {
       mctx.fillStyle = "#0e0e14"; mctx.fillRect(f.x, f.y, iw * f.k, ih * f.k);
       mctx.fillStyle = "#8a8a92"; mctx.font = `${13 * dpr}px Segoe UI, sans-serif`; mctx.textAlign = "center";
-      mctx.fillText(mapKind === "planet" ? "No planet map yet: it paints in as you spin the planet (EVE on No filter)." : mapKind === "resource" ? "No resource being scanned: click one in EVE's scan list." : "No sky yet: turn the planet sideways in EVE.", W / 2, H / 2);
+      mctx.fillText(mapKind === "planet" ? "No planet map yet: it paints in as you spin the planet (EVE on No filter)." : mapKind === "resource" ? (status && status.run && status.run.resource ? `${status.run.resource}: a blank canvas. Spin the planet to paint it in.` : "No resource being scanned: click one in EVE's scan list.") : "No sky yet: turn the planet sideways in EVE.", W / 2, H / 2);
     }
     // 30° grid.
     mctx.strokeStyle = "rgba(255,255,255,.08)"; mctx.lineWidth = 1;
@@ -649,13 +694,14 @@
     badge.textContent = !s.started ? "Waiting for Start" : rg && rg.phase ? `Measuring the rings · ${pct(rg.progress)}` : pose ? (pose.placed ? (pose.by_planet ? "On the planet map (too little sky past the rings)" : `On the sky · stars ${pct(pose.stars)}`) : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
     badge.className = "badge " + (s.started && !(rg && rg.phase) && pose && pose.placed ? "ok" : "warn");
     refreshMap(false);
-    if (Date.now() - mapDrawnAt > 100) drawMap();
+    if (Date.now() - mapDrawnAt > 30) drawMap();
     drawCard(s);
     const said = say + (also.length ? " | " + also.join(" | ") : "");
     if (said !== lastSaid) { lastSaid = said; invoke("planetscan_say", { text: said }).catch(() => {}); }
   }
   // ---------- resources: one scan each, EVE's list order ----------
   const resDoneNow = new Map();
+  let shownRun = null;
   let resStarting = null, resStartingAt = 0;
   function planetComplete(s) {
     const base = s.base_map || {}, own = s.sky && s.sky.own;
@@ -702,7 +748,7 @@
     if (!planet || !name) return;
     resStarting = name; resStartingAt = Date.now();
     invoke("planetscan_scan", { resource: name, row: row || null })
-      .then(() => { log(`Scanning ${name} on ${planet.name}: spin the planet every side.`); setMapKind("resource"); })
+      .then(() => log(`Scanning ${name} on ${planet.name}: spin the planet every side.`))
       .catch((e) => log(String(e), "bad"));
   }
   /** EVE's list shows a resource not done yet, on a finished planet, locked on: scan it. */
@@ -728,6 +774,10 @@
     $("saveRes").hidden = !(run && run.resource && !run.done);
     $("stopRes").hidden = !(run && run.resource && !run.done);
     $("tabRes").hidden = !(run && run.resource);
+    if (run && run.resource && !run.done && run.resource + ":" + (planet && planet.planet_id) !== shownRun) {
+      shownRun = run.resource + ":" + (planet && planet.planet_id);
+      setMapKind("resource");
+    }
     if (mapKind === "resource" && !(run && run.resource)) setMapKind("planet");
   }
 

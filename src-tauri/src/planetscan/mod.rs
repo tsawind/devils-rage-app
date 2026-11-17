@@ -261,6 +261,11 @@ struct Session {
     targets_at: Option<Instant>,
     /// What the page's Do now box says (kept with each recorded picture).
     page_say: String,
+    /// Where the time goes per picture (ms, smoothed): view, facing, sky, resource, planet map, rest.
+    timing: [f64; 6],
+    /// The "the rest is …" hints (sky, planet map, resource), worked out a few times a second.
+    hints: [Option<String>; 3],
+    hints_at: Option<Instant>,
 }
 
 /// Measuring a gas giant's rings from over its poles: the top first, then the bottom (with what
@@ -361,6 +366,9 @@ impl Default for Session {
             run_targets: Vec::new(),
             targets_at: None,
             page_say: String::new(),
+            timing: [0.0; 6],
+            hints: [None, None, None],
+            hints_at: None,
         }
     }
 }
@@ -402,6 +410,14 @@ impl Default for Engine {
 }
 
 /// This scanner's own files for a planet's maps (older scanners' files are left alone).
+/// Time since `from` into part k of a picture's timing (smoothed); the time now, for the next part.
+fn time_part(timing: &mut [f64; 6], k: usize, from: Instant) -> Instant {
+    let now = Instant::now();
+    let ms = (now - from).as_secs_f64() * 1000.0;
+    timing[k] = 0.9 * timing[k] + 0.1 * ms;
+    now
+}
+
 fn local_name(planet: u64, kind: &str) -> String {
     match kind {
         "sky" => format!("{planet}-sky3.bin"),
@@ -760,7 +776,9 @@ impl Session {
             d.0 = true;
             d.1 = true;
         }
+        let t_view = Instant::now();
         let view = sky::view(buf, &pic, mask, lens);
+        let mut t_mark = time_part(&mut self.timing, 0, t_view);
 
         // ---- the facing ----
         let mut locked_said: Option<String> = None;
@@ -971,6 +989,7 @@ impl Session {
             self.sky_cov = (levels, Some(Instant::now()));
         }
 
+        t_mark = time_part(&mut self.timing, 1, t_mark);
         // ---- recording this planet's own sky ----
         let fresh_buildings = !self.paint_held && self.pose.as_ref().is_some_and(|p| p.sky_of.is_none());
         // A gas giant's sky is recorded only once its rings are measured and cut out, and only
@@ -1024,6 +1043,7 @@ impl Session {
             }
         }
 
+        t_mark = time_part(&mut self.timing, 2, t_mark);
         // ---- scanning ----
         let placed = self.pose.as_ref().is_some_and(|p| p.placed);
         let picked = self.picked;
@@ -1042,7 +1062,11 @@ impl Session {
                 if run.paused.is_none() {
                     let q = pose_q(pose.yaw, pose.pitch);
                     let bare = self.planet.as_ref().and_then(|p| self.bares.get(&p.id));
-                    let every = (disc.r / 180.0).round().max(1.0) as usize;
+                    // Every pixel on a 0.5° grid when there are cores for it (every other on few
+                    // cores, or a bigger picture); the old 1° grid every other.
+                    let fine_grid = run.map.w > scan::GRID_W;
+                    let per = if fine_grid && sky::paint_cores() >= 5 { 292.0 } else { 146.0 };
+                    let every = (disc.r / per).round().max(1.0) as usize;
                     run.map.paint(&pic, &disc, &q, pose.mirrored, every, if run.resource.is_empty() { None } else { bare });
                     run.painted_frames += 1;
                 }
@@ -1052,6 +1076,7 @@ impl Session {
             self.finish(jobs);
         }
 
+        t_mark = time_part(&mut self.timing, 3, t_mark);
         // ---- the planet's own colours (EVE on No filter): the base map ----
         self.base_paused = None;
         if self.base_on && self.base_cov.0 < 0.9995 && self.planet.is_some() {
@@ -1106,6 +1131,21 @@ impl Session {
             // To the corp at 99 %, on Save now, or when switching planets: not every few minutes (6 MB).
             self.base_dirty = (false, self.base_dirty.1, self.base_dirty.2, Instant::now());
         }
+        t_mark = time_part(&mut self.timing, 4, t_mark);
+        // ---- the "the rest is …" hints, a few times a second (the status reads them) ----
+        if self.hints_at.is_none_or(|t| t.elapsed() > Duration::from_millis(400)) {
+            self.hints_at = Some(Instant::now());
+            let reach = self.reach.filter(|_| gas);
+            let q = self.pose.as_ref().map(|p| (pose_q(p.yaw, p.pitch), p.mirrored));
+            self.hints = match q {
+                None => [None, None, None],
+                Some((q, mirrored)) => [
+                    self.planet_id().filter(|_| self.sky_done() < 0.999).and_then(|id| self.skies.get(&id)).and_then(|s| s.missing_hint(&q, reach.as_ref())),
+                    self.base.as_ref().filter(|_| !self.base_done).and_then(|b| b.missing_hint(&q)),
+                    self.run.as_ref().filter(|r| !r.done).and_then(|r| r.map.missing_hint(&q, mirrored)),
+                ],
+            };
+        }
         // ---- the green targets: what's still to see, once a map is at 95 % (every 2 s) ----
         if self.targets_at.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
             self.targets_at = Some(Instant::now());
@@ -1114,7 +1154,7 @@ impl Session {
                 _ => Vec::new(),
             };
             self.run_targets = match self.run.as_ref() {
-                Some(r) if !r.done && r.map.coverage() >= 0.9 => base::patches(scan::GRID_W, scan::GRID_H, &r.map.missing(), 6),
+                Some(r) if !r.done && r.map.coverage() >= 0.9 => base::patches(r.map.w, r.map.h, &r.map.missing(), 6),
                 _ => Vec::new(),
             };
             let reach = self.reach.filter(|_| gas);
@@ -1195,6 +1235,7 @@ impl Session {
             self.identify_at = Some(Instant::now());
             self.identify(&pic, &disc);
         }
+        time_part(&mut self.timing, 5, t_mark);
         self.step_ms = start.elapsed().as_secs_f64() * 1000.0;
     }
 
@@ -1268,7 +1309,7 @@ impl Session {
             }
         } else {
             run.map.despeckle(0.2);
-            let cells = run.map.cells();
+            let cells = run.map.cells_1deg();
             let resource = run.resource.clone();
             // The colours seen, kept on the PC (every scan, by time), to read again later.
             if let Some(dir) = self.dir.as_ref() {
@@ -1313,8 +1354,9 @@ impl Session {
         } else {
             serde_json::Value::Null
         };
-        let sky_missing = self.pose.as_ref().filter(|_| self.sky_done() < 0.999).and_then(|p| self.planet_id().and_then(|id| self.skies.get(&id)).and_then(|s| s.missing_hint(&pose_q(p.yaw, p.pitch), reach.as_ref())));
-        let base_missing = self.pose.as_ref().filter(|_| !self.base_done).and_then(|p| self.base.as_ref().and_then(|b| b.missing_hint(&pose_q(p.yaw, p.pitch))));
+        let _ = reach;
+        let sky_missing = self.hints[0].clone().filter(|_| self.sky_done() < 0.999);
+        let base_missing = self.hints[1].clone().filter(|_| !self.base_done);
         let pose = self.pose.as_ref().map(|p| {
             json!({
                 "yaw": p.yaw / DEG, "pitch": p.pitch / DEG, "mirrored": p.mirrored, "placed": p.placed,
@@ -1324,7 +1366,7 @@ impl Session {
         });
         let own = self.planet_id().and_then(|id| self.skies.get(&id));
         let run = self.run.as_ref().map(|r| {
-            let hint = self.pose.as_ref().filter(|_| !r.done).and_then(|p| r.map.missing_hint(&pose_q(p.yaw, p.pitch), p.mirrored));
+            let hint = self.hints[2].clone().filter(|_| !r.done);
             json!({ "resource": r.resource, "row": r.row, "coverage": r.map.coverage(), "done": r.done, "paused": r.paused, "secs": r.started.elapsed().as_secs_f64(), "frames": r.painted_frames, "version": r.map.version, "missing": hint,
                 "targets": self.run_targets.iter().map(|t| [t.lat, t.lon, t.radius]).collect::<Vec<_>>() })
         });
@@ -1332,7 +1374,8 @@ impl Session {
             "client": self.client,
             "size": [self.size.0, self.size.1],
             "capture": { "fps": engine.cap_fps.load(Ordering::Relaxed) as f64 / 100.0, "method": self.method, "trouble": self.trouble },
-            "proc": { "fps": self.proc.per_second, "ms": self.step_ms },
+            "proc": { "fps": self.proc.per_second, "ms": self.step_ms, "cores": sky::paint_cores() + 1,
+                "parts": { "view": self.timing[0], "facing": self.timing[1], "sky": self.timing[2], "resource": self.timing[3], "map": self.timing[4], "rest": self.timing[5] } },
             "edge": self.edge_r.map(|r| json!({ "r": r, "auto_zoom": self.auto_zoom })),
             "disc": self.disc().map(|d| json!({ "cx": d.cx, "cy": d.cy, "r": d.r, "D": d.d })),
             "lens": self.lens(),
@@ -1342,7 +1385,7 @@ impl Session {
             "fast_turn": self.fast_turn,
             "find": self.last_find_note,
             "sky": {
-                "own": own.map(|s| json!({ "coverage": s.coverage(), "levels": self.sky_cov.0, "done": self.sky_done(), "mirrored": s.mirrored, "frames": s.frames })),
+                "own": own.map(|s| json!({ "coverage": self.sky_cov.0[sky::COARSE], "levels": self.sky_cov.0, "done": self.sky_done(), "mirrored": s.mirrored, "frames": s.frames })),
                 "borrowed": self.borrowed.map(|b| json!({ "id": b, "name": self.planet_name(b), "loaded": self.skies.contains_key(&b) })),
                 "compare": self.compare_last.map(|(tilt, shift, b)| json!({ "tilt": tilt, "shift": shift, "with": self.planet_name(b) })),
                 "own_each": self.own_sky_each,
@@ -1489,7 +1532,7 @@ fn process_loop(inner: Arc<Inner>, gen: u64) {
                 s.step(&f, &mut buf, &mut jobs);
                 s.record(&f, &inner);
             }
-            if status_at.elapsed() > Duration::from_millis(60) {
+            if status_at.elapsed() > Duration::from_millis(30) {
                 status_at = Instant::now();
                 let text = s.status(&inner).to_string();
                 *inner.status.lock().unwrap() = Arc::new(text);
@@ -2070,7 +2113,7 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
             // same frame as the facings), which has to be done first.
             if !bare {
                 let pid = s.planet_id().unwrap_or(0);
-                let own = if s.base_cov.0 >= 0.9 { s.base.as_ref().map(|b| b.bare_map()) } else { None };
+                let own = if s.base_cov.0 >= 0.9 { s.base.as_ref().map(|b| b.bare_map(scan::RES_W, scan::RES_H)) } else { None };
                 match own {
                     Some(m) => {
                         s.bares.insert(pid, m);
@@ -2078,7 +2121,8 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
                     None => return Err("map the planet first (its planet map to 99 %): resources are read against its own colours".into()),
                 }
             }
-            s.run = Some(Run { resource, row, map: Map::new(bare), started: Instant::now(), done: false, paused: None, painted_frames: 0 });
+            let map = if bare { Map::new(true) } else { Map::with_size(false, scan::RES_W, scan::RES_H) };
+            s.run = Some(Run { resource, row, map, started: Instant::now(), done: false, paused: None, painted_frames: 0 });
         }
     }
     Ok(())
@@ -2158,7 +2202,7 @@ pub fn planetscan_map(engine: tauri::State<'_, Engine>) -> tauri::ipc::Response 
     match s.run.as_ref() {
         Some(r) if !r.resource.is_empty() => {
             out.push(1);
-            out.extend(r.map.cells());
+            out.extend(r.map.cells_1deg());
         }
         Some(r) => {
             out.push(2);
@@ -2313,7 +2357,7 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
         // Inside the lock only a quick copy: the scanner keeps going while the picture is made.
         enum Snapshot {
             Planet(usize, usize, Vec<u8>),
-            Resource(Vec<u8>),
+            Resource(usize, usize, Vec<u8>),
             Sky { w: usize, h: usize, sum: Vec<f32>, n: Vec<u16>, mw: usize, mh: usize, msum: Vec<f32>, mn: Vec<u16>, reach: Option<[bool; 181]> },
             None,
         }
@@ -2321,7 +2365,7 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
             let s = inner.state.lock().unwrap();
             if kind == "resource" {
                 match s.run.as_ref().filter(|r| !r.resource.is_empty()) {
-                    Some(r) => Snapshot::Resource(r.map.cells()),
+                    Some(r) => Snapshot::Resource(r.map.w, r.map.h, r.map.cells()),
                     None => Snapshot::None,
                 }
             } else if kind == "planet" {
@@ -2342,14 +2386,15 @@ pub async fn planetscan_mapview(engine: tauri::State<'_, Engine>, kind: String) 
         };
         let (w, h, rgb) = match copy {
             Snapshot::None => return tauri::ipc::Response::new(Vec::new()),
-            Snapshot::Resource(cells) => {
-                // EVE's own band, low → high, at twice the grid; not seen yet purple.
-                let (w, h) = (scan::GRID_W * 2, scan::GRID_H * 2);
+            Snapshot::Resource(gw, gh, cells) => {
+                // EVE's own band, low → high; not seen yet a blank canvas (dark, faintly chequered)
+                // that fills in as the planet is spun.
+                let (w, h) = (gw * 2, gh * 2);
                 let mut rgb = vec![0u8; w * h * 3];
                 for y in 0..h {
                     for x in 0..w {
-                        let c = cells[(y / 2) * scan::GRID_W + x / 2];
-                        let px = if c == 0 { [96, 0, 88] } else { scan::band_rgb((c - 1) as f32 / 250.0) };
+                        let c = cells[(y / 2) * gw + x / 2];
+                        let px = if c == 0 { if (x / 16 + y / 16) % 2 == 0 { [22, 22, 27] } else { [17, 17, 21] } } else { scan::band_rgb((c - 1) as f32 / 250.0) };
                         rgb[(y * w + x) * 3..(y * w + x) * 3 + 3].copy_from_slice(&px);
                     }
                 }

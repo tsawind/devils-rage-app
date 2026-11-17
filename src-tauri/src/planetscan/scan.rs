@@ -7,6 +7,9 @@ use std::f64::consts::PI;
 
 pub const GRID_W: usize = 360;
 pub const GRID_H: usize = 180;
+/// Resource scans: 0.5° cells (4× the 1° grid SeAT keeps; SeAT gets them averaged to 1°).
+pub const RES_W: usize = 720;
+pub const RES_H: usize = 360;
 
 /// Paint from within about 37° of the disc's middle (facing ≥ 0.8); a cell keeps its most
 /// face-on look, and is settled once seen at 0.97.
@@ -88,8 +91,51 @@ pub fn band_rgb(level: f32) -> [u8; 3] {
 }
 
 /// Resource level 0 … 1 at a pixel, knowing the bare planet's colour there; None where the
-/// planet is too bright to see through (glowing lava).
+/// planet is too bright to see through (glowing lava). Every 4th step of the band first, then
+/// the steps round the best (a third of the work of trying them all, the same answer).
 pub fn unmix(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
+    if br.max(bg).max(bb) > 215.0 {
+        return None;
+    }
+    let k = 1.0 - OVERLAY;
+    let d = [k * br - r as f32, k * bg - g as f32, k * bb - b as f32];
+    let fine = band_fine();
+    let err = |i: usize| {
+        let c = &fine[i];
+        (d[0] + c[0]).powi(2) + (d[1] + c[1]).powi(2) + (d[2] + c[2]).powi(2)
+    };
+    let (mut best, mut at) = (f32::INFINITY, 0);
+    let mut i = 0;
+    while i < STEPS {
+        let e = err(i);
+        if e < best {
+            best = e;
+            at = i;
+        }
+        i += 4;
+    }
+    let e = err(STEPS - 1);
+    if e < best {
+        best = e;
+        at = STEPS - 1;
+    }
+    for i in at.saturating_sub(3)..=(at + 3).min(STEPS - 1) {
+        let e = err(i);
+        if e < best {
+            best = e;
+            at = i;
+        }
+    }
+    if best > 4000.0 {
+        None
+    } else {
+        Some(at as f32 / (STEPS - 1) as f32)
+    }
+}
+
+/// The same by trying every step (for checking the quick one).
+#[cfg(test)]
+fn unmix_every_step(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
     if br.max(bg).max(bb) > 215.0 {
         return None;
     }
@@ -113,6 +159,8 @@ pub fn unmix(r: u8, g: u8, b: u8, br: f32, bg: f32, bb: f32) -> Option<f32> {
 /// A whole-planet map: a resource's levels, or (bare) the planet's own colours.
 pub struct Map {
     pub bare: bool,
+    pub w: usize,
+    pub h: usize,
     /// Resource: level; bare: r, g, b.
     pub value: Vec<f32>,
     /// Resource: the colours seen (r, g, b), kept so the levels can be read again later against
@@ -128,21 +176,47 @@ pub struct Map {
 
 impl Map {
     pub fn new(bare: bool) -> Map {
-        let n = GRID_W * GRID_H;
-        Map { bare, value: vec![0.0; if bare { n * 3 } else { n }], raw: if bare { Vec::new() } else { vec![0.0; n * 3] }, seen: vec![false; n], best: vec![0.0; n], version: 0, scratch: vec![[0.0; 5]; n], square: vec![0.0; n] }
+        Map::with_size(bare, GRID_W, GRID_H)
+    }
+    /// A map on a w × h grid (rows from the north pole, longitude round).
+    pub fn with_size(bare: bool, w: usize, h: usize) -> Map {
+        let n = w * h;
+        Map { bare, w, h, value: vec![0.0; if bare { n * 3 } else { n }], raw: if bare { Vec::new() } else { vec![0.0; n * 3] }, seen: vec![false; n], best: vec![0.0; n], version: 0, scratch: vec![[0.0; 5]; n], square: vec![0.0; n] }
     }
     pub fn coverage(&self) -> f64 {
         let (mut seen, mut all) = (0.0, 0.0);
-        for row in 0..GRID_H {
-            let w = ((row as f64 + 0.5) / GRID_H as f64 * PI).sin();
-            for col in 0..GRID_W {
+        for row in 0..self.h {
+            let w = ((row as f64 + 0.5) / self.h as f64 * PI).sin();
+            for col in 0..self.w {
                 all += w;
-                if self.seen[row * GRID_W + col] {
+                if self.seen[row * self.w + col] || self.gap(row, col) {
                     seen += w;
                 }
             }
         }
         seen / all
+    }
+    /// An unseen cell with at least 6 of its 8 neighbours seen: a gap between pixels, not a part
+    /// of the planet still to see.
+    #[inline]
+    fn gap(&self, row: usize, col: usize) -> bool {
+        if row == 0 || row + 1 >= self.h {
+            return false;
+        }
+        let mut n = 0;
+        for dr in [-1i64, 0, 1] {
+            for dc in [-1i64, 0, 1] {
+                if dr == 0 && dc == 0 {
+                    continue;
+                }
+                let r = (row as i64 + dr) as usize;
+                let c = (col as i64 + dc).rem_euclid(self.w as i64) as usize;
+                if self.seen[r * self.w + c] {
+                    n += 1;
+                }
+            }
+        }
+        n >= 6
     }
     #[inline]
     pub fn bare_rgb(&self, cell: usize) -> Option<(f32, f32, f32)> {
@@ -163,6 +237,7 @@ impl Map {
         let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 8);
         let chunk = rows.len().div_ceil(threads).max(1);
         let is_bare = self.bare;
+        let (gw, gh) = (self.w, self.h);
         let min_facing = if is_bare { PAINT_FACING } else { RESOURCE_FACING };
         // Each pixel: its cell, colour, level and how face-on.
         let looks: Vec<Vec<(u32, [f32; 4], f32)>> = std::thread::scope(|sc| {
@@ -178,9 +253,9 @@ impl Map {
                                     let f = facing_of(&v, disc);
                                     if f >= min_facing {
                                         let (lat, lon) = lat_lon(&apply(&qt, &v), mirrored);
-                                        let row = ((lat / PI * GRID_H as f64).floor() as usize).min(GRID_H - 1);
-                                        let col = ((lon / (2.0 * PI) * GRID_W as f64).floor() as usize).min(GRID_W - 1);
-                                        let cell = row * GRID_W + col;
+                                        let row = ((lat / PI * gh as f64).floor() as usize).min(gh - 1);
+                                        let col = ((lon / (2.0 * PI) * gw as f64).floor() as usize).min(gw - 1);
+                                        let cell = row * gw + col;
                                         let (r, g, b) = pic.rgb(x, y);
                                         let level = if is_bare {
                                             Some(0.0)
@@ -246,11 +321,14 @@ impl Map {
         }
         painted
     }
-    /// A resource scan to keep on the PC: "RAW1", then for each cell its level byte (as `cells`)
-    /// and the colours seen (r, g, b; 0 where not seen), so it can be read again later.
+    /// A resource scan to keep on the PC: "RAW2", width and height (u16 LE), then for each cell its
+    /// level byte (as `cells`) and the colours seen (r, g, b; 0 where not seen), so it can be read
+    /// again later against a better planet map.
     pub fn raw_bytes(&self) -> Vec<u8> {
-        let n = GRID_W * GRID_H;
-        let mut out = b"RAW1".to_vec();
+        let n = self.w * self.h;
+        let mut out = b"RAW2".to_vec();
+        out.extend_from_slice(&(self.w as u16).to_le_bytes());
+        out.extend_from_slice(&(self.h as u16).to_le_bytes());
         out.extend(self.cells());
         for i in 0..n {
             for c in 0..3 {
@@ -259,9 +337,29 @@ impl Map {
         }
         out
     }
-    /// The cells still to see (for the green targets).
+    /// The cells still to see (for the green targets): not seen, and not a gap between pixels.
     pub fn missing(&self) -> Vec<bool> {
-        self.seen.iter().map(|&s| !s).collect()
+        (0..self.w * self.h).map(|i| !self.seen[i] && !self.gap(i / self.w, i % self.w)).collect()
+    }
+    /// The levels on SeAT's 1° grid: each 1° cell the mean of the seen cells in it (0 where none).
+    pub fn cells_1deg(&self) -> Vec<u8> {
+        if (self.w, self.h) == (GRID_W, GRID_H) {
+            return self.cells();
+        }
+        let mut sum = vec![(0f32, 0u32); GRID_W * GRID_H];
+        for row in 0..self.h {
+            let gr = (row * GRID_H / self.h).min(GRID_H - 1);
+            for col in 0..self.w {
+                let i = row * self.w + col;
+                if self.seen[i] {
+                    let gc = (col * GRID_W / self.w).min(GRID_W - 1);
+                    let s = &mut sum[gr * GRID_W + gc];
+                    s.0 += self.value[i];
+                    s.1 += 1;
+                }
+            }
+        }
+        sum.iter().map(|&(v, n)| if n > 0 { 1 + ((v / n as f32).clamp(0.0, 1.0) * 250.0).round() as u8 } else { 0 }).collect()
     }
     /// EVE's resource fields are smooth: a lone cell far from the cells round it takes their median.
     pub fn despeckle(&mut self, limit: f32) {
@@ -270,20 +368,20 @@ impl Map {
         }
         for _ in 0..2 {
             let mut fix = Vec::new();
-            for row in 0..GRID_H {
-                for col in 0..GRID_W {
-                    let i = row * GRID_W + col;
+            for row in 0..self.h {
+                for col in 0..self.w {
+                    let i = row * self.w + col;
                     if !self.seen[i] {
                         continue;
                     }
                     let mut near = Vec::with_capacity(25);
                     for dr in -2i64..=2 {
                         let r = row as i64 + dr;
-                        if r < 0 || r >= GRID_H as i64 {
+                        if r < 0 || r >= self.h as i64 {
                             continue;
                         }
                         for dc in -2i64..=2 {
-                            let j = r as usize * GRID_W + (col as i64 + dc).rem_euclid(GRID_W as i64) as usize;
+                            let j = r as usize * self.w + (col as i64 + dc).rem_euclid(self.w as i64) as usize;
                             if self.seen[j] {
                                 near.push(self.value[j]);
                             }
@@ -309,12 +407,12 @@ impl Map {
     }
     /// SeAT's bytes: 0 = not seen, 1 … 251 = level 0 … 1 (resource maps).
     pub fn cells(&self) -> Vec<u8> {
-        (0..GRID_W * GRID_H).map(|i| if self.seen[i] { 1 + (self.value[i].clamp(0.0, 1.0) * 250.0).round() as u8 } else { 0 }).collect()
+        (0..self.w * self.h).map(|i| if self.seen[i] { 1 + (self.value[i].clamp(0.0, 1.0) * 250.0).round() as u8 } else { 0 }).collect()
     }
     /// Bare map bytes: r, g, b a cell (0, 0, 0 = not seen).
     pub fn bare_bytes(&self) -> Vec<u8> {
-        let mut out = vec![0u8; GRID_W * GRID_H * 3];
-        for i in 0..GRID_W * GRID_H {
+        let mut out = vec![0u8; self.w * self.h * 3];
+        for i in 0..self.w * self.h {
             if self.seen[i] {
                 for c in 0..3 {
                     out[i * 3 + c] = self.value[i * 3 + c].round().clamp(if c == 0 { 1.0 } else { 0.0 }, 255.0) as u8;
@@ -324,11 +422,15 @@ impl Map {
         out
     }
     pub fn from_bare_bytes(bytes: &[u8]) -> Option<Map> {
-        if bytes.len() != GRID_W * GRID_H * 3 {
+        let (w, h) = if bytes.len() == GRID_W * GRID_H * 3 {
+            (GRID_W, GRID_H)
+        } else if bytes.len() == RES_W * RES_H * 3 {
+            (RES_W, RES_H)
+        } else {
             return None;
-        }
-        let mut m = Map::new(true);
-        for i in 0..GRID_W * GRID_H {
+        };
+        let mut m = Map::with_size(true, w, h);
+        for i in 0..w * h {
             if bytes[i * 3] == 0 && bytes[i * 3 + 1] == 0 && bytes[i * 3 + 2] == 0 {
                 continue;
             }
@@ -343,14 +445,15 @@ impl Map {
     /// Where the biggest unseen part is, in words relative to the picture now.
     pub fn missing_hint(&self, q: &M3, mirrored: bool) -> Option<String> {
         let (mut sx, mut sy, mut sz, mut n) = (0.0, 0.0, 0.0, 0.0);
-        for row in (0..GRID_H).step_by(3) {
-            let lat = (row as f64 + 0.5) / GRID_H as f64 * PI;
+        let k = (self.h / 60).max(1);
+        for row in (0..self.h).step_by(k) {
+            let lat = (row as f64 + 0.5) / self.h as f64 * PI;
             let w = lat.sin();
-            for col in (0..GRID_W).step_by(3) {
-                if self.seen[row * GRID_W + col] {
+            for col in (0..self.w).step_by(k) {
+                if self.seen[row * self.w + col] {
                     continue;
                 }
-                let v = apply(q, &planet_vector(lat, (col as f64 + 0.5) / GRID_W as f64 * 2.0 * PI, mirrored));
+                let v = apply(q, &planet_vector(lat, (col as f64 + 0.5) / self.w as f64 * 2.0 * PI, mirrored));
                 sx += v[0] * w;
                 sy += v[1] * w;
                 sz += v[2] * w;
@@ -398,7 +501,7 @@ pub fn looks_like(pic: &Pic, disc: &Disc, q: &M3, mirrored: bool, bare: &Map) ->
                 if let Some(v) = to_sphere(x, y, disc) {
                     if facing_of(&v, disc) >= 0.6 {
                         let (lat, lon) = lat_lon(&apply(&qt, &v), mirrored);
-                        let cell = ((lat / PI * GRID_H as f64) as usize).min(GRID_H - 1) * GRID_W + ((lon / (2.0 * PI) * GRID_W as f64) as usize).min(GRID_W - 1);
+                        let cell = ((lat / PI * bare.h as f64) as usize).min(bare.h - 1) * bare.w + ((lon / (2.0 * PI) * bare.w as f64) as usize).min(bare.w - 1);
                         if let Some((r, g, b)) = bare.bare_rgb(cell) {
                             let a = pic.lum(x as usize, y as usize) as f64;
                             let m = (0.3 * r + 0.59 * g + 0.11 * b) as f64;
@@ -510,9 +613,49 @@ mod tests {
             }
         }
         let raw = m.raw_bytes();
-        assert_eq!(raw.len(), 4 + GRID_W * GRID_H * 4);
+        assert_eq!(raw.len(), 8 + GRID_W * GRID_H * 4);
         // Painting the same picture again changes nothing (each cell keeps its most face-on look).
         assert_eq!(m.paint(&Pic { w, h, bgra: &px }, &disc, &pose_q(0.4, 0.3), false, 1, Some(&bare)), 0);
+    }
+
+    /// The quick unmixing gives the same level as trying every step, on real-looking colours:
+    /// planet colours with the band laid over them at every level, plus a little noise.
+    #[test]
+    fn quick_unmix_agrees() {
+        let (mut n, mut off) = (0, 0);
+        let mut seed = 12345u32;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        for _ in 0..20_000 {
+            let bare = [20.0 + 180.0 * rnd(), 20.0 + 180.0 * rnd(), 20.0 + 180.0 * rnd()];
+            let c = band_fine()[(rnd() * (STEPS - 1) as f32) as usize];
+            let px: Vec<u8> = (0..3).map(|k| ((1.0 - OVERLAY) * bare[k] + c[k] + 8.0 * (rnd() - 0.5)).clamp(0.0, 255.0) as u8).collect();
+            let (a, b) = (unmix(px[0], px[1], px[2], bare[0], bare[1], bare[2]), unmix_every_step(px[0], px[1], px[2], bare[0], bare[1], bare[2]));
+            n += 1;
+            if a != b {
+                off += 1;
+            }
+        }
+        assert!(off * 200 <= n, "{off} of {n} differ");
+    }
+
+    /// A resource on the 0.5° grid: SeAT's 1° cells are the mean of the four in each.
+    #[test]
+    fn half_degree_cells_average_to_one_degree() {
+        let mut m = Map::with_size(false, RES_W, RES_H);
+        for i in 0..RES_W * RES_H {
+            m.seen[i] = true;
+            m.value[i] = if (i % RES_W) % 2 == 0 { 0.2 } else { 0.6 };
+        }
+        let c = m.cells_1deg();
+        assert_eq!(c.len(), GRID_W * GRID_H);
+        assert!(c.iter().all(|&v| v == 1 + (0.4f32 * 250.0).round() as u8), "{:?}", &c[..4]);
+        assert!((m.coverage() - 1.0).abs() < 1e-9);
+        // A lone unseen cell among seen ones is a gap, not a target.
+        m.seen[100 * RES_W + 50] = false;
+        assert!((m.coverage() - 1.0).abs() < 1e-9 && !m.missing()[100 * RES_W + 50]);
     }
 
     #[test]
