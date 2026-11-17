@@ -15,7 +15,7 @@
 const SOUND = { masterVolume: 0.5, worldVolume: 0.5, uiGain: 0.5, evevoiceGain: 0.5, eveampGain: 0, useCombatMusic: 0, suppressTurret: 1 };
 const LOWEST = { antiAliasing: 0, postProcessingQuality: 0, shaderQuality: 1, textureQuality: 2, lodQuality: 1, shadowQuality: 0, aoQuality: 0, volumetricQuality: 0, reflectionQuality: 0, charTextureQuality: 2, dofEnabled: 0, charClothSimulation: 0, frameGeneration: false };
 
-const AUDIO_HAND = "Audio → Advanced Audio Settings on: Jump Activation full; Ship Ambience 0; Turret Volume 0; Atmosphere, Secondary Interfaces, Ship Effects, UI Click and Warning Sounds at half.";
+const AUDIO_HAND = "Audio → Advanced Audio Settings on: Jump Activation full; Ship Effects 25%; Ship Ambience 0; Turret Volume 0; Atmosphere, Secondary Interfaces, UI Click and Warning Sounds at half.";
 const effects = (on) => {
   const all = ["Turrets & Launchers", "Effects", "Missile Effects", "Explosions", "Drone Models", "Trails", "GPU Particles", "Asteroid Environments", "Inspace Skinning Effect", "Depth Of Field"];
   const ticked = all.filter(n => on.includes(n)), unticked = all.filter(n => !on.includes(n));
