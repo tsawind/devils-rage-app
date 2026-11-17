@@ -1033,6 +1033,72 @@ mod tests {
         assert_eq!(picked_row(&Pic { w, h, bgra: &px }, &spot), None);
     }
 
+    /// EVE's colour range slider as on Tsa's pictures, for a list at x 140, y0 60, y5 186: a ruler
+    /// line, the colour band between the handles (dark at the low end, a white block at the high
+    /// end, far brighter than the handles), the two see-through triangle handles, a few stars.
+    fn slider_picture(w: usize, h: usize, sky: impl Fn(usize, usize) -> u8, handles: Option<(f64, f64)>) -> Vec<u8> {
+        let (t0, t1) = (140.0 - 1.93 * 25.2, 140.0 + 6.19 * 25.2);
+        let mut px = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let mut c = [sky(x, y) as f32 * 0.6 + 12.0; 3];
+                if (x * 7 + y * 13) % 211 == 0 {
+                    c = [170.0; 3]; // a star
+                }
+                if y == 27 && (83..306).contains(&x) {
+                    c = [150.0; 3]; // the ruler
+                }
+                if let Some((lo, hi)) = handles {
+                    let (a, b) = ((t0 + lo * (t1 - t0)).round() as usize, (t0 + hi * (t1 - t0)).round() as usize);
+                    let (i, j) = (x as i64, y as i64 - 37);
+                    // The band: between the handles, rows 37 … 42.
+                    if (0..6).contains(&j) && x > a && x + 1 < b {
+                        let t = (x - a) as f32 / (b - a) as f32;
+                        let band = if t > 0.94 { [200.0; 3] } else { [20.0 + 180.0 * t, 14.0 + 90.0 * (1.0 - (2.0 * t - 1.0).abs()), 25.0] };
+                        for k in 0..3 {
+                            c[k] = 0.3 * c[k] + band[k];
+                        }
+                    }
+                    // The handles: 7 × 7, rows 37 … 43, the left one's upright side at a − 1, the
+                    // right one's at b.
+                    let lit = (0..7).contains(&j) && ((i >= a as i64 - 7 && i < a as i64 && (i - (a as i64 - 7)) + j >= 6) || (i >= b as i64 && i < b as i64 + 7 && j >= i - b as i64));
+                    if lit {
+                        for v in c.iter_mut() {
+                            *v += 0.5 * (255.0 - *v);
+                        }
+                    }
+                }
+                let k = (y * w + x) * 4;
+                px[k..k + 4].copy_from_slice(&[c[2].clamp(0.0, 255.0) as u8, c[1].clamp(0.0, 255.0) as u8, c[0].clamp(0.0, 255.0) as u8, 255]);
+            }
+        }
+        px
+    }
+
+    /// The slider's handles are read where they are: right out reads (0, 1) exactly, pulled in
+    /// reads how far, on a dark sky and with a bright nebula behind the panel; no handles, none.
+    #[test]
+    fn slider_handles_are_read() {
+        let (w, h) = (420usize, 260usize);
+        let spot = ListSpot { x: 140.0, y0: 60.0, y5: 186.0 };
+        let dark = |_: usize, _: usize| 10u8;
+        let nebula = |x: usize, y: usize| (120.0 + 80.0 * ((x as f64 / 60.0).sin() * (y as f64 / 45.0).cos())) as u8;
+        for (name, sky) in [("dark sky", &dark as &dyn Fn(usize, usize) -> u8), ("nebula", &nebula)] {
+            let px = slider_picture(w, h, sky, Some((0.0, 1.0)));
+            assert_eq!(slider_handles(&Pic { w, h, bgra: &px }, &spot), Some((0.0, 1.0)), "right out, {name}");
+            for want in [(0.25, 0.8), (0.0, 0.5), (0.4, 1.0), (0.3, 0.45)] {
+                let px = slider_picture(w, h, sky, Some(want));
+                let got = slider_handles(&Pic { w, h, bgra: &px }, &spot).unwrap_or((-1.0, -1.0));
+                assert!((got.0 - want.0).abs() < 0.012 && (got.1 - want.1).abs() < 0.012, "{want:?} on {name}: read {got:?}");
+                assert!(got != (0.0, 1.0));
+            }
+            let px = slider_picture(w, h, sky, None);
+            assert_eq!(slider_handles(&Pic { w, h, bgra: &px }, &spot), None, "no handles, {name}");
+        }
+        // No room for a list: none.
+        assert_eq!(slider_handles(&Pic { w: 40, h: 40, bgra: &vec![0u8; 40 * 40 * 4] }, &ListSpot { x: 10.0, y0: 5.0, y5: 30.0 }), None);
+    }
+
     /// A bright patch of nebula behind the list (brightest round "No filter" and Heavy Metals)
     /// doesn't make those rows read as picked: the picked row is still the one with the box.
     #[test]
