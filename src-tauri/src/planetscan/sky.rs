@@ -538,6 +538,36 @@ impl Level {
     }
 }
 
+impl Level {
+    /// The patches not recorded yet (heights that can't be seen past a gas giant's rings left
+    /// out), for the green targets: on a 360 × 180 grid, missing when a quarter of the level's
+    /// cells sampled in it aren't recorded.
+    pub fn targets(&self, heights: Option<&[bool; 181]>, max: usize) -> Vec<super::base::Target> {
+        let (gw, gh) = (360usize, 180usize);
+        let (sx, sy) = ((self.w / gw).max(1), (self.h / gh).max(1));
+        let mut missing = vec![false; gw * gh];
+        for gr in 0..gh {
+            let row_mid = gr * sy + sy / 2;
+            if heights.is_some_and(|ok| !ok[height_index(row_mid.min(self.h - 1), self.h)]) {
+                continue;
+            }
+            for gc in 0..gw {
+                let (mut n, mut gone) = (0, 0);
+                for y in (gr * sy..((gr + 1) * sy).min(self.h)).step_by(2usize.min(sy)) {
+                    for x in (gc * sx..((gc + 1) * sx).min(self.w)).step_by(2usize.min(sx)) {
+                        n += 1;
+                        if self.n[y * self.w + x] == 0 {
+                            gone += 1;
+                        }
+                    }
+                }
+                missing[gr * gw + gc] = n > 0 && gone * 4 >= n;
+            }
+        }
+        super::base::patches(gw, gh, &missing, max)
+    }
+}
+
 /// A map row's height above the planet's equator, as an index into `rings::reachable` (0 … 180).
 #[inline]
 pub fn height_index(row: usize, h: usize) -> usize {

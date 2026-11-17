@@ -91,6 +91,13 @@
   #log div { padding: 2px 0; border-top: 1px solid #202026; }
   #log div:first-child { border-top: 0; }
   #log .t { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 6px; }
+  /* the live progress card (over the map, not the picture) */
+  #card { position: absolute; top: 40px; left: 50%; transform: translateX(-50%); max-width: 78%; z-index: 5; background: rgba(14,22,8,.93); border: 1.5px solid #4e7f12; border-radius: 10px; padding: 9px 14px 10px; box-shadow: 0 6px 24px #000; }
+  #card .t { font-size: 15px; font-weight: 600; color: var(--ok); margin-bottom: 3px; }
+  #card .x { font-size: 13px; line-height: 1.4; }
+  #card .nums { font-size: 13px; color: #e8e8ea; font-variant-numeric: tabular-nums; }
+  #card .hide { position: absolute; right: 9px; top: 7px; font-size: 11px; color: var(--muted); cursor: pointer; text-decoration: underline; }
+  #card.done { border-color: var(--ok); }
   /* the done pop-up */
   #pop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 10; }
   #pop .box { width: 480px; border: 2px solid #4e7f12; background: #10180a; border-radius: 12px; padding: 18px 20px; box-shadow: 0 10px 40px #000; }
@@ -152,7 +159,7 @@
       <h3>Save for the corp <span class="state" id="s5"></span></h3>
       <label class="tog"><input type="checkbox" id="autosave" checked> Autosave at 99 % (the planet map and its sky)</label>
       <div class="row"><button class="btn" id="saveMaps" title="Save this planet's sky and map for the corp now, even under 99 %">Save now</button></div>
-      <div class="row" style="align-items: baseline"><button class="btn" id="recordBtn" title="Keep EVE's pictures (5 a second, up to 3 minutes) with what the app made of them, in the app's recordings folder, for fixing things. Nothing leaves the PC.">Record for testing</button><span class="small muted" id="recSaid"></span></div>
+      <div class="row" style="align-items: baseline"><button class="btn" id="recordBtn" title="Keep EVE's pictures (5 a second, in 30 s files, until you stop it, at most an hour) with everything the app showed, in the app's recordings folder, for fixing things. Nothing leaves the PC.">Record for testing</button><span class="small muted" id="recSaid"></span></div>
     </div></div>
   </div>
 
@@ -161,6 +168,7 @@
     <div class="view" id="mapBox"><canvas id="map"></canvas>
       <div class="tabs"><button class="btn" id="tabPlanet">Planet map</button><button class="btn" id="tabSky">Sky map</button></div>
       <div class="zoomsaid" id="mapZoom"></div>
+      <div id="card" hidden><span class="hide" id="cardHide">Hide</span><div class="t" id="cardTitle"></div><div class="nums" id="cardNums"></div><div class="x" id="cardText"></div></div>
     </div>
     <div id="panel">
       <div class="card now"><h2>Do now</h2><div class="say" id="say">Starting…</div>
@@ -421,7 +429,7 @@
   // ---------- the map: this planet's map, or its sky ----------
   const mapCanvas = $("map"), mctx = mapCanvas.getContext("2d");
   const zMap = zoomable(mapCanvas, () => drawMap());
-  let mapKind = settings.mapKind === "sky" ? "sky" : "planet", mapImg = null, mapVersion = -1, mapAt = 0, mapBusy = false;
+  let mapKind = settings.mapKind === "sky" ? "sky" : "planet", mapImg = null, mapVersion = -1, mapAt = 0, mapBusy = false, mapDrawnAt = 0;
   function setMapKind(kind) {
     mapKind = kind; settings.mapKind = kind; keep();
     $("tabPlanet").classList.toggle("on", kind === "planet"); $("tabSky").classList.toggle("on", kind === "sky");
@@ -467,14 +475,55 @@
     mctx.strokeStyle = "rgba(255,255,255,.08)"; mctx.lineWidth = 1;
     for (let lon = 0; lon <= 360; lon += 30) { const x = f.x + (lon / 360) * iw * f.k; mctx.beginPath(); mctx.moveTo(x, f.y); mctx.lineTo(x, f.y + ih * f.k); mctx.stroke(); }
     for (let lat = 0; lat <= 180; lat += 30) { const y = f.y + (lat / 180) * ih * f.k; mctx.beginPath(); mctx.moveTo(f.x, y); mctx.lineTo(f.x + iw * f.k, y); mctx.stroke(); }
+    mapDrawnAt = Date.now();
     // Where the camera looks: the planet's middle on the planet map, the view's middle on the sky.
     const s = status;
+    // A circle of angular radius r (degrees) at (lat from the north pole, lon) on this map: wider
+    // the nearer a pole it is.
+    const RAD = Math.PI / 180;
+    const circle = (lat, lon, r) => {
+      const x = f.x + (lon / 360) * iw * f.k, y = f.y + (lat / 180) * ih * f.k;
+      const ry = (r / 180) * ih * f.k, rx = (Math.min(180, r / Math.max(0.12, Math.sin(lat * RAD))) / 360) * iw * f.k;
+      mctx.beginPath(); mctx.ellipse(x, y, rx, ry, 0, 0, 2 * Math.PI);
+    };
+    let cross = null;
     if (s && s.pose && s.pose.q) {
       const Q = s.pose.q;
       const t = mapKind === "planet" ? [0, 0, 1] : [0, 0, -1];
       const v = [Q[0] * t[0] + Q[3] * t[1] + Q[6] * t[2], Q[1] * t[0] + Q[4] * t[1] + Q[7] * t[2], Q[2] * t[0] + Q[5] * t[1] + Q[8] * t[2]];
       const lat = Math.acos(Math.max(-1, Math.min(1, v[2]))); let lon = Math.atan2(v[1], v[0]); if (lon < 0) lon += 2 * Math.PI;
-      const x = f.x + (lon / (2 * Math.PI)) * iw * f.k, y = f.y + (lat / Math.PI) * ih * f.k;
+      cross = { lat: lat / RAD, lon: lon / RAD, v };
+    }
+    // The green targets: patches still to see. The nearest one to the cross is the brightest.
+    const targets = s ? (mapKind === "planet" ? (s.base_map && s.base_map.targets) : (s.sky && s.sky.targets)) || [] : [];
+    if (targets.length) {
+      const apart = (t) => {
+        if (!cross) return 0;
+        const a = t[0] * RAD, b = t[1] * RAD;
+        const u = [Math.sin(a) * Math.cos(b), Math.sin(a) * Math.sin(b), Math.cos(a)];
+        return Math.acos(Math.max(-1, Math.min(1, u[0] * cross.v[0] + u[1] * cross.v[1] + u[2] * cross.v[2])));
+      };
+      const near = targets.reduce((m, t, i) => (apart(t) < apart(targets[m]) ? i : m), 0);
+      targets.forEach((t, i) => {
+        circle(t[0], t[1], Math.max(1.2, t[2]) + 1);
+        mctx.lineWidth = (i === near ? 3 : 1.5) * dpr;
+        mctx.strokeStyle = i === near ? "rgba(140,255,90,.95)" : "rgba(110,200,70,.55)";
+        mctx.stroke();
+        if (i === near) { mctx.fillStyle = "rgba(120,255,80,.10)"; mctx.fill(); }
+      });
+    }
+    if (cross) {
+      // On the sky: the part of the sky in view round the planet (past its glow, to the window's
+      // edge). Bring a green circle into this ring.
+      if (mapKind === "sky" && s.disc) {
+        const D = s.disc.D || 4, inner = Math.asin(Math.min(1, 1.25 / D)) / RAD;
+        const outer = Math.atan((s.size ? s.size[1] / 2 : 512) / (s.lens || 1124)) / RAD;
+        mctx.setLineDash([4 * dpr, 4 * dpr]); mctx.strokeStyle = "rgba(255,120,100,.45)"; mctx.lineWidth = 1 * dpr;
+        circle(cross.lat, cross.lon, inner); mctx.stroke();
+        circle(cross.lat, cross.lon, outer); mctx.stroke();
+        mctx.setLineDash([]);
+      }
+      const x = f.x + (cross.lon / 360) * iw * f.k, y = f.y + (cross.lat / 180) * ih * f.k;
       mctx.strokeStyle = s.pose.placed ? "#ff5a4a" : "#f0c040"; mctx.lineWidth = 2 * dpr;
       mctx.beginPath(); mctx.moveTo(x - 9 * dpr, y); mctx.lineTo(x + 9 * dpr, y); mctx.moveTo(x, y - 9 * dpr); mctx.lineTo(x, y + 9 * dpr); mctx.stroke();
     }
@@ -504,10 +553,9 @@
         // SeAT's own list after a moment (who saved what, when).
         clearTimeout(reloadSoon); reloadSoon = setTimeout(loadPlanets, 4000);
       }
-      if (ev.kind === "base-done") {
-        const next = nextPlanet();
-        popup(ev.saving ? "99 %: saved for the corp" : "Planet map at 99 %", ev.text,
-          (ev.saving ? "" : "Autosave is off: press Save now to give it to the corp. ") + "Keep turning to fill the last spots and the sky; the top right says where.");
+      if (ev.kind === "base-done" && planet) {
+        // The live card over the map: it keeps counting and closes by itself once both are done.
+        card.for = planet.planet_id; card.hidden = false; card.doneAt = 0; card.saving = !!ev.saving;
       }
       if (ev.kind === "error" && ev.map) popup("Not saved", ev.text, "Press Save now to try again.", true);
     }
@@ -566,7 +614,7 @@
     const rec = s.recording;
     $("recordBtn").textContent = rec ? "Stop recording" : "Record for testing";
     $("recordBtn").classList.toggle("on", !!rec);
-    $("recSaid").textContent = rec ? `● ${Math.floor(rec.secs / 60)}:${String(rec.secs % 60).padStart(2, "0")} · ${rec.frames} pictures (stops at 3:00)` : "";
+    $("recSaid").textContent = rec ? `● ${Math.floor(rec.secs / 60)}:${String(rec.secs % 60).padStart(2, "0")} · ${rec.frames} pictures` : "";
     $("recSaid").className = "small " + (rec ? "bad" : "muted");
     // Do now.
     if (!pose && (own || (bor && bor.loaded))) lookingSince = lookingSince || Date.now(); else lookingSince = null;
@@ -580,6 +628,35 @@
     badge.textContent = !s.started ? "Waiting for Start" : rg && rg.phase ? `Measuring the rings · ${pct(rg.progress)}` : pose ? (pose.placed ? (pose.by_planet ? "On the planet map (too little sky past the rings)" : `On the sky · stars ${pct(pose.stars)}`) : "Lost the sky") : s.boot && s.boot.working ? "Working out which way is up…" : s.edge ? "Not on the sky yet" : "Edge not found yet";
     badge.className = "badge " + (s.started && !(rg && rg.phase) && pose && pose.placed ? "ok" : "warn");
     refreshMap(false);
+    if (Date.now() - mapDrawnAt > 100) drawMap();
+    drawCard(s);
+    const said = say + (also.length ? " | " + also.join(" | ") : "");
+    if (said !== lastSaid) { lastSaid = said; invoke("planetscan_say", { text: said }).catch(() => {}); }
+  }
+  // The live card: shown at 99 % (or when a planet's map is past it), counting the map and the
+  // sky; once both are at 99.9 % it says which planet is next and closes by itself after 10 s.
+  const card = { for: null, hidden: false, doneAt: 0, saving: true, hiddenFor: new Set() };
+  let lastSaid = "";
+  function drawCard(s) {
+    const box = $("card");
+    if (!planet || !s.planet || s.planet.id !== planet.planet_id) { box.hidden = true; return; }
+    const base = s.base_map || {}, own = s.sky && s.sky.own;
+    const map = base.coverage || 0, sky = own ? own.done || 0 : 0;
+    const show = (card.for === planet.planet_id && !card.hidden) || (map >= 0.99 && !card.hiddenFor.has(planet.planet_id));
+    if (!show) { box.hidden = true; return; }
+    const complete = map >= 0.999 && sky >= 0.999;
+    if (complete && !card.doneAt) card.doneAt = Date.now();
+    if (!complete) card.doneAt = 0;
+    if (complete && Date.now() - card.doneAt > 10000) { card.hiddenFor.add(planet.planet_id); card.hidden = true; box.hidden = true; return; }
+    const next = nextPlanet();
+    const rest = (m) => (m ? ` (the rest is ${m.split(":")[0]})` : "");
+    $("cardTitle").textContent = complete ? `Done: ${planet.name} is complete` : card.saving || s.autosave ? "99 %: saved for the corp" : "Planet map at 99 %";
+    $("cardNums").textContent = `Planet map ${pct(map)} · Sky ${pct(sky)}`;
+    $("cardText").textContent = complete
+      ? (next ? `Do ${next.name} now: open it in EVE and pick it on the left.` : "Every planet here is mapped.")
+      : `Keep turning to 99.9 %: bring the red cross onto the green circles${map < 0.999 ? rest(base.missing) : rest(s.sky && s.sky.missing)}.`;
+    box.classList.toggle("done", complete);
+    box.hidden = false;
   }
   function tips(s) {
     const also = [];
@@ -675,7 +752,7 @@
   $("recordBtn").addEventListener("click", () => {
     const on = !(status && status.recording);
     invoke("planetscan_record", { on })
-      .then((path) => { if (on && path) log(`Recording to ${path} (5 pictures a second, up to 3 minutes).`, "warn"); })
+      .then((path) => { if (on && path) log(`Recording (5 pictures a second, in 30 s files, until you stop it, up to an hour) to ${path.replace(/[\\/][^\\/]*$/, "")}`, "warn"); })
       .catch((e) => log("Couldn't record: " + e, "bad"));
   });
   $("clickEdge").addEventListener("click", () => setClick(clickMode === "edge" ? null : "edge", "Click once anywhere on the planet's edge"));
@@ -705,6 +782,7 @@
   $("home").addEventListener("click", () => { alive = false; invoke("planetscan_stop"); location.href = "index.html#pi"; });
   window.addEventListener("beforeunload", () => invoke("planetscan_stop"));
   $("popOk").addEventListener("click", () => { $("pop").style.display = "none"; });
+  $("cardHide").addEventListener("click", () => { if (planet) card.hiddenFor.add(planet.planet_id); card.hidden = true; $("card").hidden = true; });
 
   // ---------- the loop: picture + status in one call ----------
   async function pollLoop() {

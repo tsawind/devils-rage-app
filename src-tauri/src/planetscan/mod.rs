@@ -254,6 +254,12 @@ struct Session {
     find_buf: ViewBuffers,
     /// Recording the pictures for testing.
     recorder: Option<Recorder>,
+    /// The green targets: patches still to see on the planet map and the sky (from 95 %).
+    base_targets: Vec<base::Target>,
+    sky_targets: Vec<base::Target>,
+    targets_at: Option<Instant>,
+    /// What the page's Do now box says (kept with each recorded picture).
+    page_say: String,
 }
 
 /// Measuring a gas giant's rings from over its poles: the top first, then the bottom (with what
@@ -349,6 +355,10 @@ impl Default for Session {
             ui_trusted: None,
             find_buf: ViewBuffers::default(),
             recorder: None,
+            base_targets: Vec::new(),
+            sky_targets: Vec::new(),
+            targets_at: None,
+            page_say: String::new(),
         }
     }
 }
@@ -486,27 +496,23 @@ impl Session {
         self.boot_note = None;
         self.lost_since = None;
     }
-    /// What the recording keeps with each picture.
-    fn record(&mut self, f: &Arc<Frame>) {
+    /// What the recording keeps with each picture (5 a second): the page's whole status (the
+    /// log, both maps' %, the rings, the frame rates…) and what Do now says, so a recording shows
+    /// everything the pilot saw without screenshots. At most an hour.
+    fn record(&mut self, f: &Arc<Frame>, engine: &Inner) {
         let (expired, due, ms) = match self.recorder.as_ref() {
             None => return,
-            Some(r) => (r.started.elapsed() > Duration::from_secs(180), r.last.is_none_or(|t| t.elapsed() >= Duration::from_millis(200)), r.started.elapsed().as_millis() as u64),
+            Some(r) => (r.started.elapsed() > Duration::from_secs(3600), r.last.is_none_or(|t| t.elapsed() >= Duration::from_millis(200)), r.started.elapsed().as_millis() as u64),
         };
         if expired {
             self.recorder = None;
-            self.event(json!({ "kind": "warn", "text": "Recording stopped after 3 minutes." }));
+            self.event(json!({ "kind": "warn", "text": "Recording stopped after an hour." }));
             return;
         }
         if !due {
             return;
         }
-        let note = json!({
-            "ms": ms, "w": f.w, "h": f.h, "planet": self.planet.as_ref().map(|p| json!({ "id": p.id, "name": p.name, "type": p.kind })),
-            "started": self.started, "edge": self.edge_r, "rim_ok": self.rim_ok.0, "lens": self.lens(),
-            "pose": self.pose.as_ref().map(|p| json!({ "yaw": p.yaw / DEG, "pitch": p.pitch / DEG, "placed": p.placed, "by_planet": p.by_planet, "sky_of": p.sky_of })),
-            "rings": self.ring_cut.bands(), "ring_clean": self.ring_clean, "picked": self.picked,
-        })
-        .to_string();
+        let note = json!({ "ms": ms, "frame": f.n, "w": f.w, "h": f.h, "say": self.page_say, "status": self.status(engine) }).to_string();
         let Some(rec) = self.recorder.as_mut() else { return };
         rec.last = Some(Instant::now());
         rec.frames += 1;
@@ -589,7 +595,6 @@ impl Session {
         }
         self.frames += 1;
         self.proc.tick();
-        self.record(f);
         // Nothing until Start (pressed with EVE zoomed all the way out on this planet).
         if !self.started || self.planet.is_none() {
             self.step_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -1099,6 +1104,25 @@ impl Session {
             // To the corp at 99 %, on Save now, or when switching planets: not every few minutes (6 MB).
             self.base_dirty = (false, self.base_dirty.1, self.base_dirty.2, Instant::now());
         }
+        // ---- the green targets: what's still to see, once a map is at 95 % (every 2 s) ----
+        if self.targets_at.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+            self.targets_at = Some(Instant::now());
+            self.base_targets = match self.base.as_ref() {
+                Some(b) if self.base_cov.0 >= 0.95 && self.base_cov.0 < 0.9995 => b.targets(6),
+                _ => Vec::new(),
+            };
+            let reach = self.reach.filter(|_| gas);
+            let done = self.sky_done();
+            self.sky_targets = match self.planet_id().and_then(|pid| self.skies.get(&pid)) {
+                Some(sk) if (0.95..0.999).contains(&done) => {
+                    // The least-recorded level is the one still to fill.
+                    let k = (0..3).min_by(|&a, &b| self.sky_cov.0[a].total_cmp(&self.sky_cov.0[b])).unwrap_or(sky::FINE);
+                    sk.levels[k].targets(reach.as_ref(), 6)
+                }
+                _ => Vec::new(),
+            };
+        }
+
         // ---- a gas giant's rings: what turning sideways shows adds to the cut (never takes away:
         // what was recorded without a ring stays right). A few looks a second. ----
         if gas && self.ring_clean {
@@ -1311,6 +1335,7 @@ impl Session {
                 "compare": self.compare_last.map(|(tilt, shift, b)| json!({ "tilt": tilt, "shift": shift, "with": self.planet_name(b) })),
                 "own_each": self.own_sky_each,
                 "missing": sky_missing,
+                "targets": self.sky_targets.iter().map(|t| [t.lat, t.lon, t.radius]).collect::<Vec<_>>(),
                 "reach": reach.map(|r| rings::reachable_share(&r)),
                 "recording": self.last_paint.is_some_and(|(_, _, t)| t.elapsed() < Duration::from_millis(800)),
                 "unsent": self.planet_id().and_then(|id| self.sky_dirty.get(&id)).is_some_and(|d| d.1),
@@ -1328,6 +1353,7 @@ impl Session {
                 "coverage": self.base_cov.0, "on": self.base_on, "done": self.base_done, "full": self.base_full, "paused": self.base_paused,
                 "version": self.base.as_ref().map(|b| b.version).unwrap_or(0),
                 "missing": base_missing,
+                "targets": self.base_targets.iter().map(|t| [t.lat, t.lon, t.radius]).collect::<Vec<_>>(),
             },
             "boot": boot,
             "new_sky": self.new_sky,
@@ -1449,6 +1475,7 @@ fn process_loop(inner: Arc<Inner>, gen: u64) {
             if let Some(f) = frame {
                 last = f.n;
                 s.step(&f, &mut buf, &mut jobs);
+                s.record(&f, &inner);
             }
             if status_at.elapsed() > Duration::from_millis(60) {
                 status_at = Instant::now();
@@ -1870,35 +1897,59 @@ pub fn planetscan_record(app: AppHandle, engine: tauri::State<'_, Engine>, on: b
     Ok(Some(path.display().to_string()))
 }
 
-/// The recorder: "REC2", then for each picture its note and its JPEG, each as a u32 (LE) length
-/// then the bytes. Ends when the recording stops (or at 700 MB).
+/// The recorder: files of 30 s each (small enough to fetch quickly), named
+/// `scan2-<start>-<part>.bin`: "REC2", then for each picture its note and its JPEG, each as a u32
+/// (LE) length then the bytes. Ends when the recording stops.
 fn record_loop(inner: Arc<Inner>, rx: std::sync::mpsc::Receiver<(Arc<Frame>, String)>, path: PathBuf) {
     use std::io::Write;
-    let Ok(file) = std::fs::File::create(&path) else {
-        inner.state.lock().unwrap().event(json!({ "kind": "error", "text": format!("Couldn't start a recording at {}", path.display()) }));
-        return;
-    };
-    let mut out = std::io::BufWriter::new(file);
-    let _ = out.write_all(b"REC2");
-    let (mut n, mut bytes) = (0u32, 4u64);
+    let stem = path.with_extension("");
+    let part_path = |k: u32| PathBuf::from(format!("{}-{k:03}.bin", stem.display()));
+    let (mut part, mut n, mut bytes, mut files) = (0u32, 0u32, 0u64, 0u32);
+    let mut out: Option<(std::io::BufWriter<std::fs::File>, Instant)> = None;
     while let Ok((f, note)) = rx.recv() {
+        if out.as_ref().is_none_or(|(_, t)| t.elapsed() >= Duration::from_secs(30)) {
+            if let Some((mut w, _)) = out.take() {
+                let _ = w.flush();
+            }
+            part += 1;
+            let p = part_path(part);
+            match std::fs::File::create(&p) {
+                Ok(file) => {
+                    let mut w = std::io::BufWriter::new(file);
+                    let _ = w.write_all(b"REC2");
+                    out = Some((w, Instant::now()));
+                    files += 1;
+                }
+                Err(e) => {
+                    inner.state.lock().unwrap().event(json!({ "kind": "error", "text": format!("Recording: couldn't write {} ({e})", p.display()) }));
+                    inner.state.lock().unwrap().recorder = None;
+                    break;
+                }
+            }
+        }
+        let Some((w, _)) = out.as_mut() else { break };
         let mut jpeg = Vec::with_capacity(512 * 1024);
-        if jpeg_encoder::Encoder::new(&mut jpeg, 90).encode(&f.bgra, f.w as u16, f.h as u16, jpeg_encoder::ColorType::Bgra).is_err() {
+        if jpeg_encoder::Encoder::new(&mut jpeg, 85).encode(&f.bgra, f.w as u16, f.h as u16, jpeg_encoder::ColorType::Bgra).is_err() {
             continue;
         }
-        let ok = out.write_all(&(note.len() as u32).to_le_bytes()).is_ok() && out.write_all(note.as_bytes()).is_ok() && out.write_all(&(jpeg.len() as u32).to_le_bytes()).is_ok() && out.write_all(&jpeg).is_ok();
+        let ok = w.write_all(&(note.len() as u32).to_le_bytes()).is_ok() && w.write_all(note.as_bytes()).is_ok() && w.write_all(&(jpeg.len() as u32).to_le_bytes()).is_ok() && w.write_all(&jpeg).is_ok();
         if !ok {
             break;
         }
         n += 1;
         bytes += 8 + note.len() as u64 + jpeg.len() as u64;
-        if bytes > 700 << 20 {
-            inner.state.lock().unwrap().recorder = None;
-            break;
-        }
     }
-    let _ = out.flush();
-    inner.state.lock().unwrap().event(json!({ "kind": "saved", "text": format!("Recording saved: {n} pictures, {} MB, in {}", bytes >> 20, path.display()) }));
+    if let Some((mut w, _)) = out.take() {
+        let _ = w.flush();
+    }
+    let dir = path.parent().map(|d| d.display().to_string()).unwrap_or_default();
+    inner.state.lock().unwrap().event(json!({ "kind": "saved", "text": format!("Recording saved: {n} pictures in {files} files of 30 s, {} MB, in {dir}", bytes >> 20) }));
+}
+
+/// What the page's Do now box says (kept with each recorded picture).
+#[tauri::command]
+pub fn planetscan_say(engine: tauri::State<'_, Engine>, text: String) {
+    engine.0.state.lock().unwrap().page_say = text;
 }
 
 /// The planet's edge: `find` looks for it in the newest picture; `r` sets it (picture pixels,

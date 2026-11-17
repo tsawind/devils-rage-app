@@ -433,6 +433,30 @@ impl Base {
         Some(base)
     }
 
+    /// The patches still to see (purple on the map), for the green targets: on a 256 × 128 grid,
+    /// a grid cell is missing when a quarter of the map cells sampled in it aren't seen.
+    pub fn targets(&self, max: usize) -> Vec<Target> {
+        let (gw, gh) = (256usize, 128usize);
+        let (sx, sy) = (self.w / gw, self.h / gh);
+        let mut missing = vec![false; gw * gh];
+        for gr in 0..gh {
+            for gc in 0..gw {
+                let (mut n, mut gone) = (0, 0);
+                for y in (gr * sy..(gr + 1) * sy).step_by(2) {
+                    for x in (gc * sx..(gc + 1) * sx).step_by(2) {
+                        let i = y * self.w + x;
+                        n += 1;
+                        if self.weight[i] == 0.0 && !self.gap(i) {
+                            gone += 1;
+                        }
+                    }
+                }
+                missing[gr * gw + gc] = gone * 4 >= n;
+            }
+        }
+        patches(gw, gh, &missing, max)
+    }
+
     /// Where the biggest part not seen yet is, from the camera's side: a few words for the pilot.
     pub fn missing_hint(&self, q: &M3) -> Option<String> {
         let (mut sx, mut sy, mut sz, mut n) = (0.0, 0.0, 0.0, 0.0);
@@ -477,6 +501,64 @@ impl Base {
     }
 }
 
+/// A patch still to see, for the green targets: its middle (latitude from the north pole and
+/// longitude, degrees, as the maps are drawn) and its size (the radius of a circle as big, degrees).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Target {
+    pub lat: f64,
+    pub lon: f64,
+    pub radius: f64,
+}
+
+/// The patches on a coarse grid (gw × gh, rows from the north pole, longitude wrapping round):
+/// touching missing cells make one patch. The biggest `max` of them, biggest first.
+pub fn patches(gw: usize, gh: usize, missing: &[bool], max: usize) -> Vec<Target> {
+    let mut seen = vec![false; gw * gh];
+    let mut out: Vec<(f64, Target)> = Vec::new();
+    let cell_area = |row: usize| (((row as f64 + 0.5) / gh as f64) * PI).sin() * (PI / gh as f64) * (2.0 * PI / gw as f64);
+    for start in 0..gw * gh {
+        if !missing[start] || seen[start] {
+            continue;
+        }
+        let (mut area, mut v) = (0.0, [0.0f64; 3]);
+        let mut stack = vec![start];
+        seen[start] = true;
+        while let Some(k) = stack.pop() {
+            let (row, col) = (k / gw, k % gw);
+            let a = cell_area(row);
+            let (lat, lon) = ((row as f64 + 0.5) / gh as f64 * PI, (col as f64 + 0.5) / gw as f64 * 2.0 * PI);
+            area += a;
+            v[0] += a * lat.sin() * lon.cos();
+            v[1] += a * lat.sin() * lon.sin();
+            v[2] += a * lat.cos();
+            let mut next = vec![row * gw + (col + 1) % gw, row * gw + (col + gw - 1) % gw];
+            if row > 0 {
+                next.push((row - 1) * gw + col);
+            }
+            if row + 1 < gh {
+                next.push((row + 1) * gw + col);
+            }
+            for n in next {
+                if missing[n] && !seen[n] {
+                    seen[n] = true;
+                    stack.push(n);
+                }
+            }
+        }
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-12);
+        let lat = (v[2] / l).clamp(-1.0, 1.0).acos();
+        let mut lon = v[1].atan2(v[0]);
+        if lon < 0.0 {
+            lon += 2.0 * PI;
+        }
+        // A cap of the same area: 2π(1 − cos r).
+        let radius = (1.0 - area / (2.0 * PI)).clamp(-1.0, 1.0).acos();
+        out.push((area, Target { lat: lat / PI * 180.0, lon: lon / PI * 180.0, radius: radius / PI * 180.0 }));
+    }
+    out.sort_by(|a, b| b.0.total_cmp(&a.0));
+    out.into_iter().take(max).map(|(_, t)| t).collect()
+}
+
 /// Fill the gaps between pixels in r, g, b bytes (0, 0, 0 = not seen): an unseen cell with at
 /// least 5 of its 8 neighbours seen takes their average. For showing only.
 pub fn fill_gaps(rgb: &mut [u8], w: usize, h: usize) {
@@ -517,6 +599,35 @@ pub fn fill_gaps(rgb: &mut [u8], w: usize, h: usize) {
 mod tests {
     use super::*;
     use crate::planetscan::geom::lat_lon;
+
+    /// Two patches still to see, one across longitude 0: each found where it is and about its size.
+    #[test]
+    fn targets_where_the_gaps_are() {
+        let (gw, gh) = (360usize, 180usize);
+        let mut missing = vec![false; gw * gh];
+        // 10° × 10° at latitude 40–50 from the north pole, longitude 100–110.
+        for r in 40..50 {
+            for c in 100..110 {
+                missing[r * gw + c] = true;
+            }
+        }
+        // A smaller one round longitude 0 (355–5), latitude 120–126.
+        for r in 120..126 {
+            for c in (355..360).chain(0..5) {
+                missing[r * gw + c] = true;
+            }
+        }
+        let t = patches(gw, gh, &missing, 6);
+        assert_eq!(t.len(), 2, "{t:?}");
+        assert!((t[0].lat - 45.0).abs() < 0.5 && (t[0].lon - 105.0).abs() < 0.5, "{t:?}");
+        assert!(t[0].radius > 4.0 && t[0].radius < 5.0, "{t:?}");
+        assert!((t[1].lat - 123.0).abs() < 0.5 && (t[1].lon < 0.5 || t[1].lon > 359.5), "{t:?}");
+        // Nothing seen: one patch, all of it.
+        let b = Base::new();
+        let all = b.targets(6);
+        assert_eq!(all.len(), 1);
+        assert!(all[0].radius > 179.0, "{all:?}");
+    }
 
     #[test]
     fn fast_atan2_is_close() {
