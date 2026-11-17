@@ -81,6 +81,13 @@ pub const LEVERS: &[Lever] = &[
     },
     Lever {
         section: "audio",
+        key: "useOldJukeboxOverride",
+        kind: "switch",
+        label: "Classic EVE music instead of dynamic music",
+        choices: NONE,
+    },
+    Lever {
+        section: "audio",
         key: "suppressTurret",
         kind: "switch",
         label: "Quiet turret sounds",

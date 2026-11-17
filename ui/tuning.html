@@ -41,9 +41,17 @@
   .preset span { color: var(--muted); font-size: 12px; }
   .preset.on { border-color: var(--red-hi); background: #2a0f12; }
   .preset i { display: block; font-style: normal; color: var(--warn); font-size: 11px; font-weight: 600; letter-spacing: .3px; margin: 2px 0; }
-  .manual { margin-top: 10px; }
-  .manual ul { margin: 4px 0 0 18px; padding: 0; font-size: 13px; }
-  .manual li { margin: 3px 0; }
+  .preset.danger { background: #1a0c0e; border-color: #4a1d22; }
+  .preset.danger.on { background: #2e1013; border-color: var(--red-hi); }
+  tr.sec td { cursor: pointer; color: var(--text); font-weight: 600; font-size: 13px; border-top: 1px solid var(--line); padding-top: 9px; }
+  tr.sec td .arrow { display: inline-block; width: 14px; color: var(--muted); }
+  tr.sec td .count { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  tr.sub td { color: var(--warn); font-size: 11px; letter-spacing: .5px; text-transform: uppercase; padding-top: 10px; border-top: 0; }
+  tr.hand td { color: #b9b9c2; }
+  tr.hand td.by { color: var(--muted); font-size: 11px; text-align: center; }
+  tr.hand td.val { color: #e6d9a8; }
+  .h2row { display: flex; align-items: baseline; gap: 10px; margin: 22px 0 8px; }
+  .h2row h2 { margin: 0; }
   table { width: 100%; border-collapse: collapse; }
   td, th { padding: 6px 8px; border-top: 1px solid #23232a; text-align: left; vertical-align: middle; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
@@ -73,12 +81,10 @@
 
   <h2>1 · Pick a preset (or start from one and adjust)</h2>
   <div class="presets" id="presets"></div>
-  <div class="card manual" id="manual" hidden><b>Set by hand in EVE, once per account</b>
-    <span class="muted" style="font-size: 12px"> · EVE keeps these in its own per-account files, which the app doesn't touch.</span>
-    <ul id="manualList"></ul></div>
-
-  <h2>2 · Adjust the levers</h2>
-  <p class="note">Ticked rows are written; unticked rows stay as each client has them. “Now” is the first picked profile's current value.</p>
+  <div class="h2row"><h2>2 · Adjust the levers</h2>
+    <button class="btn small" id="remember" title="Keep the ticked settings below as “★ My settings”, here and in New launch group">Remember my settings</button>
+    <span class="muted" id="rememberNote" style="font-size: 12px"></span></div>
+  <p class="note">Every EVE setting, in the same order as EVE's own Settings window (click a section to open it). Ticked rows are written; unticked rows stay as each client has them. Rows marked <b>by hand</b> EVE keeps in its own per-account files, which the app doesn't touch: set them once in EVE for each account. “Now” is the first picked profile's current value.</p>
   <div class="card" style="padding: 4px 6px">
     <table id="levers"></table>
   </div>
@@ -109,8 +115,9 @@
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
   const PRESETS = window.DR_PRESETS;
-  const GROUPS = [["Sound", "audio"], ["Graphics", "device-gfx"], ["Interface", "interface"]];
-  const INTERFACE = ["UIScaleWindowed", "UIScaleFullscreen", "clientFontSize", "brightness"];
+  const LAYOUT = window.DR_LAYOUT;
+  let openSecs = new Set(); try { openSecs = new Set(JSON.parse(localStorage.getItem("dr-tuning-open") || "[]")); } catch (_) {}
+  let handTier = "alt";   // whose by-hand values are shown (the last tier picked)
 
   let data = null, seat = { accounts: [], groups: [] }, picked = new Set(), preset = null;
   let chosen = {};    // key -> value
@@ -121,17 +128,13 @@
 
   function usePreset(p) {
     preset = p.id;
+    handTier = p.base || (p.mine ? handTier : p.id);
     on = {}; chosen = {}; prefsOn = {};
     for (const [k, v] of Object.entries(p.values)) { on[k] = true; chosen[k] = v; }
     for (const [k, v] of Object.entries(p.prefs)) prefsOn[k] = { write: true, value: v };
     render();
   }
 
-  function groupOf(lever) {
-    if (lever.section === "audio") return "audio";
-    if (INTERFACE.includes(lever.key)) return "interface";
-    return "device-gfx";
-  }
 
   function control(lever) {
     const v = chosen[lever.key];
@@ -158,6 +161,14 @@
     return s;
   }
 
+  function nowLabel(lever, now) {
+    if (now === "—" || now === undefined) return "—";
+    if (lever.kind === "level" && lever.choices && lever.choices.length) { const c = lever.choices.find(([v]) => String(v) === String(now)); if (c) return c[1]; }
+    if (lever.kind === "switch") return String(now) === "1" ? "on" : "off";
+    if (lever.kind === "volume") return Math.round(Number(now) * 100) + "%";
+    return String(now);
+  }
+
   function nowOf(key) {
     const first = [...picked][0];
     const v = first && data.profiles[first] ? data.profiles[first].values[key] : undefined;
@@ -168,7 +179,7 @@
     // Presets
     const ph = $("presets"); ph.innerHTML = "";
     PRESETS.forEach(p => {
-      const b = el("button", "preset" + (preset === p.id ? " on" : ""));
+      const b = el("button", "preset" + (p.danger ? " danger" : "") + (preset === p.id ? " on" : ""));
       b.append(el("b", null, p.name));
       if (p.warn) b.append(el("i", null, p.warn));
       b.append(el("span", null, p.why));
@@ -176,40 +187,56 @@
       ph.append(b);
     });
 
-    const cur = PRESETS.find(p => p.id === preset);
-    $("manual").hidden = !(cur && cur.manual && cur.manual.length);
-    $("manualList").innerHTML = "";
-    (cur?.manual || []).forEach(m => $("manualList").append(el("li", null, m)));
 
-    // Levers
+    // Levers: every EVE setting in EVE's order, one collapsible section per Settings tab.
     const t = $("levers"); t.innerHTML = "";
     const head = el("tr"); ["Write", "Setting", "Set to", "Now"].forEach(h => head.append(el("th", null, h))); t.append(head);
-    GROUPS.forEach(([title, id]) => {
-      const g = el("tr", "grp"); const gt = el("td", null, title); gt.colSpan = 4; g.append(gt); t.append(g);
-      data.levers.filter(l => groupOf(l) === id).forEach(l => {
-        const tr = el("tr", on[l.key] ? "" : "off");
-        const c = el("td"); const box = el("input"); box.type = "checkbox"; box.checked = !!on[l.key];
-        box.addEventListener("change", () => { on[l.key] = box.checked; if (box.checked && chosen[l.key] === undefined) { const now = nowOf(l.key); chosen[l.key] = now === "—" ? undefined : JSON.parse(now === "true" || now === "false" ? now : String(Number(now))); } preset = null; render(); });
-        c.append(box);
-        const val = el("td", "val"); val.append(control(l));
-        tr.append(c, el("td", null, l.label), val, el("td", "now", String(nowOf(l.key))));
-        t.append(tr);
+    const leverOf = (k) => data.levers.find(l => l.key === k);
+    const prefOf = (k) => data.prefs.find(p => p.key === k);
+    LAYOUT.forEach(sec => {
+      const open = openSecs.has(sec.section);
+      const rows = sec.groups.flatMap(g => g.rows);
+      const written = rows.filter(r => (r.k && on[r.k]) || (r.p && prefsOn[r.p]?.write)).length;
+      const hand = rows.filter(r => !r.k && !r.p).length;
+      const sh = el("tr", "sec"); const st = el("td"); st.colSpan = 4;
+      st.append(el("span", "arrow", open ? "▾" : "▸"), document.createTextNode(sec.section),
+        el("span", "count", [written ? written + " written" : "", hand ? hand + " by hand" : ""].filter(Boolean).join(" · ")));
+      sh.append(st); sh.addEventListener("click", () => { open ? openSecs.delete(sec.section) : openSecs.add(sec.section); try { localStorage.setItem("dr-tuning-open", JSON.stringify([...openSecs])); } catch (_) {} render(); });
+      t.append(sh);
+      if (!open) return;
+      sec.groups.forEach(g => {
+        if (g.title) { const gr = el("tr", "sub"); const gt = el("td", null, g.title); gt.colSpan = 4; gr.append(gt); t.append(gr); }
+        g.rows.forEach(r => {
+          if (r.k) {
+            const l = leverOf(r.k); if (!l) return;
+            const tr = el("tr", on[l.key] ? "" : "off");
+            const c = el("td"); const box = el("input"); box.type = "checkbox"; box.checked = !!on[l.key];
+            box.addEventListener("change", () => { on[l.key] = box.checked; if (box.checked && chosen[l.key] === undefined) { const now = nowOf(l.key); chosen[l.key] = now === "—" ? undefined : JSON.parse(now === "true" || now === "false" ? now : String(Number(now))); } preset = null; render(); });
+            c.append(box);
+            const val = el("td", "val"); val.append(control(l));
+            tr.append(c, el("td", null, r.t || l.label), val, el("td", "now", nowLabel(l, nowOf(l.key))));
+            t.append(tr);
+          } else if (r.p) {
+            const p = prefOf(r.p); if (!p) return;
+            const state = prefsOn[p.key] || { write: false, value: true };
+            const tr = el("tr", state.write ? "" : "off");
+            const c = el("td"); const box = el("input"); box.type = "checkbox"; box.checked = state.write;
+            box.addEventListener("change", () => { prefsOn[p.key] = { ...state, write: box.checked }; preset = null; render(); });
+            c.append(box);
+            const sel = el("select"); sel.append(new Option("off", "0"), new Option("on", "1")); sel.value = state.value ? "1" : "0";
+            sel.addEventListener("change", () => { prefsOn[p.key] = { write: true, value: sel.value === "1" }; preset = null; render(); });
+            const v = el("td", "val"); v.append(sel);
+            const first = [...picked][0];
+            const now = first && data.profiles[first] ? data.profiles[first].prefs[p.key] : undefined;
+            tr.append(c, el("td", null, r.t || p.label), v, el("td", "now", now === undefined ? "—" : now === "1" ? "on" : "off"));
+            t.append(tr);
+          } else {
+            const tr = el("tr", "hand");
+            tr.append(el("td", "by", "by hand"), el("td", null, r.t), el("td", "val", window.DR_HAND(r, handTier)), el("td", "now", ""));
+            t.append(tr);
+          }
+        });
       });
-    });
-    const g = el("tr", "grp"); const gt = el("td", null, "prefs.ini"); gt.colSpan = 4; g.append(gt); t.append(g);
-    data.prefs.forEach(p => {
-      const state = prefsOn[p.key] || { write: false, value: true };
-      const tr = el("tr", state.write ? "" : "off");
-      const c = el("td"); const box = el("input"); box.type = "checkbox"; box.checked = state.write;
-      box.addEventListener("change", () => { prefsOn[p.key] = { ...state, write: box.checked }; render(); });
-      c.append(box);
-      const s = el("select"); s.append(new Option("off", "0"), new Option("on", "1")); s.value = state.value ? "1" : "0";
-      s.addEventListener("change", () => { prefsOn[p.key] = { write: true, value: s.value === "1" }; render(); });
-      const v = el("td", "val"); v.append(s);
-      const first = [...picked][0];
-      const now = first && data.profiles[first] ? data.profiles[first].prefs[p.key] : undefined;
-      tr.append(c, el("td", null, p.label), v, el("td", "now", now === undefined ? "—" : now === "1" ? "on" : "off"));
-      t.append(tr);
     });
 
     // Profiles
@@ -233,6 +260,19 @@
     seat.groups.forEach(x => gs.append(new Option(x.group.name, String(x.group.id))));
     gs.value = keep;
   }
+
+  $("remember").addEventListener("click", () => {
+    const values = {}; for (const [k, w] of Object.entries(on)) if (w && chosen[k] !== undefined) values[k] = chosen[k];
+    const prefs = {}; for (const [k, p] of Object.entries(prefsOn)) if (p.write) prefs[k] = !!p.value;
+    if (!Object.keys(values).length && !Object.keys(prefs).length) { $("rememberNote").textContent = "Tick some settings first."; return; }
+    const saved = { at: Date.now(), base: handTier, values, prefs };
+    try { localStorage.setItem("dr-tuning-mine", JSON.stringify(saved)); } catch (e) { $("rememberNote").textContent = "Couldn't save: " + e; return; }
+    const mine = { id: "mine", name: "★ My settings", mine: true, base: handTier, why: "Remembered " + new Date(saved.at).toLocaleString() + ".", values, prefs };
+    const i = PRESETS.findIndex(p => p.id === "mine"); if (i >= 0) PRESETS[i] = mine; else PRESETS.push(mine);
+    preset = "mine";
+    $("rememberNote").textContent = "Saved as “★ My settings” (also offered in New launch group).";
+    render();
+  });
 
   $("byGroup").addEventListener("change", () => {
     const g = seat.groups.find(x => String(x.group.id) === $("byGroup").value)?.group;
@@ -277,7 +317,7 @@
     catch (e) { $("noRoot").textContent = String(e); $("noRoot").hidden = false; return; }
     seat = await invoke("seat_launch_groups").catch(() => seat);
     if (data.clientsOpen) { $("openWarn").hidden = false; $("openWarn").textContent = `${data.clientsOpen} EVE client(s) open: close them before applying (EVE rewrites these settings when a client closes).`; }
-    usePreset(PRESETS[1]);
+    usePreset(PRESETS.find(p => p.id === "alt") || PRESETS[0]);
   })();
 </script>
 </body>
