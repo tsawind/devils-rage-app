@@ -160,8 +160,9 @@
     <div class="step"><div class="n" id="n6">6</div><div>
       <h3>Resources <span class="state" id="s6"></span></h3>
       <div class="small muted">Once the planet map and sky are done: click each resource in EVE's scan list. The app sees which one is lit, scans it while you spin the planet, and saves it at 99 %.</div>
+      <div class="small muted">EVE's colour slider (the bar above its list): <span id="sliderSaid"></span></div>
       <div id="resList"></div>
-      <div class="row"><button class="btn" id="saveRes" title="Save this resource for the corp now, even under 99 %">Save it now</button><button class="btn" id="stopRes" title="Stop this resource's scan (nothing saved)">Stop</button><button class="btn" id="rescanRes" title="Scan this planet's resources again (a fresh before/after scan): the ones done so far count as not done">Scan all again</button></div>
+      <div class="row"><button class="btn" id="saveRes" title="Save this resource for the corp now, even under 99 %">Save it now</button><button class="btn" id="keepRes" hidden title="Keep painting this resource after its save at 99 %, to fill in more detail; then Save again">Keep scanning</button><button class="btn" id="stopRes" title="Stop this resource's scan (nothing saved)">Stop</button><button class="btn" id="rescanRes" title="Scan this planet's resources again (a fresh before/after scan): the ones done so far count as not done">Scan all again</button></div>
     </div></div>
 
     <div class="step"><div class="n" id="n5">5</div><div>
@@ -628,6 +629,8 @@
       if (ev.kind === "done" && ev.resource && ev.planet_id) {
         if (!resDoneNow.has(ev.planet_id)) resDoneNow.set(ev.planet_id, new Set());
         resDoneNow.get(ev.planet_id).add(ev.resource);
+        // Where EVE's colour slider was for this planet's newest scan (the next ones are checked against it).
+        if (ev.slider) { sliderUsed[ev.planet_id] = ev.slider; try { localStorage.setItem("piscan-slider-used", JSON.stringify(sliderUsed)); } catch (e) {} }
       }
       if (ev.kind === "saved" && ev.resource) { clearTimeout(reloadSoon); reloadSoon = setTimeout(loadPlanets, 4000); }
       if (ev.kind === "base-done" && planet) {
@@ -695,6 +698,9 @@
     const picked = s.list ? s.list.picked : null;
     setText($("listSaid"), picked == null ? (s.list && s.list.guessed ? "not seen" : "no row lit up") : picked === 0 ? "EVE shows No filter" : `EVE shows ${resourcesOf(planet)[picked - 1] || "row " + picked}`);
     $("listSaid").className = picked === 0 ? "ok" : "warn";
+    const slider = s.list ? s.list.slider : null;
+    setText($("sliderSaid"), slider ? sliderText(slider) : "not seen");
+    $("sliderSaid").className = slider && slider[0] === 0 && slider[1] === 1 ? "ok" : "warn";
     // 6: resources
     drawResources(s);
     // 5
@@ -727,6 +733,7 @@
   const resDoneNow = new Map();
   let shownRun = null;
   let resStarting = null, resStartingAt = 0;
+  let keeping = false;
   function planetComplete(s) {
     const base = s.base_map || {}, own = s.sky && s.sky.own;
     return (base.coverage || 0) >= 0.999 && (own ? own.done || 0 : 0) >= 0.999;
@@ -753,8 +760,29 @@
     const after = list.slice(at + 1).concat(list.slice(0, Math.max(0, at)));
     return after.find((p) => resDone(p).size < resourcesOf(p).length) || null;
   }
+  // ---------- EVE's colour slider: the same on every scan, or the colours mean other levels ----------
+  let sliderUsed = {};
+  try { sliderUsed = JSON.parse(localStorage.getItem("piscan-slider-used") || "{}") || {}; } catch (e) { sliderUsed = {}; }
+  function sliderText(v) {
+    return v[0] === 0 && v[1] === 1 ? "full range" : `${Math.round(v[0] * 100)} % to ${Math.round(v[1] * 100)} % of the bar`;
+  }
+  /** A warning (never a stop) when the slider isn't right out, or isn't where this planet's last scan had it. */
+  function sliderWarning(s) {
+    const now = s.list ? s.list.slider : null;
+    if (!now) return "The app can't see EVE's colour slider (the bar above the resource list): check that both its handles are dragged right out.";
+    const was = planet ? sliderUsed[planet.planet_id] : null;
+    if (was && (Math.abs(was[0] - now[0]) > 0.02 || Math.abs(was[1] - now[1]) > 0.02)) return `EVE's colour slider is at ${sliderText(now)}, but this planet's last scan was made at ${sliderText(was)}: the colours won't mean the same levels. Drag it back first (you can still scan).`;
+    if (now[0] !== 0 || now[1] !== 1) return `EVE's colour slider is at ${sliderText(now)}, not the full range: a scan made like this can't be compared with the others. Drag both handles right out (you can still scan).`;
+    return null;
+  }
   function resourceTips(s, also) {
     const run = s.run, names = resourcesOf(planet), done = resDone(planet), picked = s.list ? s.list.picked : null;
+    const sliderOff = sliderWarning(s);
+    if (sliderOff) also.unshift(sliderOff);
+    if (run && run.resource && !run.done && s.keep_going) {
+      if (run.paused) return [`Filling in more of ${run.resource}: paused (${run.paused}).`, also];
+      return [`Filling in more of ${run.resource}: ${pct(run.coverage)} (saved at 99 % already). Keep spinning; press Save again (6) when you're happy with it.`, also];
+    }
     if (run && run.resource && !run.done) {
       if (run.paused) return [`Scanning ${run.resource}: paused (${run.paused}).`, also];
       const miss = run.missing ? `; the rest is ${run.missing.split(":")[0]}` : "";
@@ -800,6 +828,10 @@
     }).join(""));
     setState(6, planet ? `${done.size} of ${names.length}` : "", done.size >= names.length && names.length ? "ok" : run && run.resource && !run.done ? "warn" : "muted", names.length > 0 && done.size >= names.length);
     $("saveRes").hidden = !(run && run.resource && !run.done);
+    // Keep scanning: offered once a resource is saved; while it runs, Save it now reads Save again.
+    keeping = !!(s.keep_going && run && run.resource && !run.done);
+    $("keepRes").hidden = !(run && run.resource && run.done);
+    setText($("saveRes"), keeping ? "Save again" : "Save it now");
     $("rescanRes").hidden = !planet || done.size === 0 || !!(run && run.resource && !run.done);
     $("stopRes").hidden = !(run && run.resource && !run.done);
     $("tabRes").hidden = !(run && run.resource);
@@ -971,7 +1003,12 @@
   $("popOk").addEventListener("click", () => { $("pop").style.display = "none"; });
   $("startRes").addEventListener("click", () => { const n = nextResource(status); if (n) startResource(n, null); });
   $("saveRes").addEventListener("click", () => invoke("planetscan_save").then(() => log("Saving this resource for the corp…")).catch((e) => log(String(e), "bad")));
-  $("stopRes").addEventListener("click", () => { invoke("planetscan_scan", { resource: null, row: null }); log("Resource scan stopped (not saved).", "warn"); });
+  $("stopRes").addEventListener("click", () => {
+    // While filling in more after the save: Stop leaves the scan as it was saved at 99 %.
+    if (keeping) { invoke("planetscan_keep", { on: false }).catch((e) => log(String(e), "bad")); log("Stopped: the scan stays as it was saved (press Keep scanning then Save again to save more).", "warn"); return; }
+    invoke("planetscan_scan", { resource: null, row: null }); log("Resource scan stopped (not saved).", "warn");
+  });
+  $("keepRes").addEventListener("click", () => invoke("planetscan_keep", { on: true }).then(() => log("Keep scanning: spin the planet to fill in more detail, then press Save again.")).catch((e) => log(String(e), "bad")));
   $("cardHide").addEventListener("click", () => { if (planet) card.hiddenFor.add(planet.planet_id); card.hidden = true; $("card").hidden = true; });
 
   // ---------- the loop: picture + status in one call ----------

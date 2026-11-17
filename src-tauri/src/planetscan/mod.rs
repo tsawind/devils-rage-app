@@ -189,6 +189,14 @@ struct Session {
     /// The newest reading and how many times running it's been read (any reading that isn't the
     /// run's row pauses the run at once; only a steady one switches).
     pick_read: (Option<usize>, u32),
+    /// EVE's colour range slider above the list (lowest and highest level shown, 0 … 1 of the
+    /// bar; 0 and 1 = the full range) once read the same 4 times running, and the newest reading
+    /// with how many times running it's been read.
+    slider: Option<(f64, f64)>,
+    slider_read: (Option<(f64, f64)>, u32),
+    /// Keep scanning: the resource carries on past 99 % (already saved) to fill in more detail,
+    /// until Save again.
+    keep_going: bool,
     run: Option<Run>,
     /// Resources started and left before 99 % (EVE switched to another, or another planet):
     /// picked up where they were when that resource is scanned again.
@@ -323,6 +331,9 @@ impl Default for Session {
             list_guessed: true,
             picked: None,
             pick_read: (None, 0),
+            slider: None,
+            slider_read: (None, 0),
+            keep_going: false,
             kept_runs: Vec::new(),
             run: None,
             autosave: true,
@@ -670,6 +681,19 @@ impl Session {
             // behind the see-through list) never switches the resource.
             if self.pick_read.1 >= 4 {
                 self.picked = read;
+            }
+        }
+        // EVE's colour range slider above the list, a few times a second: kept once it reads the
+        // same 4 times running (one odd picture, or the mouse pointer over the bar, never counts).
+        if self.frames % 6 == 4 {
+            let read = self.list.as_ref().and_then(|s| scan::slider_handles(&pic, s));
+            if read == self.slider_read.0 {
+                self.slider_read.1 += 1;
+            } else {
+                self.slider_read = (read, 1);
+            }
+            if self.slider_read.1 >= 4 {
+                self.slider = read;
             }
         }
 
@@ -1105,7 +1129,7 @@ impl Session {
                 }
             }
         }
-        if self.run.as_ref().is_some_and(|r| !r.done && r.paused.is_none() && r.map.coverage() >= DONE_AT) {
+        if !self.keep_going && self.run.as_ref().is_some_and(|r| !r.done && r.paused.is_none() && r.map.coverage() >= DONE_AT) {
             self.finish(jobs);
         }
 
@@ -1313,6 +1337,8 @@ impl Session {
     /// Put the resource being scanned aside (unfinished, with something on it) to pick up again
     /// when that resource is scanned next; at most 10 kept, none older than 2 hours.
     fn keep_run(&mut self) {
+        // Keep scanning ends with the run it was for.
+        self.keep_going = false;
         if let Some(run) = self.run.take() {
             if !run.done && !run.resource.is_empty() && run.painted_frames > 0 {
                 self.kept_runs.retain(|k| !(k.planet == run.planet && k.resource == run.resource));
@@ -1331,6 +1357,10 @@ impl Session {
         let pname = self.planet.as_ref().map(|p| p.name.clone()).unwrap_or_default();
         let autosave = self.autosave;
         let character_id = self.character_id;
+        // Where EVE's colour slider was (None: not seen), and the picture's size, kept with the scan.
+        let slider = self.slider.map(|(lo, hi)| [lo, hi]);
+        let size = self.size;
+        self.keep_going = false;
         let Some(run) = self.run.as_mut() else { return };
         run.done = true;
         let coverage = run.map.coverage();
@@ -1363,11 +1393,16 @@ impl Session {
             if let Some(dir) = self.dir.as_ref() {
                 let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                 jobs.push(Job::WriteFile { path: dir.join("scans").join(format!("{pid}-{}-{stamp}.bin", safe_name(&resource))), bytes: run.map.raw_bytes() });
+                // Beside it, what the scan was made with (SeAT keeps only the levels): EVE's colour
+                // slider above all, since it changes which level each colour stands for.
+                let about = json!({ "planet_id": pid, "planet": pname, "resource": resource, "at": stamp, "coverage": coverage, "slider": slider,
+                    "size": [size.0, size.1], "app": env!("CARGO_PKG_VERSION") });
+                jobs.push(Job::WriteFile { path: dir.join("scans").join(format!("{pid}-{}-{stamp}.json", safe_name(&resource))), bytes: about.to_string().into_bytes() });
             }
             if autosave {
                 jobs.push(Job::SaveScan { planet: pid, planet_name: pname.clone(), resource: resource.clone(), character_id, cells, coverage });
             }
-            self.event(json!({ "kind": "done", "resource": resource, "planet_id": pid, "coverage": coverage, "secs": secs, "saving": autosave,
+            self.event(json!({ "kind": "done", "resource": resource, "planet_id": pid, "coverage": coverage, "secs": secs, "saving": autosave, "slider": slider,
                 "text": format!("{resource} on {pname}: {:.0} % in {secs} s{}.", coverage * 100.0, if autosave { ", saving for the corp" } else { " (autosave is off: press Save for the corp)" }) }));
         }
     }
@@ -1446,7 +1481,8 @@ impl Session {
             },
             "bare": self.planet_id().and_then(|id| self.bares.get(&id)).map(|b| json!({ "coverage": b.coverage() })),
             "ui": self.ui.as_ref().map(|u| json!({ "ready": u.ready(), "views": u.views })),
-            "list": { "picked": self.picked, "guessed": self.list_guessed, "spot": self.list.map(|s| json!({ "x": s.x, "y0": s.y0, "y5": s.y5 })) },
+            "list": { "picked": self.picked, "guessed": self.list_guessed, "spot": self.list.map(|s| json!({ "x": s.x, "y0": s.y0, "y5": s.y5 })), "slider": self.slider.map(|(lo, hi)| [lo, hi]) },
+            "keep_going": self.keep_going,
             "run": run,
             "autosave": self.autosave,
             "auto_planet": self.auto_planet,
@@ -2169,6 +2205,10 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
     if fresh == Some(true) {
         s.kept_runs.retain(|k| k.planet != pid);
     }
+    // Another scan, or Stop: Keep scanning is over (the same resource asked for again carries on).
+    if !s.run.as_ref().is_some_and(|r| Some(&r.resource) == resource.as_ref() && r.planet == pid) {
+        s.keep_going = false;
+    }
     match resource {
         None => s.run = None,
         Some(resource) => {
@@ -2219,6 +2259,24 @@ pub fn planetscan_scan(engine: tauri::State<'_, Engine>, resource: Option<String
             s.run = Some(run);
         }
     }
+    Ok(())
+}
+
+/// Keep scanning the resource just saved (done at 99 %): it carries on painting, to fill in the
+/// last spots and take better looks, with no second save by itself; Save again (planetscan_save)
+/// saves it once more and ends it. `on` false: leave it as saved.
+#[tauri::command]
+pub fn planetscan_keep(engine: tauri::State<'_, Engine>, on: bool) -> Result<(), String> {
+    let mut s = engine.0.state.lock().unwrap();
+    let Some(run) = s.run.as_mut().filter(|r| !r.resource.is_empty()) else { return Err("no resource scan to keep going".into()) };
+    if on {
+        run.done = false;
+        run.paused = None;
+        run.touched = Instant::now();
+    } else {
+        run.done = true;
+    }
+    s.keep_going = on;
     Ok(())
 }
 
