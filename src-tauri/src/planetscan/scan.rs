@@ -708,6 +708,127 @@ pub fn picked_row(pic: &Pic, spot: &ListSpot) -> Option<usize> {
     Some(best)
 }
 
+/// EVE's colour range slider, just above "No filter" in the resource list: where its two small
+/// triangle handles sit along the bar, as fractions 0 … 1 of the bar (lowest level shown, highest
+/// level shown). (0, 1) = both right out, the full range: only then are two scans' colours the
+/// same levels. None when the two handles aren't both seen (panel closed or moved, Build tab).
+///
+/// The bar's place comes from the list spot: its ends 1.93 rows left and 6.19 rows right of the
+/// names' x (measured on Tsa's 1918 × 1024 window at 90 % UI scale), so a list spot clicked far
+/// along the names shifts the reading; the handles themselves are found from the picture.
+pub fn slider_handles(pic: &Pic, spot: &ListSpot) -> Option<(f64, f64)> {
+    let found = slider_boxes(pic, spot)?;
+    if found.contrast < 14.0 {
+        return None;
+    }
+    let gap = (spot.y5 - spot.y0) / 5.0;
+    let (t0, t1) = (spot.x - 1.93 * gap, spot.x + 6.19 * gap);
+    // Within a pixel and a half of an end counts as right out.
+    let snap = 1.5 / (t1 - t0);
+    let at = |x: f64| {
+        let v = ((x - t0) / (t1 - t0)).clamp(0.0, 1.0);
+        if v < snap {
+            0.0
+        } else if v > 1.0 - snap {
+            1.0
+        } else {
+            v
+        }
+    };
+    // Each handle points at the bar with its upright side.
+    Some((at((found.left + found.side) as f64), at(found.right as f64)))
+}
+
+/// The slider's two handles as found in the picture: each one's little box (left edge x, their
+/// top y, the box's side) and how clearly the fainter of the two stands out (grey levels).
+#[derive(Clone, Copy, Debug)]
+pub struct SliderBoxes {
+    pub left: usize,
+    pub right: usize,
+    pub top: usize,
+    pub side: usize,
+    pub contrast: f64,
+}
+
+/// The handles are light triangles about 0.28 rows across: the left one "◢", the right one "◣",
+/// upright sides towards the bar. Each is found by its shape: the lit half of its box against the
+/// other half, and against the strip just outside its slanted side (dark for a handle; lit for
+/// the colour band's own edge), so neither the band nor a bright sky behind the see-through panel
+/// reads as a handle. Both must sit on the same line.
+pub fn slider_boxes(pic: &Pic, spot: &ListSpot) -> Option<SliderBoxes> {
+    let gap = (spot.y5 - spot.y0) / 5.0;
+    if gap < 12.0 {
+        return None;
+    }
+    let n = ((0.28 * gap).round() as usize).max(4);
+    let xa = (spot.x - 2.6 * gap).floor().max(4.0) as usize;
+    let xb = ((spot.x + 6.9 * gap).ceil().max(0.0) as usize).min(pic.w.saturating_sub(4));
+    let ya = (spot.y0 - 1.15 * gap).floor().max(0.0) as usize;
+    let yb = ((spot.y0 - 0.45 * gap).ceil().max(0.0) as usize).min(pic.h);
+    if xb < xa + 4 * n || yb < ya + n {
+        return None;
+    }
+    let mut best: Option<SliderBoxes> = None;
+    for top in ya..=yb - n {
+        let mut scores: Vec<(f64, f64)> = Vec::with_capacity(xb - xa);
+        for x in xa..=xb - n {
+            // Row by row (the top and bottom rows left out, and the slant itself, which is half
+            // lit): the lit run against the dark run. A handle shows the step in every row; the
+            // colour band's edges and its white end, far brighter than a handle, only in some.
+            // So the second-weakest row counts.
+            let (mut rows_l, mut rows_r) = (Vec::with_capacity(n), Vec::with_capacity(n));
+            let (mut lit_l, mut lit_r) = ((0.0f64, 0.0f64), (0.0f64, 0.0f64));
+            // The three columns just outside each side of the box (the brightest of them counts).
+            let (mut out_l, mut out_r) = ([0.0f64; 3], [0.0f64; 3]);
+            for j in 0..n {
+                if j >= 1 && j + 1 < n {
+                    let (mut ll, mut dl, mut lr, mut dr) = ((0.0f64, 0.0f64), (0.0f64, 0.0f64), (0.0f64, 0.0f64), (0.0f64, 0.0f64));
+                    for i in 0..n {
+                        let v = pic.lum(x + i, top + j) as f64;
+                        // "◢": lit right of its slant.
+                        if i + j >= n {
+                            ll = (ll.0 + v, ll.1 + 1.0);
+                        } else if i + j + 1 < n {
+                            dl = (dl.0 + v, dl.1 + 1.0);
+                        }
+                        // "◣": lit left of its slant.
+                        if j > i {
+                            lr = (lr.0 + v, lr.1 + 1.0);
+                        } else if j < i {
+                            dr = (dr.0 + v, dr.1 + 1.0);
+                        }
+                    }
+                    rows_l.push(ll.0 / ll.1.max(1.0) - dl.0 / dl.1.max(1.0));
+                    rows_r.push(lr.0 / lr.1.max(1.0) - dr.0 / dr.1.max(1.0));
+                    lit_l = (lit_l.0 + ll.0, lit_l.1 + ll.1);
+                    lit_r = (lit_r.0 + lr.0, lit_r.1 + lr.1);
+                }
+                for k in 0..3 {
+                    out_l[k] += pic.lum(x - 2 - k, top + j) as f64;
+                    out_r[k] += pic.lum(x + n + 1 + k, top + j) as f64;
+                }
+            }
+            let (out_l, out_r) = (out_l.iter().cloned().fold(0.0, f64::max) / n as f64, out_r.iter().cloned().fold(0.0, f64::max) / n as f64);
+            rows_l.sort_by(f64::total_cmp);
+            rows_r.sort_by(f64::total_cmp);
+            let (lit_l, lit_r) = (lit_l.0 / lit_l.1.max(1.0), lit_r.0 / lit_r.1.max(1.0));
+            // Outside a handle's slanted side it's dark; past the left handle's upright side too
+            // (the band starts with its darkest colour there; at the right handle it ends white).
+            let left = rows_l[1.min(rows_l.len() - 1)].min(lit_l - out_l).min(lit_l - out_r);
+            let right = rows_r[1.min(rows_r.len() - 1)].min(lit_r - out_r);
+            scores.push((left, right));
+        }
+        let Some((li, l)) = scores.iter().map(|s| s.0).enumerate().max_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
+        // The right handle is right of the left one.
+        let Some((ri, r)) = scores.iter().map(|s| s.1).enumerate().skip(li + 2 * n).max_by(|a, b| a.1.total_cmp(&b.1)) else { continue };
+        let contrast = l.min(r);
+        if best.is_none_or(|b| contrast > b.contrast) {
+            best = Some(SliderBoxes { left: xa + li, right: xa + ri, top, side: n, contrast });
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
