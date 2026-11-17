@@ -128,6 +128,7 @@
       <h3>Character and planet <span class="state" id="s1"></span></h3>
       <div class="row"><select id="client" style="flex: 1"></select><button class="btn" id="reload" title="Look for clients and planets again">↻</button></div>
       <div class="small muted" style="margin-top: 4px">Open the planet in EVE and pick it here. The app only watches; it never clicks or types in EVE.</div>
+      <select id="systemPick" style="width: 100%; margin-top: 6px" hidden title="Which system's planets to show: your colony systems, the systems the corp has mapped, and where your characters are now"></select>
       <div id="planets"></div>
     </div></div>
 
@@ -223,6 +224,8 @@
     temperate: ["Aqueous Liquids", "Autotrophs", "Carbon Compounds", "Complex Organisms", "Microorganisms"],
   };
   const FRESH_DAYS = 7;
+  // here: your characters and the system each is in now (from SeAT; a few minutes behind EVE).
+  let here = [];
   let planets = [], planet = null, me = null, status = null, seq = 0, alive = true, switchError = null;
   let picture = null, clickMode = null, listClicks = [];
   const settings = (() => { try { return JSON.parse(localStorage.getItem("planetscan") || "{}"); } catch { return {}; } })();
@@ -265,7 +268,33 @@
   }
   function characterIdOf(name) {
     for (const p of planets) for (const c of p.characters || []) if (c.name === name) return c.id;
-    return null;
+    const h = here.find((x) => x.name === name);
+    return h ? h.character_id : null;
+  }
+  // The system the picked EVE client's character is in now (null when SeAT doesn't know).
+  function clientSystem() {
+    const h = here.find((x) => x.name === me);
+    if (!h) return null;
+    const p = planets.find((q) => q.system_id === h.system_id);
+    return p ? systemName(p) : null;
+  }
+  // Open a system: its planet you have a colony on, else its first.
+  function openSystem(name) {
+    const list = planets.filter((p) => systemName(p) === name);
+    const pick = list.find((p) => (p.characters || []).some((c) => c.name === me)) || list[0];
+    if (pick) selectPlanet(pick.planet_id);
+  }
+  function renderSystems() {
+    const box = $("systemPick");
+    const names = [...new Set(planets.map(systemName))];
+    box.hidden = names.length < 2;
+    const at = (n) => here.filter((h) => planets.some((p) => p.system_id === h.system_id && systemName(p) === n)).map((h) => h.name);
+    const html = names.map((n) => {
+      const who = at(n);
+      return `<option value="${esc(n)}">${esc(n)}${who.length ? ` · here: ${esc(who.slice(0, 3).join(", "))}${who.length > 3 ? " …" : ""}` : ""}</option>`;
+    }).join("");
+    setHtml(box, html);
+    if (planet) box.value = systemName(planet);
   }
   let startedWith = null;
   function startClient() {
@@ -282,11 +311,18 @@
   async function loadPlanets() {
     const data = await invoke("piscan_planets").catch((e) => { log("SeAT: " + e, "bad"); return null; });
     planets = ((data && data.planets) || []).sort((a, b) => systemName(a).localeCompare(systemName(b)) || numeral(a) - numeral(b));
+    here = (data && data.here) || [];
     renderPlanets();
-    if (!planet) {
+    // Opening (or ↻): the system the EVE client's character is in, if it's not the one showing.
+    const there = clientSystem();
+    if (there && (!planet || systemName(planet) !== there) && !(planet && status && status.run && status.run.resource && !status.run.done)) {
+      const saved = planets.find((p) => p.planet_id === settings.planet && systemName(p) === there);
+      if (saved) selectPlanet(saved.planet_id); else openSystem(there);
+    } else if (!planet) {
       const wanted = planets.find((p) => p.planet_id === settings.planet) || planets.find((p) => (p.characters || []).some((c) => c.name === me)) || planets[0];
       if (wanted) selectPlanet(wanted.planet_id);
     } else selectPlanet(planet.planet_id, true);
+    renderSystems();
     startClient();
   }
   function systemOf(p) { return planets.filter((q) => systemName(q) === systemName(p)); }
@@ -335,6 +371,7 @@
     const changed = !planet || planet.planet_id !== id;
     planet = p; settings.planet = id; keep();
     renderPlanets();
+    renderSystems();
     if (changed) { mapImg = null; mapVersion = -1; drawMap(); }
     const info = (q) => {
       const sky = mapInfo(q, "sky"), base = mapInfo(q, "bare");
@@ -897,6 +934,10 @@
     if (cap.trouble) also.push(cap.trouble);
     if (cap.fps && cap.fps < 40) also.push(`EVE draws ${Math.round(cap.fps)} pictures a second. If that's NVIDIA's Background Application Max Frame Rate, set it Off for exefile.exe while scanning (NVIDIA Control Panel → Manage 3D settings → Program settings).`);
     if (!planet) return ["Pick the planet you have open in EVE (1).", also];
+    // The character is in another system than the planets shown: a planet there would be painted
+    // into this one's map. (SeAT learns where a character is a few minutes late.)
+    const there = clientSystem();
+    if (there && there !== systemName(planet)) also.unshift(`${me} is in ${there}, but the planets shown are ${systemName(planet)}'s: pick ${there} in the system list (1) before pressing Start.`);
     if (!s.planet || s.planet.id !== planet.planet_id) {
       if (switchError) return [`Couldn't switch to ${planet.name}: ${switchError}. Press ↻ (1) to try again.`, also];
       return [`Switching to ${planet.name}… loading its maps.`, also];
@@ -1014,6 +1055,7 @@
     $(id).addEventListener("change", () => { settings[id] = $(id).checked; keep(); options(); });
   }
   $("client").addEventListener("change", startClient);
+  $("systemPick").addEventListener("change", () => openSystem($("systemPick").value));
   $("reload").addEventListener("click", () => { loadClients(); loadPlanets(); });
   $("home").addEventListener("click", () => { alive = false; invoke("planetscan_stop"); location.href = "index.html#pi"; });
   window.addEventListener("beforeunload", () => invoke("planetscan_stop"));
