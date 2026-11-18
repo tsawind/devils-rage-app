@@ -46,7 +46,7 @@ pub struct Seat {
 }
 
 /// `  Key: [stamp, value]` inside `device:` -> value text.
-fn device_value<'a>(yaml: &'a str, key: &str) -> Option<&'a str> {
+pub(crate) fn device_value<'a>(yaml: &'a str, key: &str) -> Option<&'a str> {
     let mut in_device = false;
     for line in yaml.lines() {
         if !line.starts_with(' ') {
@@ -63,7 +63,7 @@ fn device_value<'a>(yaml: &'a str, key: &str) -> Option<&'a str> {
 }
 
 /// The `{adapter: 0, height: 1024, left: -7, …}` block under `  Key:` in `device:` (it can wrap).
-fn device_block(yaml: &str, key: &str) -> BTreeMap<String, i64> {
+pub(crate) fn device_block(yaml: &str, key: &str) -> BTreeMap<String, i64> {
     let mut out = BTreeMap::new();
     let mut in_device = false;
     let mut grabbing = false;

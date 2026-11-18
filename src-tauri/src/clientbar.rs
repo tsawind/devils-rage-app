@@ -38,6 +38,9 @@ pub struct BarSettings {
     /// When `every` is off: only these clients get a bar.
     #[serde(default)]
     pub clients: BTreeSet<String>,
+    /// Fixed Window clients that keep the small floating bar instead of our title bar.
+    #[serde(default)]
+    pub floating: BTreeSet<String>,
     /// Bars shrunk (›) to just ⚙ and ✕.
     #[serde(default)]
     pub mini: BTreeSet<String>,
@@ -74,7 +77,7 @@ pub fn bar_width(buttons: &[String]) -> f64 {
 
 impl Default for BarSettings {
     fn default() -> Self {
-        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), mini: BTreeSet::new(), corner: default_corner(), buttons: default_buttons(), version: 1 }
+        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), floating: BTreeSet::new(), mini: BTreeSet::new(), corner: default_corner(), buttons: default_buttons(), version: 1 }
     }
 }
 
@@ -183,9 +186,9 @@ pub struct Place {
     pub top: i32,
 }
 
-pub fn place_for(frame: Spot, captioned: bool, work: Option<Spot>, corner: &str, scale: f64, width: f64, height: f64) -> Place {
+pub fn place_for(frame: Spot, captioned: bool, floating: bool, work: Option<Spot>, corner: &str, scale: f64, width: f64, height: f64) -> Place {
     let (top, side) = chrome(scale);
-    if !captioned {
+    if !captioned && !floating {
         if let Some(work) = work {
             if frame.y - top >= work.y {
                 return Place { frame: true, x: frame.x - side, y: frame.y - top, w: frame.w + 2 * side, h: frame.h + top + side, top };
@@ -283,6 +286,7 @@ mod win {
 
     /// The window you'd see at a point: the topmost visible window there that isn't ours and isn't
     /// see-through for clicks.
+    #[allow(dead_code)]
     pub fn front_at(x: i32, y: i32) -> Option<isize> {
         let mut all: Vec<isize> = Vec::new();
         // SAFETY: EnumWindows calls `collect` with our Vec for every top-level window, top first.
@@ -327,6 +331,28 @@ mod win {
             let w = info.rcWork;
             Some(Spot { x: w.left, y: w.top, w: w.right - w.left, h: w.bottom - w.top })
         }
+    }
+
+    /// Puts our bar window just above its client in the stacking order (no move, no focus).
+    pub fn stack_above(ours: isize, client: isize) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindow, SetWindowPos, GW_HWNDPREV, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
+        // SAFETY: z-order queries / changes on our own window and the client's handle.
+        unsafe {
+            let above = GetWindow(client as HWND, GW_HWNDPREV);
+            if above as isize == ours {
+                return;
+            }
+            let after = if above.is_null() { HWND_TOP } else { above };
+            SetWindowPos(ours as HWND, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+
+    /// The game's own drawing area (EVE's "Window Size"), without Windows' title bar and edges.
+    pub fn client_size(handle: isize) -> Option<(i32, i32)> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SAFETY: fills a RECT for a window handle.
+        (unsafe { GetClientRect(handle as HWND, &mut r) } != 0 && r.right > 0).then_some((r.right - r.left, r.bottom - r.top))
     }
 
     /// Whether the window has Windows' own title bar (EVE's Window mode; Fixed Window has none).
@@ -392,6 +418,7 @@ mod win {
     pub fn window_rect(_h: isize) -> Option<Spot> {
         None
     }
+    #[allow(dead_code)]
     pub fn front_at(_x: i32, _y: i32) -> Option<isize> {
         None
     }
@@ -403,6 +430,10 @@ mod win {
     }
     pub fn captioned(_h: isize) -> bool {
         true
+    }
+    pub fn stack_above(_ours: isize, _client: isize) {}
+    pub fn client_size(_h: isize) -> Option<(i32, i32)> {
+        None
     }
     pub fn shape(_ours: isize, _w: i32, _h: i32, _ring: Option<(i32, i32)>, _menu: Option<(i32, i32, i32, i32)>) {}
     pub fn button_down() -> bool {
@@ -423,7 +454,7 @@ fn build_bar(app: &AppHandle, name: &str) -> Option<tauri::WebviewWindow> {
         .title(format!("{name} · bar"))
         .decorations(false)
         .transparent(true)
-        .always_on_top(true)
+        .always_on_top(false)
         .skip_taskbar(true)
         .shadow(false)
         .resizable(false)
@@ -470,6 +501,22 @@ fn follow_switches(app: &AppHandle, seen: &mut HashMap<String, (bool, Spot)>) {
     for (name, handle) in clients {
         let Some(frame) = win::frame(handle) else { continue };
         let captioned = win::captioned(handle);
+        // Launched again after the Devil's window mode switch: into its spot, once.
+        if let Some((fixed, to)) = crate::windowfix::pending(&name) {
+            if fixed != captioned {
+                crate::windowfix::done(&name);
+                std::thread::spawn(move || {
+                    for wait in [400, 1500] {
+                        std::thread::sleep(Duration::from_millis(wait));
+                        let (Some(rect), Some(now)) = (win::window_rect(handle), win::frame(handle)) else { return };
+                        let target = if fixed { to } else { Spot { x: rect.x + (to.x - now.x), y: rect.y + (to.y - now.y), ..rect } };
+                        crate::clientwindows::place_window(handle, target);
+                    }
+                });
+                seen.remove(&name);
+                continue;
+            }
+        }
         let before = seen.insert(name.clone(), (captioned, frame));
         let Some((was_captioned, old)) = before else { continue };
         if was_captioned == captioned || DRAGGING.lock().unwrap().is_some() {
@@ -505,9 +552,9 @@ pub fn start(app: AppHandle) {
                 std::thread::sleep(Duration::from_millis(150));
                 follow_switches(&app, &mut modes);
                 let wanted = settings(&app);
-                // Window-mode clients have Windows' own title bar: no bar of ours (Tsa, 17 Nov). A client
-                // switched to Fixed Window gets one by itself.
-                let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, h)| wanted.wants(n) && !win::captioned(*h)).collect();
+                // Window-mode clients get the small bar left of Windows' own –, ☐, ✕; Fixed Window
+                // clients get our title bar (or the small bar when floating).
+                let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| wanted.wants(n)).collect();
                 // Bars whose client closed or was taken off the list.
                 for (label, window) in app.webview_windows() {
                     if !label.starts_with(PREFIX) {
@@ -544,10 +591,15 @@ pub fn start(app: AppHandle) {
                         None if wanted.mini.contains(name) => BAR_MINI_W,
                         None => bar_width(&wanted.buttons).max(BAR_MINI_W),
                     };
-                    let place = place_for(frame, win::captioned(*handle), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
-                    let (cx, cy) = if place.frame { (frame.x + 8, frame.y + 8) } else { (place.x + place.w / 2, place.y + place.h / 2) };
-                    let dragging = DRAGGING.lock().unwrap().as_deref() == Some(name.as_str());
-                    let see = dragging || tall.is_some() || win::front_at(cx, cy) == Some(*handle);
+                    let place = place_for(frame, win::captioned(*handle), wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+                    // Shown whenever the client is; kept just above its client in Windows' stacking
+                    // order (not on top of everything), so whatever covers the client covers it too.
+                    let see = true;
+                    if let Some(ours) = our_hwnd(&window) {
+                        if tall.is_none() {
+                            win::stack_above(ours, *handle);
+                        }
+                    }
                     let before = shown.get(&label).copied();
                     if before.is_none_or(|b| b.1.x != place.x || b.1.y != place.y) {
                         let _ = window.set_position(PhysicalPosition::new(place.x, place.y));
@@ -657,14 +709,18 @@ pub fn clientbar_corner(app: AppHandle, corner: String) -> Result<(), String> {
 
 /// This client's details for the bar's ⚙.
 #[tauri::command]
-pub fn clientbar_info(name: String) -> serde_json::Value {
+pub fn clientbar_info(app: AppHandle, name: String) -> serde_json::Value {
     let handle = handle_of(&name);
+    let floating = settings(&app).floating.contains(&name);
     let frame = handle.and_then(win::frame);
     serde_json::json!({
         "name": name,
         "open": handle.is_some(),
         "locked": locked(&name),
         "frame": frame.map(|f| serde_json::json!({ "x": f.x, "y": f.y, "w": f.w, "h": f.h })),
+        "windowMode": handle.map(win::captioned),
+        "size": handle.and_then(win::client_size).map(|(w, h)| serde_json::json!({ "w": w, "h": h })),
+        "floating": floating,
         "titleBar": MODES.lock().unwrap().as_ref().and_then(|m| m.get(&name).copied()).map(|(on, top)| serde_json::json!({ "on": on, "top": top })),
     })
 }
@@ -697,7 +753,7 @@ pub fn clientbar_menu(window: tauri::WebviewWindow, height: Option<f64>) {
     let map = guard.get_or_insert_with(HashMap::new);
     match height {
         Some(h) => {
-            map.insert(label, h.clamp(BAR_H, 600.0));
+            map.insert(label, h.clamp(BAR_H, 900.0));
         }
         None => {
             map.remove(&label);
@@ -807,6 +863,57 @@ pub fn clientbar_drag(app: AppHandle, name: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Ask a client window to close (its ✕ / Alt+F4); EVE may ask to confirm.
+pub fn close_window(handle: isize) -> bool {
+    win::close(handle)
+}
+
+/// A Fixed Window client: our title bar (false) or the small floating bar (true).
+#[tauri::command]
+pub fn clientbar_floating(app: AppHandle, name: String, on: bool) {
+    change(&app, |s| {
+        if on {
+            s.floating.insert(name);
+        } else {
+            s.floating.remove(&name);
+        }
+    });
+}
+
+/// The Devil's window mode (windowfix.rs): close the client, switch its profile to Fixed Window at
+/// `width`×`height` (or back to Window mode), and put it in the same spot when it opens again.
+#[tauri::command]
+pub fn clientbar_window_mode(app: AppHandle, name: String, to_fixed: bool, width: i64, height: i64, floating: bool, profile: Option<String>) -> Result<String, String> {
+    if !(640..=7680).contains(&width) || !(480..=4320).contains(&height) {
+        return Err("That size is outside 640×480 – 7680×4320.".into());
+    }
+    let handle = handle_of(&name).ok_or("that client isn't open")?;
+    let frame = win::frame(handle).ok_or("restore the client first (it's minimised)")?;
+    let scale = app.get_webview_window(&label_for(&name)).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+    let (top, side) = chrome(scale);
+    let captioned = win::captioned(handle);
+    let framed_now = !captioned && !settings(&app).floating.contains(&name);
+    let to = if to_fixed {
+        // The window's spot (title bar included) becomes our title bar + the client inside it.
+        let (x, y) = if floating { (frame.x, frame.y) } else { (frame.x + side, frame.y + top) };
+        Spot { x, y, w: width as i32, h: height as i32 }
+    } else {
+        // Windows' title bar goes where ours was. w/h 0: a visible-frame spot, sized by EVE.
+        let (x, y) = if framed_now { (frame.x - side, frame.y - top) } else { (frame.x, frame.y) };
+        Spot { x, y, w: 0, h: 0 }
+    };
+    change(&app, |s| {
+        if floating {
+            s.floating.insert(name.clone());
+        } else {
+            s.floating.remove(&name);
+        }
+    });
+    let profile = profile.filter(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+    crate::windowfix::run(app, name.clone(), handle, to_fixed, width, height, to, profile)?;
+    Ok(format!("Closing {name}… (if EVE asks, pick Quit). The app changes its profile once it's closed and tells you when to launch it again."))
+}
+
 #[tauri::command]
 pub fn clientbar_minimize(name: String) -> Result<(), String> {
     let handle = handle_of(&name).ok_or("that client is closed")?;
@@ -903,7 +1010,7 @@ mod tests {
     fn fixed_window_1918_gets_our_title_bar_and_fills_a_4k_quarter() {
         let work = Spot { x: 0, y: 0, w: 3840, h: 2112 };
         let client = Spot { x: 1921, y: 1087, w: 1918, h: 1024 };
-        let p = place_for(client, false, Some(work), "right", 1.0, BAR_W, BAR_H);
+        let p = place_for(client, false, false, Some(work), "right", 1.0, BAR_W, BAR_H);
         assert!(p.frame);
         assert_eq!((p.x, p.y, p.w, p.h, p.top), (1920, 1056, 1920, 1056, 31));
         // dropped near the bottom-right quarter: the whole 1920×1056 snaps there
@@ -915,11 +1022,11 @@ mod tests {
     fn small_bar_when_there_is_no_room_above_or_a_windows_title_bar() {
         let work = Spot { x: 0, y: 0, w: 3840, h: 2112 };
         let tsawind = Spot { x: 0, y: 0, w: 1920, h: 1056 };
-        let p = place_for(tsawind, false, Some(work), "right", 1.0, BAR_W, BAR_H);
+        let p = place_for(tsawind, false, false, Some(work), "right", 1.0, BAR_W, BAR_H);
         assert!(!p.frame);
         assert_eq!((p.x, p.y), (1612, 0));
         let windowed = Spot { x: 0, y: 40, w: 1920, h: 1056 };
-        let w = place_for(windowed, true, Some(work), "right", 1.0, BAR_W, BAR_H);
+        let w = place_for(windowed, true, false, Some(work), "right", 1.0, BAR_W, BAR_H);
         assert!(!w.frame);
         // Window mode: left of Windows' own –, ☐, ✕
         assert_eq!(w.x, 1612 - 140);

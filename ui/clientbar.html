@@ -61,6 +61,12 @@
   .say { color: var(--muted); font-size: 11px; min-height: 1.3em; margin-top: 4px; word-break: break-word; }
   .say.ok { color: var(--ok); }
   .say.bad { color: #f08a8a; }
+  .size { display: flex; align-items: center; gap: 4px; margin: 4px 0; }
+  .size input[type=number] { width: 64px; background: #0d0d10; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; padding: 1px 4px; }
+  .menu label.m { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .menu .warnline { color: #ffcf5a; font-size: 11px; }
+  .menu button.go { width: 100%; background: #1c0d0e; border: 1px solid var(--red-hi); color: var(--text); border-radius: 6px; padding: 3px 6px; cursor: pointer; font: inherit; }
+  .menu button.go.sure { background: var(--red-hi); }
   hr { border: 0; border-top: 1px solid #25252c; margin: 6px 0; }
 </style>
 </head>
@@ -103,6 +109,17 @@
   <div class="m" id="where"></div>
   <div class="m" id="profile"></div>
   <div class="row"><button id="lockIt">🔓 Unlocked: can be moved</button></div>
+  <hr>
+  <div id="modeBox">
+    <div class="m" id="modeNote"></div>
+    <div class="size"><span class="m" style="margin:0">Size</span><input type="number" id="mw" min="640" max="7680"> × <input type="number" id="mh" min="480" max="4320"></div>
+    <label class="m" id="mFloatRow"><input type="checkbox" id="mFloat"> Floating: small bar only, no title bar of ours</label>
+    <div class="warnline" id="modeWarn"></div>
+    <button class="go" id="modeGo"></button>
+    <div class="say" id="modeSay"></div>
+  </div>
+  <div class="row" id="floatRow"><button id="floatT"></button></div>
+  <hr>
   <div class="row" id="gearMore">
     <button id="gCam">📹 Camera…</button><button id="gMin">— Minimise</button>
   </div>
@@ -132,7 +149,7 @@
   const NAME = window.__CLIENT_NAME__ || "";
   const LOCKED_SVG = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
   const OPEN_SVG = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/></svg>';
-  let locked = false, menu = null, closeArmed = null, state = null;
+  let locked = false, menu = null, closeArmed = null, state = null, info = null, profileHint = null, modeArmed = false;
 
   // Frame mode on / off (sent by the app when the client gets / loses room for our title bar).
   window.setMode = (frame, top) => {
@@ -268,13 +285,15 @@
   $("gear").addEventListener("click", async () => {
     if (menu === "gearMenu") { closeMenus(); back(); return; }
     $("who").textContent = NAME;
-    const info = await invoke("clientbar_info", { name: NAME }).catch(() => null);
+    info = await invoke("clientbar_info", { name: NAME }).catch(() => null);
     const f = info?.frame;
     $("where").textContent = f ? `${f.w}×${f.h} at ${f.x}, ${f.y}` : "Minimised";
     if (info) { locked = !!info.locked; showLock(); }
     const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [], groups: [] }));
     const acct = (seat.accounts || []).find(a => (a.characters || []).some(c => c.name === NAME));
     const groups = (seat.groups || []).map(x => x.group).filter(g => (g.members || []).some(m => m.name === NAME)).map(g => g.name);
+    profileHint = acct?.profile || null;
+    fillMode();
     $("profile").textContent = (acct ? `Account ${acct.nickname}${acct.profile ? " · settings_" + acct.profile : ""}` : "Account not in SeAT yet") +
       (groups.length ? ` · launch group${groups.length > 1 ? "s" : ""}: ${groups.join(", ")}` : "");
     applyState(await invoke("clientbar_state").catch(() => null));
@@ -300,6 +319,46 @@
     const mini = !document.body.classList.contains("mini");
     await invoke("clientbar_mini", { name: NAME, on: mini }).catch(() => {});
     closeMenus(); applyState(await invoke("clientbar_state").catch(() => null)); back();
+  });
+
+  // The Devil's window mode: Window mode ↔ Fixed Window at the same size and spot (closes the client once).
+  function fillMode() {
+    const windowed = info?.windowMode !== false;
+    const size = info?.size || { w: 1918, h: 1024 };
+    $("mw").value = size.w; $("mh").value = size.h;
+    modeArmed = false; $("modeGo").classList.remove("sure");
+    $("mFloatRow").style.display = windowed ? "" : "none";
+    $("mFloat").checked = false;
+    $("floatRow").style.display = windowed ? "none" : "";
+    $("floatT").textContent = info?.floating ? "Title bar: floating small bar (click for our title bar)" : "Title bar: ours (click for the floating small bar)";
+    $("modeNote").textContent = windowed
+      ? "Try the Devil's window mode: EVE's Fixed Window at this same size and spot, with our title bar, so Windows can never resize or half-snap it. Only needed once per profile: afterwards EVE's own Display Mode switch keeps the size."
+      : `Fixed Window ${size.w}×${size.h}. Back to Window mode at:`;
+    $("modeGo").textContent = windowed ? "Switch to the Devil's window mode" : "Back to Window mode";
+    $("modeWarn").textContent = "The client closes first (if EVE asks, pick Quit); the app changes its profile, then you launch it again.";
+    say("modeSay", "");
+  }
+  $("floatT").addEventListener("click", async () => {
+    await invoke("clientbar_floating", { name: NAME, on: !info?.floating }).catch(() => {});
+    if (info) info.floating = !info.floating;
+    fillMode();
+  });
+  $("modeGo").addEventListener("click", async () => {
+    const width = Math.round(+$("mw").value), height = Math.round(+$("mh").value);
+    if (!(width >= 640 && height >= 480)) { say("modeSay", "Pick a size of at least 640×480.", "bad"); return; }
+    if (!modeArmed) {
+      modeArmed = true;
+      $("modeGo").classList.add("sure");
+      $("modeGo").textContent = (width < 1024 || height < 768)
+        ? `${width}×${height} is under 1024×768: EVE's windows get cramped. Click again to close ${NAME} anyway`
+        : `Click again to close ${NAME} and switch`;
+      return;
+    }
+    modeArmed = false;
+    const toFixed = info?.windowMode !== false;
+    try {
+      say("modeSay", await invoke("clientbar_window_mode", { name: NAME, toFixed, width, height, floating: toFixed && $("mFloat").checked, profile: profileHint }), "ok");
+    } catch (e) { say("modeSay", String(e), "bad"); fillMode(); }
   });
 
   // Which buttons show, shrunk or whole, and which side the bar sits (changed here or on Home).

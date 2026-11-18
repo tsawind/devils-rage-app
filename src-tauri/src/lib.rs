@@ -14,6 +14,7 @@ mod bar;
 mod capture;
 mod chatlog;
 mod clientbar;
+mod windowfix;
 mod clientwindows;
 mod clipboard;
 mod cycle;
@@ -443,6 +444,8 @@ pub fn run() {
             clientbar::clientbar_mini,
             clientbar::clientbar_camera,
             clientbar::clientbar_buttons,
+            clientbar::clientbar_floating,
+            clientbar::clientbar_window_mode,
             groupsetup::group_setup_create,
             groupsetup::group_setup_update,
             piscan::piscan_planets,
