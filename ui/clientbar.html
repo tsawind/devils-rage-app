@@ -41,10 +41,32 @@
   body.mini.right .bar { margin-left: auto; }
   body.mini.center .bar { margin: 0 auto; }
   body.mini .full { display: none; }
+  /* Frame mode (Fixed Window client with room above): our own title bar + a 1 px edge, like
+     Windows' (1918×1024 inside → 1920×1056 with us round it). The middle is cut out (the client
+     shows through and takes the clicks). */
+  :root { --top: 31px; --edge: #3b3b44; }
+  .title { display: none; }
+  .ring { display: none; }
+  body.frame .ring { display: block; position: fixed; inset: 0; border: 1px solid var(--edge); pointer-events: none; }
+  body.frame .bar { position: absolute; top: 0; left: 0; right: 0; width: auto; height: var(--top); margin: 0; border: 1px solid var(--edge);
+                    border-bottom: 0; border-radius: 0; background: #17171c; padding: 0 2px 0 10px; }
+  body.frame .title { display: block; order: 0; flex: 1; align-self: stretch; line-height: calc(var(--top) - 2px); color: #c9c9d0; font-size: 12px;
+                      cursor: grab; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  body.frame.locked .title { cursor: default; }
+  body.frame .b { order: 2; }
+  body.frame .b.lock { order: 1; }
+  body.frame .b.x { order: 6; }
+  body.frame #min { order: 5; }
+  body.frame .b.fold, body.frame .b.drag, body.frame .sep, body.frame .gap { display: none; }
+  body.frame .full.b.lock, body.frame .full.b.cam, body.frame #min { display: grid; }
+  body.frame .menu { top: calc(var(--top) + 2px); left: auto; right: 0; width: 300px; }
+  .title.nudge { color: #ffcf5a; }
 </style>
 </head>
 <body>
+<div class="ring"></div>
 <div class="bar">
+  <span class="title" id="title" title="Drag here to move the client (unlock 🔒 first)"></span>
   <button class="b fold" id="fold" title="Shrink the bar to just ⚙ and ✕">
     <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
   <button class="full b lock" id="lock" title="Locked: click to unlock moving this client"></button>
@@ -103,7 +125,13 @@
   const OPEN = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/></svg>';
   let locked = true, menu = null, closeArmed = null;
 
+  // Frame mode on / off (sent by the app when the client gets / loses room for our title bar).
+  window.setMode = (frame, top) => {
+    document.body.classList.toggle("frame", !!frame);
+    if (top) document.documentElement.style.setProperty("--top", top + "px");
+  };
   function showLock() {
+    document.body.classList.toggle("locked", locked);
     $("lock").innerHTML = locked ? LOCKED : OPEN;
     $("lock").classList.toggle("open", !locked);
     $("lock").title = locked ? "Locked: click to unlock moving this client" : "Unlocked: drag ✥ to move; click to lock";
@@ -141,6 +169,18 @@
     try { await invoke("clientbar_drag", { name: NAME }); } catch (err) { console.warn(err); }
   });
 
+  $("title").textContent = "EVE - " + NAME;
+  $("title").addEventListener("pointerdown", async (e) => {
+    if (e.button !== 0) return;
+    if (locked) {
+      $("title").classList.add("nudge");
+      $("title").textContent = "EVE - " + NAME + "   🔒 unlock to move";
+      setTimeout(() => { $("title").classList.remove("nudge"); $("title").textContent = "EVE - " + NAME; }, 1500);
+      return;
+    }
+    closeMenus();
+    try { await invoke("clientbar_drag", { name: NAME }); } catch (err) { console.warn(err); }
+  });
   $("min").addEventListener("click", () => { closeMenus(); invoke("clientbar_minimize", { name: NAME }).catch(() => {}); });
 
   function disarmClose() {
@@ -253,7 +293,10 @@
   setInterval(() => { if (!menu) refreshState(); }, 2000);
   refreshState();
 
-  invoke("clientbar_info", { name: NAME }).then(i => { locked = i?.locked !== false; showLock(); }).catch(showLock);
+  invoke("clientbar_info", { name: NAME }).then(i => {
+    locked = i?.locked !== false; showLock();
+    if (i?.titleBar) window.setMode(i.titleBar.on, i.titleBar.top);
+  }).catch(showLock);
   showLock();
 </script>
 </body>

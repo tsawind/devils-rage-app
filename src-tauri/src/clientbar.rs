@@ -136,6 +136,60 @@ pub fn bar_spot(frame: Spot, corner: &str, scale: f64, width: f64) -> (i32, i32)
     (x, frame.y)
 }
 
+/// Windows' own title bar at 100%: 31 px, plus a 1 px edge round the window. A Fixed Window
+/// client of 1918×1024 with our title bar and edge is 1920×1056: the same spot a window-mode
+/// client snapped into a 4K quarter takes (Tsa, 17 Nov), so a client can switch between the two.
+const TITLE: f64 = 31.0;
+/// Windows' three title bar buttons (46 px each at 100%), and room for "EVE - name" on the left.
+const CAPTION_BUTTONS: f64 = 140.0;
+const CAPTION_TITLE: f64 = 180.0;
+
+/// Our title bar (its top edge included, like Windows': 1024 + 31 + 1 = 1056), and the 1 px side /
+/// bottom edge (physical pixels).
+pub fn chrome(scale: f64) -> (i32, i32) {
+    ((TITLE * scale).round() as i32, 1)
+}
+
+/// Where the bar window goes and how big it is (physical pixels).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Place {
+    /// true: our title bar above the client and a 1 px edge round it (a Fixed Window client with
+    /// room above it); false: the small bar laid over the client's top edge.
+    pub frame: bool,
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    pub top: i32,
+}
+
+pub fn place_for(frame: Spot, captioned: bool, work: Option<Spot>, corner: &str, scale: f64, width: f64, height: f64) -> Place {
+    let (top, side) = chrome(scale);
+    if !captioned {
+        if let Some(work) = work {
+            if frame.y - top >= work.y {
+                return Place { frame: true, x: frame.x - side, y: frame.y - top, w: frame.w + 2 * side, h: frame.h + top + side, top };
+            }
+        }
+    }
+    let (mut x, y) = bar_spot(frame, corner, scale, width);
+    if captioned {
+        // Window mode: stay clear of Windows' own –, ☐, ✕ (right) and the title (left).
+        match corner {
+            "left" => x += (CAPTION_TITLE * scale) as i32,
+            "center" => {}
+            _ => x -= (CAPTION_BUTTONS * scale) as i32,
+        }
+    }
+    Place { frame: false, x, y, w: (width * scale).round() as i32, h: (height * scale).round() as i32, top: 0 }
+}
+
+/// The client with our title bar and edge round it (what snaps when it's dragged).
+pub fn outer_of(frame: Spot, scale: f64) -> Spot {
+    let (top, side) = chrome(scale);
+    Spot { x: frame.x - side, y: frame.y - top, w: frame.w + 2 * side, h: frame.h + top + side }
+}
+
 /// Where a dropped client snaps: its visible frame's edges to the work area's edges and middle
 /// lines, each axis on its own, only when within [`SNAP`]. Returns the frame's new top-left.
 pub fn snap(frame: Spot, work: Spot) -> (i32, i32) {
@@ -255,6 +309,38 @@ mod win {
         }
     }
 
+    /// Whether the window has Windows' own title bar (EVE's Window mode; Fixed Window has none).
+    pub fn captioned(handle: isize) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_STYLE, WS_CAPTION};
+        // SAFETY: reads the window's style bits.
+        let style = unsafe { GetWindowLongPtrW(handle as HWND, GWL_STYLE) } as u32;
+        style & WS_CAPTION == WS_CAPTION
+    }
+
+    /// Shapes our bar window: the title bar and edge only, with the client showing (and clickable)
+    /// through the hole, plus an open menu's box. None = the whole window (the small bar).
+    pub fn shape(ours: isize, w: i32, h: i32, ring: Option<(i32, i32)>, menu: Option<(i32, i32, i32, i32)>) {
+        use windows_sys::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_DIFF, RGN_OR};
+        // SAFETY: regions are made, combined and handed to SetWindowRgn (which then owns the final
+        // one); the temporary ones are deleted. A failed call just leaves the window unshaped.
+        unsafe {
+            let Some((top, side)) = ring else {
+                SetWindowRgn(ours as HWND, std::ptr::null_mut(), 1);
+                return;
+            };
+            let all = CreateRectRgn(0, 0, w, h);
+            let hole = CreateRectRgn(side, top, w - side, h - side);
+            CombineRgn(all, all, hole, RGN_DIFF);
+            DeleteObject(hole);
+            if let Some((x, y, mw, mh)) = menu {
+                let box_ = CreateRectRgn(x, y, x + mw, y + mh);
+                CombineRgn(all, all, box_, RGN_OR);
+                DeleteObject(box_);
+            }
+            SetWindowRgn(ours as HWND, all, 1);
+        }
+    }
+
     pub fn cursor() -> Option<(i32, i32)> {
         let mut p = POINT { x: 0, y: 0 };
         // SAFETY: GetCursorPos fills a POINT.
@@ -295,6 +381,10 @@ mod win {
     pub fn cursor() -> Option<(i32, i32)> {
         None
     }
+    pub fn captioned(_h: isize) -> bool {
+        true
+    }
+    pub fn shape(_ours: isize, _w: i32, _h: i32, _ring: Option<(i32, i32)>, _menu: Option<(i32, i32, i32, i32)>) {}
     pub fn button_down() -> bool {
         false
     }
@@ -325,13 +415,29 @@ fn build_bar(app: &AppHandle, name: &str) -> Option<tauri::WebviewWindow> {
         .ok()
 }
 
+/// Each bar's frame mode, for the page (clientbar_info): name -> (frame, top in CSS px).
+static MODES: Mutex<Option<HashMap<String, (bool, f64)>>> = Mutex::new(None);
+
+fn our_hwnd(window: &tauri::WebviewWindow) -> Option<isize> {
+    #[cfg(windows)]
+    {
+        window.hwnd().ok().map(|h| h.0 as isize)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        None
+    }
+}
+
 /// Keeps every bar over its client: made when its client opens, moved with it, shown only when
 /// that client is what you see there, closed with the client.
 pub fn start(app: AppHandle) {
     std::thread::Builder::new()
         .name("client-bars".into())
         .spawn(move || {
-            let mut shown: HashMap<String, (bool, i32, i32, f64, f64)> = HashMap::new();
+            // label -> (shown, place, region key)
+            let mut shown: HashMap<String, (bool, Place, (bool, i32, i32, i32))> = HashMap::new();
             loop {
                 std::thread::sleep(Duration::from_millis(150));
                 let wanted = settings(&app);
@@ -361,27 +467,43 @@ pub fn start(app: AppHandle) {
                     let Some(frame) = win::frame(*handle) else {
                         if shown.get(&label).is_none_or(|s| s.0) && tall.is_none() {
                             let _ = window.hide();
-                            shown.insert(label.clone(), (false, 0, 0, 0.0, 0.0));
+                            if let Some(entry) = shown.get_mut(&label) {
+                                entry.0 = false;
+                            }
                         }
                         continue;
                     };
                     let width = if tall.is_none() && wanted.mini.contains(name) { BAR_MINI_W } else { BAR_W };
-                    let (x, y) = bar_spot(frame, &wanted.corner, scale, width);
-                    let (cx, cy) = (x + (width * scale / 2.0) as i32, y + (BAR_H * scale / 2.0) as i32);
+                    let place = place_for(frame, win::captioned(*handle), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+                    let (cx, cy) = if place.frame { (frame.x + 8, frame.y + 8) } else { (place.x + place.w / 2, place.y + place.h / 2) };
                     let dragging = DRAGGING.lock().unwrap().as_deref() == Some(name.as_str());
                     let see = dragging || tall.is_some() || win::front_at(cx, cy) == Some(*handle);
-                    let height = tall.unwrap_or(BAR_H);
                     let before = shown.get(&label).copied();
-                    if before.is_none_or(|b| b.1 != x || b.2 != y) {
-                        let _ = window.set_position(PhysicalPosition::new(x, y));
+                    if before.is_none_or(|b| b.1.x != place.x || b.1.y != place.y) {
+                        let _ = window.set_position(PhysicalPosition::new(place.x, place.y));
                     }
-                    if before.is_none_or(|b| (b.3 - height).abs() > 0.5 || (b.4 - width).abs() > 0.5) {
-                        let _ = window.set_size(LogicalSize::new(width, height));
+                    if before.is_none_or(|b| b.1.w != place.w || b.1.h != place.h) {
+                        let _ = window.set_size(tauri::PhysicalSize::new(place.w.max(1) as u32, place.h.max(1) as u32));
+                    }
+                    // Frame mode: only the title bar and edge are ours (plus an open menu's box).
+                    let menu_h = tall.map_or(0, |t| ((t - BAR_H + 8.0) * scale).round() as i32);
+                    let region = (place.frame, place.w, place.h, menu_h);
+                    if before.is_none_or(|b| b.2 != region) {
+                        if let Some(ours) = our_hwnd(&window) {
+                            let menu_w = (BAR_W * scale).round() as i32;
+                            let menu = (place.frame && menu_h > 0).then_some((place.w - menu_w, place.top, menu_w, menu_h));
+                            win::shape(ours, place.w, place.h, place.frame.then_some((place.top, 1)), menu);
+                        }
+                    }
+                    if before.is_none_or(|b| b.1.frame != place.frame || b.1.top != place.top) {
+                        let top_css = place.top as f64 / scale;
+                        MODES.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.clone(), (place.frame, top_css));
+                        let _ = window.eval(format!("window.setMode && window.setMode({}, {top_css})", place.frame));
                     }
                     if before.is_none_or(|b| b.0 != see) {
                         let _ = if see { window.show() } else { window.hide() };
                     }
-                    shown.insert(label, (see, x, y, height, width));
+                    shown.insert(label, (see, place, region));
                 }
             }
         })
@@ -473,6 +595,7 @@ pub fn clientbar_info(name: String) -> serde_json::Value {
         "open": handle.is_some(),
         "locked": !UNLOCKED.lock().unwrap().as_ref().is_some_and(|s| s.contains(&name)),
         "frame": frame.map(|f| serde_json::json!({ "x": f.x, "y": f.y, "w": f.w, "h": f.h })),
+        "titleBar": MODES.lock().unwrap().as_ref().and_then(|m| m.get(&name).copied()).map(|(on, top)| serde_json::json!({ "on": on, "top": top })),
     })
 }
 
@@ -540,13 +663,17 @@ pub fn clientbar_drag(app: AppHandle, name: String) -> Result<(), String> {
     let rect0 = win::window_rect(handle).ok_or("that client is minimised")?;
     let frame0 = win::frame(handle).ok_or("that client is minimised")?;
     let mouse0 = win::cursor().ok_or("no mouse position")?;
+    // A Fixed Window client snaps with our title bar and edge round it (1918×1024 → 1920×1056).
+    let scale = app.get_webview_window(&label_for(&name)).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+    let framed = !win::captioned(handle);
+    let outer0 = if framed { outer_of(frame0, scale) } else { frame0 };
     *DRAGGING.lock().unwrap() = Some(name.clone());
     std::thread::Builder::new()
         .name("client-drag".into())
         .spawn(move || {
             let outline = ghost(&app);
             let mut last = mouse0;
-            let mut target = frame0;
+            let mut target = outer0;
             let mut moved = false;
             let mut snapping: Option<bool> = None;
             let mut placed: Option<Spot> = None;
@@ -561,9 +688,9 @@ pub fn clientbar_drag(app: AppHandle, name: String) -> Result<(), String> {
                         let (dx, dy) = (now.0 - mouse0.0, now.1 - mouse0.1);
                         moved |= dx.abs() > 3 || dy.abs() > 3;
                         if moved {
-                            let raw = Spot { x: frame0.x + dx, y: frame0.y + dy, ..frame0 };
+                            let raw = Spot { x: outer0.x + dx, y: outer0.y + dy, ..outer0 };
                             let (sx, sy) = win::work_area(raw).map_or((raw.x, raw.y), |work| snap(raw, work));
-                            target = Spot { x: sx, y: sy, ..frame0 };
+                            target = Spot { x: sx, y: sy, ..outer0 };
                             if let Some(window) = &outline {
                                 let snaps = (sx, sy) != (raw.x, raw.y);
                                 if snapping != Some(snaps) {
@@ -590,7 +717,7 @@ pub fn clientbar_drag(app: AppHandle, name: String) -> Result<(), String> {
                 let _ = window.hide();
             }
             if moved {
-                let to = Spot { x: rect0.x + (target.x - frame0.x), y: rect0.y + (target.y - frame0.y), w: rect0.w, h: rect0.h };
+                let to = Spot { x: rect0.x + (target.x - outer0.x), y: rect0.y + (target.y - outer0.y), w: rect0.w, h: rect0.h };
                 crate::clientwindows::place_window(handle, to);
                 crate::clientwindows::remember_one(&app, &name, to);
             }
@@ -691,6 +818,32 @@ mod tests {
         let kept: BarSettings = serde_json::from_str(r#"{"every":false,"clients":["Tsawind"],"corner":"left","version":1}"#).unwrap();
         assert_eq!(kept.clone().upgrade().corner, "left");
         assert!(!kept.upgrade().every);
+    }
+
+    #[test]
+    fn fixed_window_1918_gets_our_title_bar_and_fills_a_4k_quarter() {
+        let work = Spot { x: 0, y: 0, w: 3840, h: 2112 };
+        let client = Spot { x: 1921, y: 1087, w: 1918, h: 1024 };
+        let p = place_for(client, false, Some(work), "right", 1.0, BAR_W, BAR_H);
+        assert!(p.frame);
+        assert_eq!((p.x, p.y, p.w, p.h, p.top), (1920, 1056, 1920, 1056, 31));
+        // dropped near the bottom-right quarter: the whole 1920×1056 snaps there
+        let outer = outer_of(Spot { x: 1950, y: 1070, ..client }, 1.0);
+        assert_eq!(snap(outer, work), (1920, 1056));
+    }
+
+    #[test]
+    fn small_bar_when_there_is_no_room_above_or_a_windows_title_bar() {
+        let work = Spot { x: 0, y: 0, w: 3840, h: 2112 };
+        let tsawind = Spot { x: 0, y: 0, w: 1920, h: 1056 };
+        let p = place_for(tsawind, false, Some(work), "right", 1.0, BAR_W, BAR_H);
+        assert!(!p.frame);
+        assert_eq!((p.x, p.y), (1612, 0));
+        let windowed = Spot { x: 0, y: 40, w: 1920, h: 1056 };
+        let w = place_for(windowed, true, Some(work), "right", 1.0, BAR_W, BAR_H);
+        assert!(!w.frame);
+        // Window mode: left of Windows' own –, ☐, ✕
+        assert_eq!(w.x, 1612 - 140);
     }
 
     #[test]
