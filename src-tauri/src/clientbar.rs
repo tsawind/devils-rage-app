@@ -223,6 +223,34 @@ pub fn outer_of(frame: Spot, scale: f64) -> Spot {
     Spot { x: frame.x - side, y: frame.y - top, w: frame.w + 2 * side, h: frame.h + top + side }
 }
 
+/// Fixed Window windows already looked at for the nudge (by handle; a login screen keeps its
+/// window when it logs in).
+static SEEN_FIXED: Mutex<Option<HashSet<isize>>> = Mutex::new(None);
+
+fn first_sight(handle: isize) -> bool {
+    let mut guard = SEEN_FIXED.lock().unwrap();
+    let seen = guard.get_or_insert_with(HashSet::new);
+    if seen.len() > 500 {
+        seen.clear();
+    }
+    seen.insert(handle)
+}
+
+/// Where a Fixed Window client with no room above goes so our title bar fits: the client plus
+/// title bar and edge, snapped on its monitor. Only when that still fits a quarter / half (a
+/// 1918×1024 client) or the full height (a tall one); a 1920×1056 client is left alone.
+pub fn nudge_for_title_bar(frame: Spot, work: Spot, scale: f64) -> Option<Spot> {
+    let (top, side) = chrome(scale);
+    let outer_h = frame.h + top + side;
+    let fits = outer_h <= work.h / 2 + 1 || (frame.h > work.h / 2 && outer_h <= work.h);
+    if !fits || frame.y - top >= work.y {
+        return None;
+    }
+    let outer = Spot { x: frame.x - side, y: frame.y, w: frame.w + 2 * side, h: outer_h };
+    let (sx, sy) = snap(outer, work);
+    Some(Spot { x: sx + side, y: sy + top, w: frame.w, h: frame.h })
+}
+
 /// Where a dropped client snaps: its visible frame's edges to the work area's edges and middle
 /// lines, each axis on its own, only when within [`SNAP`]. Returns the frame's new top-left.
 pub fn snap(frame: Spot, work: Spot) -> (i32, i32) {
@@ -631,6 +659,16 @@ pub fn start(app: AppHandle) {
                         None => bar_width(&wanted.buttons).max(BAR_MINI_W),
                     };
                     let mut place = place_for(frame, win::captioned(*handle), wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+                    // A Fixed Window client (login screens too) that opened flush against the top
+                    // has no room for our title bar: the first time, nudge it into its snapped spot.
+                    if !place.frame && !win::captioned(*handle) && !wanted.floating.contains(name) && first_sight(*handle) {
+                        if let Some(work) = win::work_area(frame) {
+                            if let Some(to) = nudge_for_title_bar(frame, work, scale) {
+                                crate::clientwindows::place_window(*handle, to);
+                                continue;
+                            }
+                        }
+                    }
                     if !place.frame {
                         if let Some((dx, dy)) = wanted.offsets.get(name) {
                             place.x = frame.x + dx;
@@ -1176,6 +1214,17 @@ mod tests {
         let frame = Spot { x: 0, y: 0, w: 1920, h: 1056 };
         let to = after_switch(false, Spot { x: 1921, y: 1087, w: 1918, h: 1024 }, rect, frame, 1.0);
         assert_eq!((to.x, to.y), (1913, 1056));
+    }
+
+    #[test]
+    fn a_fixed_login_screen_in_the_corner_moves_down_for_our_title_bar() {
+        let work = Spot { x: 0, y: 0, w: 3840, h: 2112 };
+        let login = Spot { x: 0, y: 0, w: 1918, h: 1024 };
+        assert_eq!(nudge_for_title_bar(login, work, 1.0), Some(Spot { x: 1, y: 31, w: 1918, h: 1024 }));
+        // already room above: nothing
+        assert_eq!(nudge_for_title_bar(Spot { y: 1087, ..login }, work, 1.0), None);
+        // a 1920×1056 client wouldn't fit its quarter with our bar: left alone
+        assert_eq!(nudge_for_title_bar(Spot { x: 0, y: 0, w: 1920, h: 1056 }, work, 1.0), None);
     }
 
     #[test]
