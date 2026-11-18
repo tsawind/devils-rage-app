@@ -616,10 +616,16 @@ pub fn start(app: AppHandle) {
             let mut shown: HashMap<String, (bool, Place, (bool, i32, i32, i32))> = HashMap::new();
             let mut modes: HashMap<String, (bool, Spot)> = HashMap::new();
             let mut logins: HashMap<isize, LoginWatch> = HashMap::new();
+            let mut noted = std::time::Instant::now();
             loop {
                 std::thread::sleep(Duration::from_millis(150));
                 follow_switches(&app, &mut modes);
                 remember_moved_logins(&app, &mut logins);
+                // Which EVE account each logged-in client is on (pcaccounts.rs), every few seconds.
+                if noted.elapsed() >= Duration::from_secs(3) {
+                    noted = std::time::Instant::now();
+                    crate::pcaccounts::note_running(&app);
+                }
                 let wanted = settings(&app);
                 // Window-mode clients get the small bar left of Windows' own –, ☐, ✕; Fixed Window
                 // clients get our title bar (or the small bar when floating).

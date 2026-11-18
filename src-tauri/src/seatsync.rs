@@ -106,13 +106,58 @@ pub fn pc_accounts() -> serde_json::Value {
     serde_json::json!({ "accounts": accounts, "hidden": hidden, "running": running })
 }
 
+/// Character ids for names (EVE's public lookup), for characters seen logged in here.
+async fn esi_ids(names: Vec<String>) -> std::collections::HashMap<String, u64> {
+    if names.is_empty() {
+        return Default::default();
+    }
+    let response = crate::http_client()
+        .post("https://esi.evetech.net/latest/universe/ids/?datasource=tranquility")
+        .json(&names)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await;
+    let Ok(response) = response else { return Default::default() };
+    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    body["characters"].as_array().into_iter().flatten().filter_map(|c| Some((c["name"].as_str()?.to_lowercase(), c["id"].as_u64()?))).collect()
+}
+
 /// Hand `pc_accounts` to a SeAT page in the app (its Your accounts asked), with each character's
-/// name (public ESI lookup from this PC, remembered; the page's own lookup can fail).
+/// name (public ESI lookup from this PC, remembered; the page's own lookup can fail), plus every
+/// character seen logged in here on its EVE account (certain: from the client's sign-in token).
 pub fn send_pc_accounts(app: &AppHandle, me: &str) {
     let (app, me) = (app.clone(), me.to_string());
     tauri::async_runtime::spawn(async move {
         use tauri::Manager;
         let mut detail = pc_accounts();
+        // Seen logged in: add each to its EVE account (the launcher's lists may not have it).
+        let seen = crate::pcaccounts::seen(&app);
+        let ids = esi_ids(seen.keys().cloned().collect()).await;
+        if let Some(accounts) = detail["accounts"].as_array_mut() {
+            for (name, user) in &seen {
+                let Some(id) = ids.get(&name.to_lowercase()).copied() else { continue };
+                // Seen on this account now: off any other account the older lists put it on.
+                for account in accounts.iter_mut() {
+                    if account["user_id"].as_u64() != Some(*user) {
+                        if let Some(list) = account["characters"].as_array_mut() {
+                            list.retain(|c| c["id"].as_u64() != Some(id));
+                        }
+                    }
+                }
+                let entry = match accounts.iter_mut().position(|a| a["user_id"].as_u64() == Some(*user)) {
+                    Some(i) => &mut accounts[i],
+                    None => {
+                        accounts.push(serde_json::json!({ "user_id": user, "characters": [] }));
+                        accounts.last_mut().expect("just pushed")
+                    }
+                };
+                if let Some(list) = entry["characters"].as_array_mut() {
+                    if !list.iter().any(|c| c["id"].as_u64() == Some(id)) {
+                        list.push(serde_json::json!({ "id": id, "incognito": !crate::incognito::is_public_id(id), "how": "client", "name": name }));
+                    }
+                }
+            }
+        }
         let ids: Vec<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();
         let names = crate::profiles::profiles_names(ids).await;
         if let Some(accounts) = detail["accounts"].as_array_mut() {

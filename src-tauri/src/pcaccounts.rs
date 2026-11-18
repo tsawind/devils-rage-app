@@ -175,3 +175,46 @@ mod tests {
         assert_eq!(got[&2].characters, vec![(20, How::Profiles)]);
     }
 }
+
+/// Patch 74 (Tsa, 18 Nov): every character seen logged in on this PC, and the EVE account its
+/// client was signed in to (from the client's own sign-in token): certain, and it builds up as
+/// characters log in. Character name → EVE account number; this PC only (pc-accounts.json).
+static SEEN: std::sync::Mutex<Option<BTreeMap<String, u64>>> = std::sync::Mutex::new(None);
+
+fn seen_file(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    app.path().app_config_dir().ok().map(|dir| dir.join("pc-accounts.json"))
+}
+
+fn with_seen<T>(app: &tauri::AppHandle, f: impl FnOnce(&mut BTreeMap<String, u64>) -> T) -> T {
+    let mut guard = SEEN.lock().unwrap();
+    let seen = guard.get_or_insert_with(|| seen_file(app).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+    f(seen)
+}
+
+/// Note the EVE account of every logged-in client whose start-up line has been read (the rest are
+/// read in the background and noted next time).
+pub fn note_running(app: &tauri::AppHandle) {
+    let mut changed = false;
+    for (name, handle) in crate::clipboard::open_eve_windows() {
+        if crate::startline::known_profile_of_window(handle).is_none() {
+            continue;
+        }
+        let Some(user) = crate::startline::known_account_of_window(handle) else { continue };
+        changed |= with_seen(app, |seen| seen.insert(name.clone(), user) != Some(user));
+    }
+    if changed {
+        let text = with_seen(app, |seen| serde_json::to_string_pretty(seen).unwrap_or_default());
+        if let Some(path) = seen_file(app) {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(path, text);
+        }
+    }
+}
+
+/// Every character seen logged in here, with its EVE account.
+pub fn seen(app: &tauri::AppHandle) -> BTreeMap<String, u64> {
+    with_seen(app, |seen| seen.clone())
+}
