@@ -86,16 +86,14 @@ pub fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
 /// of them are incognito, so Your accounts can show them where they belong (greyed). Only for our
 /// SeAT's page; the page shows them and never sends the incognito ones on.
 pub fn pc_accounts() -> serde_json::Value {
-    let launcher = crate::launch::launcher_accounts();
-    let accounts: Vec<serde_json::Value> = crate::pcaccounts::deduce(&launcher, &crate::pcaccounts::folders())
+    // Only the EVE launcher's own lists (from CCP: this account has these characters). Profile
+    // folders say which profile a character was played with, not whose it is (Tsa, 18 Nov:
+    // Tsawind started once with settings_11 is just a stray file there).
+    let accounts: Vec<serde_json::Value> = crate::launch::launcher_accounts()
         .into_iter()
-        .map(|(user, account)| {
-            let characters: Vec<serde_json::Value> = account
-                .characters
-                .into_iter()
-                .map(|(id, how)| serde_json::json!({ "id": id, "incognito": !crate::incognito::is_public_id(id), "how": if how == crate::pcaccounts::How::Launcher { "launcher" } else { "profiles" } }))
-                .collect();
-            serde_json::json!({ "user_id": user, "profile": account.profile, "characters": characters })
+        .map(|(user, ids)| {
+            let characters: Vec<serde_json::Value> = ids.into_iter().map(|id| serde_json::json!({ "id": id, "incognito": !crate::incognito::is_public_id(id), "how": "launcher" })).collect();
+            serde_json::json!({ "user_id": user, "characters": characters })
         })
         .collect();
     let hidden = crate::incognito::incognito_state()["hidden"].clone();

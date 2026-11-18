@@ -21,6 +21,8 @@ mod clipboard;
 mod cycle;
 mod groupsetup;
 mod incognito;
+// Kept for the profile-folder cleanup (which account each folder belongs to, stray files).
+#[allow(dead_code)]
 mod pcaccounts;
 mod launch;
 mod clientaudio;
