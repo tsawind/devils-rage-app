@@ -44,6 +44,10 @@ pub struct BarSettings {
     /// "right" (default), "center" or "left" (past EVE's Neocom).
     #[serde(default = "default_corner")]
     pub corner: String,
+    /// Which buttons the bar shows besides ⚙ (and › on the small bar): lock, move, camera,
+    /// minimize, close. Default move and close (Tsa, 17 Nov); the rest live in ⚙.
+    #[serde(default = "default_buttons")]
+    pub buttons: Vec<String>,
     #[serde(default)]
     pub version: u32,
 }
@@ -56,9 +60,21 @@ fn default_corner() -> String {
     "right".into()
 }
 
+pub const BUTTONS: &[&str] = &["lock", "move", "camera", "minimize", "close"];
+
+fn default_buttons() -> Vec<String> {
+    vec!["move".into(), "close".into()]
+}
+
+/// The small bar's width for the buttons shown (logical px): ›, ⚙, the buttons, gaps and padding.
+pub fn bar_width(buttons: &[String]) -> f64 {
+    let each: f64 = buttons.iter().map(|b| if b == "move" { 46.0 } else { 30.0 }).sum();
+    12.0 + 20.0 + 30.0 + each + 2.0 * (buttons.len() as f64 + 2.0)
+}
+
 impl Default for BarSettings {
     fn default() -> Self {
-        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), mini: BTreeSet::new(), corner: default_corner(), version: 1 }
+        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), mini: BTreeSet::new(), corner: default_corner(), buttons: default_buttons(), version: 1 }
     }
 }
 
@@ -80,8 +96,8 @@ impl BarSettings {
 }
 
 static SETTINGS: Mutex<Option<BarSettings>> = Mutex::new(None);
-/// Clients whose bar is unlocked (drag allowed; Lock windows leaves them alone). Locked by default.
-static UNLOCKED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// Clients locked in place from ⚙ (their bar can't move them). Unlocked by default.
+static LOCKED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// Bars with a menu open: label -> height (logical).
 static TALL: Mutex<Option<HashMap<String, f64>>> = Mutex::new(None);
 static DRAGGING: Mutex<Option<String>> = Mutex::new(None);
@@ -110,9 +126,13 @@ fn change(app: &AppHandle, f: impl FnOnce(&mut BarSettings)) {
     *SETTINGS.lock().unwrap() = Some(now);
 }
 
-/// Whether Lock windows should leave this client alone (its bar is unlocked or it's being dragged).
+/// Whether Lock windows should leave this client alone right now (it's being dragged by its bar).
 pub fn unlocked(name: &str) -> bool {
-    UNLOCKED.lock().unwrap().as_ref().is_some_and(|set| set.contains(name)) || DRAGGING.lock().unwrap().as_deref() == Some(name)
+    DRAGGING.lock().unwrap().as_deref() == Some(name)
+}
+
+fn locked(name: &str) -> bool {
+    LOCKED.lock().unwrap().as_ref().is_some_and(|set| set.contains(name))
 }
 
 pub fn label_for(name: &str) -> String {
@@ -441,7 +461,9 @@ pub fn start(app: AppHandle) {
             loop {
                 std::thread::sleep(Duration::from_millis(150));
                 let wanted = settings(&app);
-                let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| wanted.wants(n)).collect();
+                // Window-mode clients have Windows' own title bar: no bar of ours (Tsa, 17 Nov). A client
+                // switched to Fixed Window gets one by itself.
+                let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, h)| wanted.wants(n) && !win::captioned(*h)).collect();
                 // Bars whose client closed or was taken off the list.
                 for (label, window) in app.webview_windows() {
                     if !label.starts_with(PREFIX) {
@@ -473,7 +495,11 @@ pub fn start(app: AppHandle) {
                         }
                         continue;
                     };
-                    let width = if tall.is_none() && wanted.mini.contains(name) { BAR_MINI_W } else { BAR_W };
+                    let width = match tall {
+                        Some(_) => BAR_W,
+                        None if wanted.mini.contains(name) => BAR_MINI_W,
+                        None => bar_width(&wanted.buttons).max(BAR_MINI_W),
+                    };
                     let place = place_for(frame, win::captioned(*handle), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
                     let (cx, cy) = if place.frame { (frame.x + 8, frame.y + 8) } else { (place.x + place.w / 2, place.y + place.h / 2) };
                     let dragging = DRAGGING.lock().unwrap().as_deref() == Some(name.as_str());
@@ -516,7 +542,7 @@ pub fn clientbar_state(app: AppHandle) -> serde_json::Value {
     let s = settings(&app);
     let mut open: Vec<String> = crate::clipboard::open_clients().into_iter().map(|(n, _)| n).filter(|n| crate::clientwindows::keeps_a_spot(n)).collect();
     open.sort();
-    serde_json::json!({ "every": s.every, "off": s.off, "clients": s.clients, "mini": s.mini, "corner": s.corner, "open": open })
+    serde_json::json!({ "every": s.every, "off": s.off, "clients": s.clients, "mini": s.mini, "corner": s.corner, "buttons": s.buttons, "open": open })
 }
 
 /// Give a client a bar, or take it away.
@@ -593,7 +619,7 @@ pub fn clientbar_info(name: String) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "open": handle.is_some(),
-        "locked": !UNLOCKED.lock().unwrap().as_ref().is_some_and(|s| s.contains(&name)),
+        "locked": locked(&name),
         "frame": frame.map(|f| serde_json::json!({ "x": f.x, "y": f.y, "w": f.w, "h": f.h })),
         "titleBar": MODES.lock().unwrap().as_ref().and_then(|m| m.get(&name).copied()).map(|(on, top)| serde_json::json!({ "on": on, "top": top })),
     })
@@ -601,13 +627,22 @@ pub fn clientbar_info(name: String) -> serde_json::Value {
 
 #[tauri::command]
 pub fn clientbar_lock(name: String, locked: bool) {
-    let mut guard = UNLOCKED.lock().unwrap();
+    let mut guard = LOCKED.lock().unwrap();
     let set = guard.get_or_insert_with(HashSet::new);
     if locked {
-        set.remove(&name);
-    } else {
         set.insert(name);
+    } else {
+        set.remove(&name);
     }
+}
+
+/// Which buttons the bars show (⚙ → Buttons on the bar).
+#[tauri::command]
+pub fn clientbar_buttons(app: AppHandle, buttons: Vec<String>) -> Result<(), String> {
+    let mut picked: Vec<String> = BUTTONS.iter().filter(|b| buttons.iter().any(|x| x == *b)).map(|b| b.to_string()).collect();
+    picked.dedup();
+    change(&app, |s| s.buttons = picked);
+    Ok(())
 }
 
 /// A menu opened or closed: the bar grows to fit it.
@@ -656,8 +691,8 @@ fn ghost(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 /// let go and the client moves there once, at its exact size, and is remembered at its new spot.
 #[tauri::command]
 pub fn clientbar_drag(app: AppHandle, name: String) -> Result<(), String> {
-    if !unlocked(&name) {
-        return Err("Unlock it first (🔒).".into());
+    if locked(&name) {
+        return Err("This client is locked in place (⚙ → Unlock).".into());
     }
     let handle = handle_of(&name).ok_or("that client is closed")?;
     let rect0 = win::window_rect(handle).ok_or("that client is minimised")?;
@@ -844,6 +879,15 @@ mod tests {
         assert!(!w.frame);
         // Window mode: left of Windows' own –, ☐, ✕
         assert_eq!(w.x, 1612 - 140);
+    }
+
+    #[test]
+    fn default_bar_is_move_and_close() {
+        let s = BarSettings::default();
+        assert_eq!(s.buttons, vec!["move".to_string(), "close".to_string()]);
+        assert_eq!(bar_width(&s.buttons), 146.0);
+        let old: BarSettings = serde_json::from_str(r#"{"corner":"right","version":1}"#).unwrap();
+        assert_eq!(old.buttons, s.buttons);
     }
 
     #[test]

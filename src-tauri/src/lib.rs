@@ -442,6 +442,7 @@ pub fn run() {
             clientbar::clientbar_every,
             clientbar::clientbar_mini,
             clientbar::clientbar_camera,
+            clientbar::clientbar_buttons,
             groupsetup::group_setup_create,
             groupsetup::group_setup_update,
             piscan::piscan_planets,

@@ -4,83 +4,83 @@
 <meta charset="utf-8">
 <title>Client bar</title>
 <style>
-  :root { --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --purple:#a970ff; --line:#33333b; --text:#e6e6ea; --muted:#8a8a92; }
+  :root { --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --purple:#a970ff; --line:#33333b; --text:#e6e6ea; --muted:#8a8a92;
+          --top: 31px; --edge: #3b3b44; }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: transparent; overflow: hidden; font: 12px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--text); user-select: none; }
   .bar { height: 34px; display: flex; align-items: center; gap: 2px; padding: 0 4px; background: rgba(12, 12, 15, .86);
          border: 1px solid var(--line); border-top: 0; border-radius: 0 0 9px 9px; }
-  .b { width: 30px; height: 28px; border: 0; border-radius: 6px; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; padding: 0; }
+  .b { width: 30px; height: 28px; border: 0; border-radius: 6px; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; padding: 0; flex: none; }
   .b:hover { background: #22222a; color: var(--text); }
   .b svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-  .b.drag { width: 46px; cursor: grab; }
+  .b.fold { width: 20px; }
+  .b.drag { width: 46px; cursor: grab; color: var(--ok); }
   .b.drag.off { cursor: not-allowed; opacity: .35; }
-  .b.drag:not(.off) { color: var(--ok); }
-  .b.lock.open { color: #ffcf5a; }
+  .b.lock.on { color: #ffcf5a; }
   .b.cam { color: var(--purple); }
   .b.cam.rec { color: #ff4d4d; }
   .b.x:hover { background: var(--red); color: #fff; }
   .b.x.sure { background: var(--red-hi); color: #fff; width: 58px; font-size: 11px; font-weight: 600; }
   .gap { flex: 1; }
-  .sep { width: 10px; }
-  .menu { position: absolute; top: 38px; left: 0; right: 0; background: rgba(16, 16, 20, .97); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; display: none; }
+  .title, .ring { display: none; }
+
+  /* Buttons left out in ⚙ → Buttons on the bar. */
+  .nobtn { display: none !important; }
+
+  /* Small bar shrunk (›): just ⚙ and ✕. */
+  body.mini:not(.frame) .bar > .b:not(.fold):not(#gear):not(#close) { display: none !important; }
+  body.mini:not(.frame) #close { display: grid !important; }
+  body.mini:not(.frame) .b.fold svg { transform: rotate(180deg); }
+  body.right:not(.frame) .bar { width: fit-content; margin-left: auto; }
+  body.center:not(.frame) .bar { width: fit-content; margin: 0 auto; }
+  body:not(.right):not(.center):not(.frame) .bar { width: fit-content; }
+
+  /* Frame mode (Fixed Window client with room above): our own title bar + a 1 px edge, like
+     Windows' (1918×1024 inside → 1920×1056). The middle is cut out: the client shows through. */
+  body.frame .ring { display: block; position: fixed; inset: 0; border: 1px solid var(--edge); pointer-events: none; }
+  body.frame .bar { position: absolute; top: 0; left: 0; right: 0; height: var(--top); border: 1px solid var(--edge); border-bottom: 0;
+                    border-radius: 0; background: #17171c; padding: 0 2px 0 10px; }
+  body.frame .title { display: block; flex: 1; align-self: stretch; line-height: calc(var(--top) - 2px); color: #c9c9d0; font-size: 12px;
+                      cursor: grab; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  body.frame.locked .title { cursor: default; }
+  body.frame .b.fold, body.frame .b.drag, body.frame .gap { display: none; }
+  .title.nudge { color: #ffcf5a; }
+
+  .menu { position: absolute; top: 38px; left: 0; width: 300px; background: rgba(16, 16, 20, .97); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; display: none; }
+  body.right .menu { left: auto; right: 0; }
+  body.frame .menu { top: calc(var(--top) + 2px); left: auto; right: 0; }
   .menu.on { display: block; }
   .menu h4 { margin: 0 0 4px; font-size: 13px; }
   .menu .m { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
   .menu button.it { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 4px 6px; border-radius: 6px; cursor: pointer; font: inherit; }
   .menu button.it:hover { background: #22222a; }
-  .menu .row { display: flex; gap: 4px; margin: 4px 0; }
-  .menu .row button { flex: 1; background: #121216; border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 2px 0; cursor: pointer; font: inherit; }
+  .menu .row { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
+  .menu .row button { flex: 1; background: #121216; border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 2px 6px; cursor: pointer; font: inherit; white-space: nowrap; }
   .menu .row button.on { border-color: var(--red-hi); background: #1c0d0e; }
+  .menu .row button.lockon { border-color: #ffcf5a; color: #ffcf5a; }
   .say { color: var(--muted); font-size: 11px; min-height: 1.3em; margin-top: 4px; word-break: break-word; }
   .say.ok { color: var(--ok); }
   .say.bad { color: #f08a8a; }
   hr { border: 0; border-top: 1px solid #25252c; margin: 6px 0; }
-  body.mini .bar { width: 100px; }
-  .b.fold { width: 20px; }
-  body.mini .b.fold svg { transform: rotate(180deg); }
-  body.mini.right .bar { margin-left: auto; }
-  body.mini.center .bar { margin: 0 auto; }
-  body.mini .full { display: none; }
-  /* Frame mode (Fixed Window client with room above): our own title bar + a 1 px edge, like
-     Windows' (1918×1024 inside → 1920×1056 with us round it). The middle is cut out (the client
-     shows through and takes the clicks). */
-  :root { --top: 31px; --edge: #3b3b44; }
-  .title { display: none; }
-  .ring { display: none; }
-  body.frame .ring { display: block; position: fixed; inset: 0; border: 1px solid var(--edge); pointer-events: none; }
-  body.frame .bar { position: absolute; top: 0; left: 0; right: 0; width: auto; height: var(--top); margin: 0; border: 1px solid var(--edge);
-                    border-bottom: 0; border-radius: 0; background: #17171c; padding: 0 2px 0 10px; }
-  body.frame .title { display: block; order: 0; flex: 1; align-self: stretch; line-height: calc(var(--top) - 2px); color: #c9c9d0; font-size: 12px;
-                      cursor: grab; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  body.frame.locked .title { cursor: default; }
-  body.frame .b { order: 2; }
-  body.frame .b.lock { order: 1; }
-  body.frame .b.x { order: 6; }
-  body.frame #min { order: 5; }
-  body.frame .b.fold, body.frame .b.drag, body.frame .sep, body.frame .gap { display: none; }
-  body.frame .full.b.lock, body.frame .full.b.cam, body.frame #min { display: grid; }
-  body.frame .menu { top: calc(var(--top) + 2px); left: auto; right: 0; width: 300px; }
-  .title.nudge { color: #ffcf5a; }
 </style>
 </head>
-<body>
+<body class="right">
 <div class="ring"></div>
 <div class="bar">
-  <span class="title" id="title" title="Drag here to move the client (unlock 🔒 first)"></span>
+  <span class="title" id="title" title="Drag here to move the client"></span>
   <button class="b fold" id="fold" title="Shrink the bar to just ⚙ and ✕">
     <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
-  <button class="full b lock" id="lock" title="Locked: click to unlock moving this client"></button>
-  <button class="full b drag off" id="drag" title="Unlock first, then hold and drag to move the client (snaps to corners, edges and middle lines; never resized)">
+  <button class="b lock" id="lock" data-btn="lock" title="Lock this client in place"></button>
+  <button class="b drag" id="drag" data-btn="move" title="Hold and drag to move the client (snaps to corners, edges and middle lines; never resized)">
     <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
-  <span class="full sep"></span>
-  <button class="full b cam" id="cam" title="Snapshot / video of this client">
+  <button class="b cam" id="cam" data-btn="camera" title="Camera (mapper surveillance) and recordings for this client">
     <svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/></svg></button>
-  <button class="b" id="gear" title="This client: spot, profile, launch groups, bar settings">
+  <span class="gap"></span>
+  <button class="b" id="gear" title="This client: lock, buttons, spot, profile, launch groups">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
-  <span class="full gap"></span>
-  <button class="full b" id="min" title="Minimise this client">
+  <button class="b" id="min" data-btn="minimize" title="Minimise this client">
     <svg viewBox="0 0 24 24"><path d="M5 17h14"/></svg></button>
-  <button class="b x" id="close" title="Close this client (click twice)">
+  <button class="b x" id="close" data-btn="close" title="Close this client (click twice)">
     <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
 </div>
 
@@ -102,7 +102,16 @@
   <h4 id="who"></h4>
   <div class="m" id="where"></div>
   <div class="m" id="profile"></div>
+  <div class="row"><button id="lockIt">🔓 Unlocked: can be moved</button></div>
+  <div class="row" id="gearMore">
+    <button id="gCam">📹 Camera…</button><button id="gMin">— Minimise</button>
+  </div>
   <hr>
+  <div class="m">Buttons on the bar (⚙ is always there)</div>
+  <div class="row" id="btns">
+    <button data-b="lock">🔒 Lock</button><button data-b="move">✥ Move</button><button data-b="camera">📹 Camera</button>
+    <button data-b="minimize">— Minimise</button><button data-b="close">✕ Close</button>
+  </div>
   <div class="m">Bar sits</div>
   <div class="row" id="corners">
     <button data-c="left">Left</button><button data-c="center">Middle</button><button data-c="right">Right</button>
@@ -121,21 +130,29 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
   const NAME = window.__CLIENT_NAME__ || "";
-  const LOCKED = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
-  const OPEN = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/></svg>';
-  let locked = true, menu = null, closeArmed = null;
+  const LOCKED_SVG = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+  const OPEN_SVG = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/></svg>';
+  let locked = false, menu = null, closeArmed = null, state = null;
 
   // Frame mode on / off (sent by the app when the client gets / loses room for our title bar).
   window.setMode = (frame, top) => {
     document.body.classList.toggle("frame", !!frame);
     if (top) document.documentElement.style.setProperty("--top", top + "px");
   };
+
   function showLock() {
     document.body.classList.toggle("locked", locked);
-    $("lock").innerHTML = locked ? LOCKED : OPEN;
-    $("lock").classList.toggle("open", !locked);
-    $("lock").title = locked ? "Locked: click to unlock moving this client" : "Unlocked: drag ✥ to move; click to lock";
+    $("lock").innerHTML = locked ? LOCKED_SVG : OPEN_SVG;
+    $("lock").classList.toggle("on", locked);
+    $("lock").title = locked ? "Locked in place: click to unlock" : "Click to lock this client in place";
     $("drag").classList.toggle("off", locked);
+    $("lockIt").textContent = locked ? "🔒 Locked in place (click to unlock)" : "🔓 Unlocked: can be moved (click to lock)";
+    $("lockIt").classList.toggle("lockon", locked);
+  }
+  async function setLock(on) {
+    locked = on;
+    showLock();
+    await invoke("clientbar_lock", { name: NAME, locked }).catch(() => {});
   }
   const say = (id, text, cls) => { $(id).textContent = text || ""; $(id).className = "say" + (cls ? " " + cls : ""); };
   const back = () => invoke("clientbar_focus_client", { name: NAME }).catch(() => {});
@@ -144,8 +161,7 @@
     closeMenus();
     menu = which;
     $(which).classList.add("on");
-    const h = $(which).offsetHeight + 44;
-    invoke("clientbar_menu", { height: h }).catch(() => {});
+    invoke("clientbar_menu", { height: $(which).offsetHeight + 44 }).catch(() => {});
   }
   function closeMenus() {
     if (!menu) return;
@@ -156,32 +172,29 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenus(); back(); } });
   window.addEventListener("blur", () => { closeMenus(); disarmClose(); });
 
-  $("lock").addEventListener("click", async () => {
-    locked = !locked;
-    showLock();
-    await invoke("clientbar_lock", { name: NAME, locked }).catch(() => {});
-    if (locked) back();
-  });
+  $("lock").addEventListener("click", async () => { await setLock(!locked); back(); });
+  $("lockIt").addEventListener("click", () => setLock(!locked));
 
-  $("drag").addEventListener("pointerdown", async (e) => {
-    if (locked || e.button !== 0) return;
+  async function drag() {
     closeMenus();
     try { await invoke("clientbar_drag", { name: NAME }); } catch (err) { console.warn(err); }
-  });
-
-  $("title").textContent = "EVE - " + NAME;
-  $("title").addEventListener("pointerdown", async (e) => {
+  }
+  $("drag").addEventListener("pointerdown", (e) => { if (!locked && e.button === 0) drag(); });
+  $("title").addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     if (locked) {
       $("title").classList.add("nudge");
-      $("title").textContent = "EVE - " + NAME + "   🔒 unlock to move";
+      $("title").textContent = "EVE - " + NAME + "   🔒 locked in place (⚙ to unlock)";
       setTimeout(() => { $("title").classList.remove("nudge"); $("title").textContent = "EVE - " + NAME; }, 1500);
       return;
     }
-    closeMenus();
-    try { await invoke("clientbar_drag", { name: NAME }); } catch (err) { console.warn(err); }
+    drag();
   });
-  $("min").addEventListener("click", () => { closeMenus(); invoke("clientbar_minimize", { name: NAME }).catch(() => {}); });
+  $("title").textContent = "EVE - " + NAME;
+
+  const minimize = () => { closeMenus(); invoke("clientbar_minimize", { name: NAME }).catch(() => {}); };
+  $("min").addEventListener("click", minimize);
+  $("gMin").addEventListener("click", minimize);
 
   function disarmClose() {
     clearTimeout(closeArmed); closeArmed = null;
@@ -199,7 +212,7 @@
     invoke("clientbar_close", { name: NAME }).catch(() => {});
   });
 
-  // 📹 Recordings of this client (the dev Snapshot / Video tools, aimed at this client).
+  // 📹 Camera (mapper surveillance) and dev recordings of this client.
   const target = { kind: "client", name: NAME };
   let videoTimer = null;
   async function videoState() {
@@ -210,12 +223,14 @@
     $("vid10").style.display = on ? "none" : "";
     return on;
   }
-  $("cam").addEventListener("click", async () => {
+  async function openCamera() {
     if (menu === "camMenu") { closeMenus(); back(); return; }
     $("camTitle").textContent = "Camera · " + NAME;
     await videoState();
     openMenu("camMenu");
-  });
+  }
+  $("cam").addEventListener("click", openCamera);
+  $("gCam").addEventListener("click", () => { closeMenus(); openCamera(); });
   $("snap").addEventListener("click", async () => {
     say("camSay", "Taking it…");
     try { say("camSay", "Saved " + await invoke("dev_snapshot_take", { target }), "ok"); } catch (e) { say("camSay", String(e), "bad"); }
@@ -238,6 +253,15 @@
   $("vid").addEventListener("click", () => video(2));
   $("vid10").addEventListener("click", () => video(10));
   $("folder").addEventListener("click", () => invoke("dev_open_recordings").then(m => say("camSay", m)).catch(e => say("camSay", String(e), "bad")));
+  for (const [id, on] of [["camOn", true], ["camOff", false]]) {
+    $(id).addEventListener("click", async () => {
+      say("camSay", "…");
+      try { say("camSay", await invoke("clientbar_camera", { name: NAME, on }), "ok"); } catch (e) { say("camSay", String(e), "bad"); }
+    });
+  }
+  $("camShare").addEventListener("click", async () => {
+    try { say("camSay", await invoke("clientbar_camera", { name: NAME, on: true }).then(() => "Share a camera is open.")); } catch (e) { say("camSay", String(e), "bad"); }
+  });
   setInterval(() => { if (menu !== "camMenu") videoState(); }, 3000);
 
   // ⚙ This client.
@@ -247,19 +271,25 @@
     const info = await invoke("clientbar_info", { name: NAME }).catch(() => null);
     const f = info?.frame;
     $("where").textContent = f ? `${f.w}×${f.h} at ${f.x}, ${f.y}` : "Minimised";
+    if (info) { locked = !!info.locked; showLock(); }
     const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [], groups: [] }));
     const acct = (seat.accounts || []).find(a => (a.characters || []).some(c => c.name === NAME));
     const groups = (seat.groups || []).map(x => x.group).filter(g => (g.members || []).some(m => m.name === NAME)).map(g => g.name);
     $("profile").textContent = (acct ? `Account ${acct.nickname}${acct.profile ? " · settings_" + acct.profile : ""}` : "Account not in SeAT yet") +
       (groups.length ? ` · launch group${groups.length > 1 ? "s" : ""}: ${groups.join(", ")}` : "");
-    const st = await invoke("clientbar_state").catch(() => null);
-    document.querySelectorAll("#corners button").forEach(b => b.classList.toggle("on", b.dataset.c === st?.corner));
+    applyState(await invoke("clientbar_state").catch(() => null));
     say("gearSay", "");
     openMenu("gearMenu");
   });
   document.querySelectorAll("#corners button").forEach(b => b.addEventListener("click", async () => {
     await invoke("clientbar_corner", { corner: b.dataset.c }).catch(() => {});
-    document.querySelectorAll("#corners button").forEach(x => x.classList.toggle("on", x === b));
+    applyState(await invoke("clientbar_state").catch(() => null));
+  }));
+  document.querySelectorAll("#btns button").forEach(b => b.addEventListener("click", async () => {
+    const now = new Set(state?.buttons || []);
+    now.has(b.dataset.b) ? now.delete(b.dataset.b) : now.add(b.dataset.b);
+    await invoke("clientbar_buttons", { buttons: [...now] }).catch(() => {});
+    applyState(await invoke("clientbar_state").catch(() => null));
   }));
   document.querySelectorAll("[data-page]").forEach(b => b.addEventListener("click", () => {
     closeMenus();
@@ -271,18 +301,15 @@
     await invoke("clientbar_mini", { name: NAME, on: mini }).catch(() => {});
     closeMenus(); applyState(await invoke("clientbar_state").catch(() => null)); back();
   });
-  for (const [id, on] of [["camOn", true], ["camOff", false]]) {
-    $(id).addEventListener("click", async () => {
-      say("camSay", "…");
-      try { say("camSay", await invoke("clientbar_camera", { name: NAME, on }), "ok"); } catch (e) { say("camSay", String(e), "bad"); }
-    });
-  }
-  $("camShare").addEventListener("click", async () => {
-    try { say("camSay", await invoke("clientbar_camera", { name: NAME, on: true }).then(() => "Share a camera is open.")); } catch (e) { say("camSay", String(e), "bad"); }
-  });
-  // Shrunk or whole, and which side the bar sits (changed here or on Home).
+
+  // Which buttons show, shrunk or whole, and which side the bar sits (changed here or on Home).
   function applyState(st) {
     if (!st) return;
+    state = st;
+    const shown = new Set(st.buttons || ["move", "close"]);
+    document.querySelectorAll("[data-btn]").forEach(el => el.classList.toggle("nobtn", !shown.has(el.dataset.btn)));
+    document.querySelectorAll("#btns button").forEach(b => b.classList.toggle("on", shown.has(b.dataset.b)));
+    document.querySelectorAll("#corners button").forEach(b => b.classList.toggle("on", b.dataset.c === st.corner));
     const mini = (st.mini || []).includes(NAME);
     document.body.classList.toggle("mini", mini);
     document.body.classList.toggle("right", st.corner === "right");
@@ -294,7 +321,7 @@
   refreshState();
 
   invoke("clientbar_info", { name: NAME }).then(i => {
-    locked = i?.locked !== false; showLock();
+    locked = !!i?.locked; showLock();
     if (i?.titleBar) window.setMode(i.titleBar.on, i.titleBar.top);
   }).catch(showLock);
   showLock();
