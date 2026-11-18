@@ -86,11 +86,23 @@ mod win {
         Some(Spot { x: rect.left, y: rect.top, w: rect.right - rect.left, h: rect.bottom - rect.top })
     }
 
+    fn captioned(handle: isize) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_STYLE, WS_CAPTION};
+        // SAFETY: reads the window's style bits.
+        let style = unsafe { GetWindowLongPtrW(handle as HWND, GWL_STYLE) } as u32;
+        style & WS_CAPTION == WS_CAPTION
+    }
+
     pub fn place(handle: isize, to: Spot) -> bool {
         // Patch 121: only resize when the size really differs. A window's rectangle read back
         // comes out a few pixels off (invisible borders, display scaling), and setting it again
         // shrank the client a little each time (1918x1024 became 1914x1021).
         let keep_size = spot(handle).is_some_and(|now| super::same_size(now, to));
+        // Patch 74: never resize a Fixed Window client (no title bar). A spot remembered while it
+        // was in Window mode is another size: leave it be; dragging it by its bar remembers its new spot.
+        if !keep_size && !captioned(handle) {
+            return false;
+        }
         let flags = SWP_NOZORDER | SWP_NOACTIVATE | if keep_size { SWP_NOSIZE } else { 0 };
         // SAFETY: as above; no activation and no z-order change, so focus stays where it is.
         unsafe { SetWindowPos(handle as HWND, std::ptr::null_mut(), to.x, to.y, to.w, to.h, flags) != 0 }
