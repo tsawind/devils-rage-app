@@ -21,6 +21,7 @@ mod clipboard;
 mod cycle;
 mod groupsetup;
 mod incognito;
+mod pcaccounts;
 mod launch;
 mod clientaudio;
 mod commands;
