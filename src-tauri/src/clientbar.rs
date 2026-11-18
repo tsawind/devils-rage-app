@@ -450,6 +450,48 @@ fn our_hwnd(window: &tauri::WebviewWindow) -> Option<isize> {
     }
 }
 
+/// Where a client lands when it switches display mode, so it keeps its spot (Tsa, 17 Nov):
+/// Window mode → Fixed Window: the client goes inside where the old window was, leaving room for
+/// our title bar and edge (1920×1056 window → 1918×1024 client at +1, +31); Fixed Window → Window
+/// mode: the new window's visible frame goes where our title bar and edge were.
+/// `old` = the visible frame before (window incl. Windows' title bar, or the fixed client);
+/// `now_rect` / `now_frame` = the window's rectangle and visible frame after the switch.
+pub fn after_switch(to_fixed: bool, old: Spot, now_rect: Spot, now_frame: Spot, scale: f64) -> Spot {
+    let (top, side) = chrome(scale);
+    let frame_to = if to_fixed { Spot { x: old.x + side, y: old.y + top, ..now_frame } } else { Spot { x: old.x - side, y: old.y - top, ..now_frame } };
+    Spot { x: now_rect.x + (frame_to.x - now_frame.x), y: now_rect.y + (frame_to.y - now_frame.y), ..now_rect }
+}
+
+/// Watches every client's display mode; when one switches, puts it back in its spot (twice: EVE
+/// can move the window again just after) and remembers it there.
+fn follow_switches(app: &AppHandle, seen: &mut HashMap<String, (bool, Spot)>) {
+    let clients: Vec<(String, isize)> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| crate::clientwindows::keeps_a_spot(n)).collect();
+    seen.retain(|name, _| clients.iter().any(|(n, _)| n == name));
+    for (name, handle) in clients {
+        let Some(frame) = win::frame(handle) else { continue };
+        let captioned = win::captioned(handle);
+        let before = seen.insert(name.clone(), (captioned, frame));
+        let Some((was_captioned, old)) = before else { continue };
+        if was_captioned == captioned || DRAGGING.lock().unwrap().is_some() {
+            continue;
+        }
+        let scale = app.get_webview_window(crate::MAIN_WINDOW).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+        let app = app.clone();
+        log::info!("{name} switched to {}", if captioned { "Window mode" } else { "Fixed Window" });
+        std::thread::spawn(move || {
+            for wait in [300, 900] {
+                std::thread::sleep(Duration::from_millis(wait));
+                let (Some(rect), Some(now)) = (win::window_rect(handle), win::frame(handle)) else { return };
+                let to = after_switch(!captioned, old, rect, now, scale);
+                crate::clientwindows::place_window(handle, to);
+                crate::clientwindows::remember_one(&app, &name, to);
+            }
+        });
+        // The spot it ends up at is the one to remember for the next switch.
+        seen.remove(&name);
+    }
+}
+
 /// Keeps every bar over its client: made when its client opens, moved with it, shown only when
 /// that client is what you see there, closed with the client.
 pub fn start(app: AppHandle) {
@@ -458,8 +500,10 @@ pub fn start(app: AppHandle) {
         .spawn(move || {
             // label -> (shown, place, region key)
             let mut shown: HashMap<String, (bool, Place, (bool, i32, i32, i32))> = HashMap::new();
+            let mut modes: HashMap<String, (bool, Spot)> = HashMap::new();
             loop {
                 std::thread::sleep(Duration::from_millis(150));
+                follow_switches(&app, &mut modes);
                 let wanted = settings(&app);
                 // Window-mode clients have Windows' own title bar: no bar of ours (Tsa, 17 Nov). A client
                 // switched to Fixed Window gets one by itself.
@@ -888,6 +932,20 @@ mod tests {
         assert_eq!(bar_width(&s.buttons), 146.0);
         let old: BarSettings = serde_json::from_str(r#"{"corner":"right","version":1}"#).unwrap();
         assert_eq!(old.buttons, s.buttons);
+    }
+
+    #[test]
+    fn switching_modes_keeps_the_spot() {
+        // Window mode in the bottom-right 4K quarter: visible frame 1920×1056 at 1920,1056.
+        let window_frame = Spot { x: 1920, y: 1056, w: 1920, h: 1056 };
+        // EVE switches to Fixed Window 1918×1024 and drops it at the monitor's top left.
+        let fixed = Spot { x: 0, y: 0, w: 1918, h: 1024 };
+        assert_eq!(after_switch(true, window_frame, fixed, fixed, 1.0), Spot { x: 1921, y: 1087, w: 1918, h: 1024 });
+        // And back: Window mode's rect has 7 px invisible borders round the visible frame.
+        let rect = Spot { x: -7, y: 0, w: 1934, h: 1063 };
+        let frame = Spot { x: 0, y: 0, w: 1920, h: 1056 };
+        let to = after_switch(false, Spot { x: 1921, y: 1087, w: 1918, h: 1024 }, rect, frame, 1.0);
+        assert_eq!((to.x, to.y), (1913, 1056));
     }
 
     #[test]
