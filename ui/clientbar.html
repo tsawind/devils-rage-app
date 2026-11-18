@@ -14,6 +14,9 @@
   .b:hover { background: #22222a; color: var(--text); }
   .b svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .b.fold { width: 20px; }
+  .grip { width: 16px; height: 28px; display: grid; place-items: center; color: #55555e; cursor: move; flex: none; font-size: 13px; letter-spacing: -2px; }
+  .grip:hover { color: var(--text); }
+  body.frame .grip { display: none; }
   .b.drag { width: 46px; cursor: grab; color: var(--ok); }
   .b.drag.off { cursor: not-allowed; opacity: .35; }
   .b.lock.on { color: #ffcf5a; }
@@ -74,6 +77,7 @@
 <div class="ring"></div>
 <div class="bar">
   <span class="title" id="title" title="Drag here to move the client"></span>
+  <span class="grip" id="grip" title="Drag to put the bar anywhere on its client (Left / Middle / Right in ⚙ puts it back)">⋮⋮</span>
   <button class="b fold" id="fold" title="Shrink the bar to just ⚙ and ✕">
     <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
   <button class="b lock" id="lock" data-btn="lock" title="Lock this client in place"></button>
@@ -81,6 +85,8 @@
     <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
   <button class="b cam" id="cam" data-btn="camera" title="Camera (mapper surveillance) and recordings for this client">
     <svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/></svg></button>
+  <button class="b" id="pop" data-btn="popout" title="Pop out (on top of EVE): the mapper's scanner for this character">
+    <svg viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2"/><rect x="11.5" y="11" width="8" height="6" rx="1"/></svg></button>
   <span class="gap"></span>
   <button class="b" id="gear" title="This client: lock, buttons, spot, profile, launch groups">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
@@ -116,6 +122,7 @@
     <label class="m" id="mFloatRow"><input type="checkbox" id="mFloat"> Floating: small bar only, no title bar of ours</label>
     <div class="warnline" id="modeWarn"></div>
     <button class="go" id="modeGo"></button>
+    <button class="go" id="liveGo" style="margin-top:4px; background:#121216; border-color: var(--line)">Resize now, no restart (experiment)</button>
     <div class="say" id="modeSay"></div>
   </div>
   <div class="row" id="floatRow"><button id="floatT"></button></div>
@@ -127,7 +134,7 @@
   <div class="m">Buttons on the bar (⚙ is always there)</div>
   <div class="row" id="btns">
     <button data-b="lock">🔒 Lock</button><button data-b="move">✥ Move</button><button data-b="camera">📹 Camera</button>
-    <button data-b="minimize">— Minimise</button><button data-b="close">✕ Close</button>
+    <button data-b="popout">⧉ Pop out</button><button data-b="minimize">— Minimise</button><button data-b="close">✕ Close</button>
   </div>
   <div class="m">Bar sits</div>
   <div class="row" id="corners">
@@ -208,6 +215,20 @@
     drag();
   });
   $("title").textContent = "EVE - " + NAME;
+  $("grip").addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    closeMenus();
+    invoke("clientbar_move_bar", { name: NAME }).catch(err => console.warn(err));
+  });
+  // ⧉ Pop out: the mapper's scanner for this character, on top of EVE.
+  let charId = null;
+  invoke("seat_launch_groups").then(seat => {
+    for (const a of seat.accounts || []) for (const c of a.characters || []) if (c.name === NAME) charId = c.id;
+  }).catch(() => {});
+  $("pop").addEventListener("click", async () => {
+    if (!charId) { $("pop").title = "This character isn't in SeAT, so the mapper can't pop it out"; return; }
+    try { $("pop").title = await invoke("clientbar_popout", { id: Number(charId), name: NAME }); } catch (e) { $("pop").title = String(e); }
+  });
 
   const minimize = () => { closeMenus(); invoke("clientbar_minimize", { name: NAME }).catch(() => {}); };
   $("min").addEventListener("click", minimize);
@@ -301,7 +322,7 @@
     openMenu("gearMenu");
   });
   document.querySelectorAll("#corners button").forEach(b => b.addEventListener("click", async () => {
-    await invoke("clientbar_corner", { corner: b.dataset.c }).catch(() => {});
+    await invoke("clientbar_corner", { corner: b.dataset.c, name: NAME }).catch(() => {});
     applyState(await invoke("clientbar_state").catch(() => null));
   }));
   document.querySelectorAll("#btns button").forEach(b => b.addEventListener("click", async () => {
@@ -335,9 +356,14 @@
       ? "Try the Devil's window mode: EVE's Fixed Window at this same size and spot, with our title bar, so Windows can never resize or half-snap it. Only needed once per profile: afterwards EVE's own Display Mode switch keeps the size."
       : `Fixed Window ${size.w}×${size.h}. Back to Window mode at:`;
     $("modeGo").textContent = windowed ? "Switch to the Devil's window mode" : "Back to Window mode";
+    $("liveGo").style.display = windowed ? "none" : "";
     $("modeWarn").textContent = "The client closes first (if EVE asks, pick Quit); the app changes its profile, then you launch it again.";
     say("modeSay", "");
   }
+  $("liveGo").addEventListener("click", async () => {
+    const width = Math.round(+$("mw").value), height = Math.round(+$("mh").value);
+    try { say("modeSay", await invoke("clientbar_resize_live", { name: NAME, width, height }), "ok"); } catch (e) { say("modeSay", String(e), "bad"); }
+  });
   $("floatT").addEventListener("click", async () => {
     await invoke("clientbar_floating", { name: NAME, on: !info?.floating }).catch(() => {});
     if (info) info.floating = !info.floating;

@@ -41,6 +41,9 @@ pub struct BarSettings {
     /// Fixed Window clients that keep the small floating bar instead of our title bar.
     #[serde(default)]
     pub floating: BTreeSet<String>,
+    /// Small bars dragged to a spot of their own: name -> offset from the client's top-left (px).
+    #[serde(default)]
+    pub offsets: std::collections::BTreeMap<String, (i32, i32)>,
     /// Bars shrunk (›) to just ⚙ and ✕.
     #[serde(default)]
     pub mini: BTreeSet<String>,
@@ -63,21 +66,21 @@ fn default_corner() -> String {
     "right".into()
 }
 
-pub const BUTTONS: &[&str] = &["lock", "move", "camera", "minimize", "close"];
+pub const BUTTONS: &[&str] = &["lock", "move", "camera", "popout", "minimize", "close"];
 
 fn default_buttons() -> Vec<String> {
     vec!["move".into(), "close".into()]
 }
 
-/// The small bar's width for the buttons shown (logical px): ›, ⚙, the buttons, gaps and padding.
+/// The small bar's width for the buttons shown (logical px): ⋮⋮, ›, ⚙, the buttons, gaps, padding.
 pub fn bar_width(buttons: &[String]) -> f64 {
     let each: f64 = buttons.iter().map(|b| if b == "move" { 46.0 } else { 30.0 }).sum();
-    12.0 + 20.0 + 30.0 + each + 2.0 * (buttons.len() as f64 + 2.0)
+    12.0 + 16.0 + 20.0 + 30.0 + each + 2.0 * (buttons.len() as f64 + 3.0)
 }
 
 impl Default for BarSettings {
     fn default() -> Self {
-        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), floating: BTreeSet::new(), mini: BTreeSet::new(), corner: default_corner(), buttons: default_buttons(), version: 1 }
+        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), floating: BTreeSet::new(), offsets: Default::default(), mini: BTreeSet::new(), corner: default_corner(), buttons: default_buttons(), version: 1 }
     }
 }
 
@@ -109,6 +112,8 @@ static LOCKED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 /// Bars with a menu open: label -> height (logical).
 static TALL: Mutex<Option<HashMap<String, f64>>> = Mutex::new(None);
 static DRAGGING: Mutex<Option<String>> = Mutex::new(None);
+/// The bar (label) being dragged to a spot of its own.
+static BAR_MOVING: Mutex<Option<String>> = Mutex::new(None);
 
 fn path(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_config_dir().ok().map(|dir| dir.join("client-bars.json"))
@@ -338,6 +343,13 @@ mod win {
         }
     }
 
+    /// Move and resize a window as asked (no focus change).
+    pub fn resize(handle: isize, to: Spot) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+        // SAFETY: SetWindowPos on a client window handle.
+        unsafe { SetWindowPos(handle as HWND, std::ptr::null_mut(), to.x, to.y, to.w, to.h, SWP_NOZORDER | SWP_NOACTIVATE) };
+    }
+
     /// Puts our bar window just above its client in the stacking order (no move, no focus).
     pub fn stack_above(ours: isize, client: isize) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindow, SetWindowPos, GW_HWNDPREV, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
@@ -437,6 +449,7 @@ mod win {
         true
     }
     pub fn stack_above(_ours: isize, _client: isize) {}
+    pub fn resize(_h: isize, _to: Spot) {}
     pub fn client_size(_h: isize) -> Option<(i32, i32)> {
         None
     }
@@ -617,7 +630,16 @@ pub fn start(app: AppHandle) {
                         None if wanted.mini.contains(name) => BAR_MINI_W,
                         None => bar_width(&wanted.buttons).max(BAR_MINI_W),
                     };
-                    let place = place_for(frame, win::captioned(*handle), wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+                    let mut place = place_for(frame, win::captioned(*handle), wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+                    if !place.frame {
+                        if let Some((dx, dy)) = wanted.offsets.get(name) {
+                            place.x = frame.x + dx;
+                            place.y = frame.y + dy;
+                        }
+                    }
+                    if BAR_MOVING.lock().unwrap().as_deref() == Some(label.as_str()) {
+                        continue;
+                    }
                     // Shown whenever the client is; kept just above its client in Windows' stacking
                     // order (not on top of everything), so whatever covers the client covers it too.
                     let see = true;
@@ -725,12 +747,87 @@ pub fn clientbar_camera(app: AppHandle, name: String, on: bool) -> Result<String
 }
 
 #[tauri::command]
-pub fn clientbar_corner(app: AppHandle, corner: String) -> Result<(), String> {
+pub fn clientbar_corner(app: AppHandle, corner: String, name: Option<String>) -> Result<(), String> {
     if !["left", "center", "right"].contains(&corner.as_str()) {
         return Err("left, center or right".into());
     }
-    change(&app, |s| s.corner = corner);
+    change(&app, |s| {
+        s.corner = corner;
+        // Left / Middle / Right also bring a bar dragged to a spot of its own back.
+        if let Some(name) = &name {
+            s.offsets.remove(name);
+        }
+    });
     Ok(())
+}
+
+/// ⋮⋮ held on the small bar: the bar follows the mouse; let go and it keeps that spot on its client.
+#[tauri::command]
+pub fn clientbar_move_bar(app: AppHandle, window: tauri::WebviewWindow, name: String) -> Result<(), String> {
+    let handle = handle_of(&name).ok_or("that client is closed")?;
+    let frame = win::frame(handle).ok_or("that client is minimised")?;
+    let start = window.outer_position().map_err(|e| e.to_string())?;
+    let mouse0 = win::cursor().ok_or("no mouse position")?;
+    *BAR_MOVING.lock().unwrap() = Some(window.label().to_string());
+    std::thread::Builder::new()
+        .name("bar-move".into())
+        .spawn(move || {
+            let mut at = (start.x, start.y);
+            for _ in 0..(10 * 60 * 125) {
+                if !win::button_down() {
+                    break;
+                }
+                if let Some(now) = win::cursor() {
+                    let to = (start.x + now.0 - mouse0.0, start.y + now.1 - mouse0.1);
+                    if to != at {
+                        at = to;
+                        let _ = window.set_position(PhysicalPosition::new(to.0, to.1));
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(8));
+            }
+            change(&app, |s| {
+                s.offsets.insert(name, (at.0 - frame.x, at.1 - frame.y));
+            });
+            *BAR_MOVING.lock().unwrap() = None;
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The mapper's "Pop out (on top of EVE)" for this client's character.
+#[tauri::command]
+pub fn clientbar_popout(app: AppHandle, id: i64, name: String) -> Result<String, String> {
+    let view = crate::main_view(&app).ok_or("the mapper isn't open in the app")?;
+    let on_mapper = view.url().ok().is_some_and(|u| u.path().starts_with("/maps/"));
+    if !on_mapper {
+        return Err("Open your map in the app first, then try again.".into());
+    }
+    let detail = serde_json::json!({ "id": id, "name": name });
+    view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:popout', {{ detail: {detail} }}));")).map_err(|e| e.to_string())?;
+    Ok(format!("Asked the mapper for {name}'s pop-out."))
+}
+
+/// Experiment (Tsa, 17 Nov): resize a Fixed Window client to `width`×`height` without restarting,
+/// keeping its top-left. EVE may or may not keep that size; nothing is written to its files.
+#[tauri::command]
+pub fn clientbar_resize_live(name: String, width: i32, height: i32) -> Result<String, String> {
+    if !(640..=7680).contains(&width) || !(480..=4320).contains(&height) {
+        return Err("That size is outside 640×480 – 7680×4320.".into());
+    }
+    let handle = handle_of(&name).ok_or("that client isn't open")?;
+    if win::captioned(handle) {
+        return Err("That's for Fixed Window clients.".into());
+    }
+    let rect = win::window_rect(handle).ok_or("restore the client first (it's minimised)")?;
+    win::resize(handle, Spot { x: rect.x, y: rect.y, w: width, h: height });
+    std::thread::sleep(Duration::from_millis(600));
+    let now = win::client_size(handle).unwrap_or((0, 0));
+    Ok(if now == (width, height) {
+        format!("{name} is {width}×{height} now. If EVE keeps it after a while (and after a restart), we don't need the restart step.")
+    } else {
+        format!("Windows says {}×{} now: EVE didn't take {width}×{height}.", now.0, now.1)
+    })
 }
 
 /// This client's details for the bar's ⚙.
@@ -826,7 +923,7 @@ pub fn clientbar_drag(app: AppHandle, name: String) -> Result<(), String> {
     let mouse0 = win::cursor().ok_or("no mouse position")?;
     // A Fixed Window client snaps with our title bar and edge round it (1918×1024 → 1920×1056).
     let scale = app.get_webview_window(&label_for(&name)).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
-    let framed = !win::captioned(handle);
+    let framed = !win::captioned(handle) && !settings(&app).floating.contains(&name);
     let outer0 = if framed { outer_of(frame0, scale) } else { frame0 };
     *DRAGGING.lock().unwrap() = Some(name.clone());
     std::thread::Builder::new()
@@ -1062,7 +1159,7 @@ mod tests {
     fn default_bar_is_move_and_close() {
         let s = BarSettings::default();
         assert_eq!(s.buttons, vec!["move".to_string(), "close".to_string()]);
-        assert_eq!(bar_width(&s.buttons), 146.0);
+        assert_eq!(bar_width(&s.buttons), 164.0);
         let old: BarSettings = serde_json::from_str(r#"{"corner":"right","version":1}"#).unwrap();
         assert_eq!(old.buttons, s.buttons);
     }
