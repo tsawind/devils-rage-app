@@ -60,6 +60,8 @@ pub async fn piscan_cells(app: AppHandle, planet_id: u64, resource: String) -> R
 /// Hand a scan to SeAT (it merges into what the corp has).
 #[tauri::command]
 pub async fn piscan_save(app: AppHandle, planet_id: u64, resource: String, character_id: Option<u64>, cells: String) -> Result<String, String> {
+    // Patch 74: an incognito character's scan is saved without who scanned it.
+    let character_id = character_id.filter(|id| crate::incognito::is_public_id(*id));
     let (cookies, xsrf) = crate::launch::seat_write_session(&app).await?;
     let response = client()
         .post(format!("{}/devilsrage/pi/scans", crate::SEAT_URL))

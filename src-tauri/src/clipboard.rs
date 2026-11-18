@@ -125,6 +125,11 @@ fn deliver(app: &AppHandle, character_id: Option<i64>, name: &str, text: &str) {
 }
 
 fn deliver_event(app: &AppHandle, event: &str, character_id: Option<i64>, name: &str, text: &str) {
+    // Patch 74: an incognito character's copies stay on this PC (Ctrl+V still works).
+    if !crate::incognito::is_public_name(name) {
+        log::info!("copy from an incognito client: not handed to the mapper (Ctrl+V still works)");
+        return;
+    }
     let detail = serde_json::json!({
         "character_id": character_id,
         "character_name": name,

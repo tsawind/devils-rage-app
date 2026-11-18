@@ -20,6 +20,7 @@ mod clientwindows;
 mod clipboard;
 mod cycle;
 mod groupsetup;
+mod incognito;
 mod launch;
 mod clientaudio;
 mod commands;
@@ -431,6 +432,8 @@ pub fn run() {
             setups::setups_look,
             setups::setups_compare,
             clientbar::clientbar_state,
+            incognito::incognito_state,
+            incognito::incognito_hide,
             clientbar::clientbar_set,
             clientbar::clientbar_corner,
             clientbar::clientbar_info,
@@ -612,6 +615,7 @@ pub fn run() {
             let _ = window.show();
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
+            incognito::load(&handle);
             launch::load_account_logins(&handle);
             clipboard::start(handle.clone());
             #[cfg(desktop)]
@@ -746,6 +750,15 @@ fn new_window_handler(
                     }
                 }
                 "/clipboard" | "/attention" if from_mapper(&app, &me) => page_signal(&app, &me, &url),
+                // Patch 74: the mapper says which characters are linked to your login (incognito.rs).
+                "/known-characters" if from_mapper(&app, &me) => {
+                    let characters: Vec<(u64, String)> = url
+                        .query_pairs()
+                        .filter(|(k, _)| k == "c")
+                        .filter_map(|(_, v)| v.split_once(':').and_then(|(id, name)| Some((id.parse::<u64>().ok()?, name.chars().take(40).collect::<String>()))))
+                        .collect();
+                    incognito::from_mapper(&app, characters);
+                }
                 // Cameras: one EVE client's own sound for the hole watch (clientaudio.rs).
                 "/audio-clients" | "/audio-listen" | "/audio-learn" if from_mapper(&app, &me) => clientaudio::signal(&app, &me, &url),
                 "/audio-clients" | "/audio-listen" | "/audio-learn" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),

@@ -149,7 +149,7 @@ fn report_chat_logs(app: &AppHandle, w: &Watcher, seen: &mut HashMap<String, Ins
         let first = *seen.entry(name.clone()).or_insert_with(Instant::now);
         let has_log = logging.contains(&name.to_lowercase());
         // A fresh login gets a minute for EVE to start its Local log.
-        if has_log || first.elapsed() >= SETTLE {
+        if (has_log || first.elapsed() >= SETTLE) && crate::incognito::is_public_name(&name) {
             rows.push((name, has_log));
         }
     }
@@ -206,7 +206,8 @@ pub fn resend_all(app: &AppHandle) {
 /// Hands the changes to one mapper page in the app.
 fn deliver(app: &AppHandle, changes: &[(i64, String)]) {
     let mut js = String::new();
-    for (id, system) in changes {
+    // Patch 74: incognito characters' locations stay on this PC.
+    for (id, system) in changes.iter().filter(|(id, _)| *id > 0 && crate::incognito::is_public_id(*id as u64)) {
         let system = serde_json::to_string(system).unwrap_or_else(|_| "\"\"".into());
         js.push_str(&format!(
             "window.dispatchEvent(new CustomEvent('devils-rage-app:location', {{ detail: {{ character_id: {id}, solarsystem: {system} }} }}));"

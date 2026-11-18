@@ -257,6 +257,7 @@ pub fn store_seat(app: &AppHandle, data: &SeatData) -> Result<(), String> {
     write_json(config_file(app, "seat-groups.json").ok_or("no config folder")?, data)?;
     log::info!("launch groups from SeAT: {} accounts, {} groups", data.accounts.len(), data.groups.len());
     set_account_logins(data);
+    crate::incognito::load(app);
     #[cfg(desktop)]
     register_cycle_hotkeys(app);
     crate::previews::refresh_modes(app);
@@ -269,7 +270,8 @@ pub fn local_for_import(app: &AppHandle) -> Vec<serde_json::Value> {
         .groups
         .into_iter()
         .map(|g| {
-            let members: Vec<String> = g.members.into_iter().filter(|m| m != crate::cycle::LOGIN_SCREENS && !g.skipped.contains(m)).collect();
+            // Patch 74: incognito characters never leave this PC.
+            let members: Vec<String> = g.members.into_iter().filter(|m| m != crate::cycle::LOGIN_SCREENS && !g.skipped.contains(m) && crate::incognito::is_public_name(m)).collect();
             serde_json::json!({ "name": g.name, "members": members })
         })
         .filter(|g| g["members"].as_array().is_some_and(|m| !m.is_empty()))

@@ -773,6 +773,9 @@ pub fn clientbar_mini(app: AppHandle, name: String, on: bool) {
 /// window), which turns on / off every camera and watch area set up for this client there.
 #[tauri::command]
 pub fn clientbar_camera(app: AppHandle, name: String, on: bool) -> Result<String, String> {
+    if !crate::incognito::is_public_name(&name) {
+        return Err(format!("{name} is incognito (not on your SeAT accounts or mapper login), so it isn't shared with the mapper's cameras."));
+    }
     if !crate::camera_share(&app)? {
         return Ok("Opening Share a camera… press again once it has loaded.".into());
     }
@@ -931,6 +934,9 @@ fn remember_moved_logins(app: &AppHandle, watch: &mut HashMap<isize, LoginWatch>
 /// The mapper's "Pop out (on top of EVE)" for this client's character.
 #[tauri::command]
 pub fn clientbar_popout(app: AppHandle, id: i64, name: String) -> Result<String, String> {
+    if !crate::incognito::is_public_name(&name) || !crate::incognito::is_public_id(id.max(0) as u64) {
+        return Err(format!("{name} is incognito (not on your SeAT accounts or mapper login), so the mapper doesn't get it."));
+    }
     let view = crate::main_view(&app).ok_or("the mapper isn't open in the app")?;
     let on_mapper = view.url().ok().is_some_and(|u| u.path().starts_with("/maps/"));
     if !on_mapper {

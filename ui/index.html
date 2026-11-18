@@ -80,6 +80,7 @@
   <p class="sub">Where to?</p>
   <div class="motd" id="motd" hidden><b>MESSAGE OF THE DAY</b><span id="motdText"></span></div>
 
+  <!-- Patch 74 (Tsa, 18 Nov): most used first, left to right. -->
   <div class="sites">
     <button class="site" data-site="mapper" autofocus>
       <svg viewBox="0 0 24 24"><circle cx="5" cy="6" r="2.2"/><circle cx="18" cy="5" r="2.2"/>
@@ -87,22 +88,26 @@
         <path d="M7 7l3.4 4.4M16.2 6.4l-2.6 4.9M10.6 14.7L7.5 17.4M13.9 14.2l3.3 2.6"/></svg>
       <b>Mapper</b><span>Chain, scanning, pings</span>
     </button>
+    <button class="site" data-hub="pi">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5.2"/><ellipse cx="12" cy="12" rx="10" ry="3.4" transform="rotate(-20 12 12)"/></svg>
+      <b>PI</b><span>What to restart, where; planet scans</span>
+    </button>
+    <button class="site" data-page="assets.html">
+      <svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/></svg>
+      <b>Assets</b><span>What we have where; vacation, war, eviction</span>
+    </button>
     <button class="site" data-site="seat">
       <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.3 2.8-5 5.5-5s4.9 1.7 5.5 5"/>
         <circle cx="17" cy="9" r="2.4"/><path d="M15.8 14.2c2.4-.3 4.3 1.1 4.8 4"/></svg>
       <b>SeAT</b><span>Characters, skills, FC tools</span>
     </button>
+  </div>
+  <div class="sites hubs">
     <button class="site" data-site="accounts">
       <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="11" r="2.2"/>
         <path d="M5.8 16.5c.6-1.8 1.8-2.7 3.2-2.7s2.6.9 3.2 2.7M14.5 10h3.5M14.5 13.5h3.5"/></svg>
       <b>Your accounts</b><span>Logins, alts, order</span>
     </button>
-    <button class="site" data-hub="pi">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5.2"/><ellipse cx="12" cy="12" rx="10" ry="3.4" transform="rotate(-20 12 12)"/></svg>
-      <b>PI</b><span>What to restart, where; planet scans</span>
-    </button>
-  </div>
-  <div class="sites hubs">
     <button class="site" data-hub="groups">
       <svg viewBox="0 0 24 24"><path d="M12 3c3 2.2 4.5 5.4 4.5 9.2L14 15h-4l-2.5-2.8C7.5 8.4 9 5.2 12 3z"/><circle cx="12" cy="9" r="1.6"/><path d="M10.5 17.5L12 21l1.5-3.5"/></svg>
       <b>Launch Groups</b><span>Groups, launcher, client tuning and settings</span>
@@ -114,10 +119,6 @@
     <button class="site" data-page="settings.html">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
       <b>Settings</b><span>The app itself</span>
-    </button>
-    <button class="site" data-page="assets.html">
-      <svg viewBox="0 0 24 24"><path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v8"/></svg>
-      <b>Assets</b><span>What we have where; vacation, war, eviction</span>
     </button>
   </div>
 

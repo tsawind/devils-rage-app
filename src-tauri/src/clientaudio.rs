@@ -62,14 +62,17 @@ pub fn signal(app: &AppHandle, me: &str, url: &Url) {
     activity::watch(app, me);
     match url.path() {
         "/audio-clients" => {
-            let clients = crate::clipboard::open_eve_characters();
+            // Patch 74: incognito characters (not known to SeAT / the mapper) aren't named to the page.
+            let clients: Vec<String> = crate::clipboard::open_eve_characters().into_iter().filter(|n| crate::incognito::is_public_name(n)).collect();
             // Cameras: which window is which client (by its handle), see clipboard::open_eve_windows.
             let windows: Vec<serde_json::Value> = crate::clipboard::open_eve_windows()
                 .into_iter()
+                .filter(|(name, _)| crate::incognito::is_public_name(name))
                 .map(|(name, handle)| serde_json::json!({ "name": name, "handle": handle }))
                 .collect();
             tell(app, me, "devils-rage-app:audio-clients", serde_json::json!({ "clients": clients, "windows": windows, "supported": cfg!(windows) }));
         }
+        "/audio-listen" | "/audio-learn" if !crate::incognito::is_public_name(&character) => {}
         "/audio-listen" if !character.is_empty() => {
             if param("on").as_deref() == Some("1") {
                 listen::start(app, me, &character, load_print(app));
@@ -287,7 +290,7 @@ mod activity {
         let (app, me) = (app.clone(), me.to_string());
         std::thread::spawn(move || {
             while let Some(view) = app.get_webview(&me) {
-                let character = crate::clipboard::foreground_eve_character();
+                let character = crate::clipboard::foreground_eve_character().filter(|n| crate::incognito::is_public_name(n));
                 let idle = idle_ms().min(86_400_000);
                 let detail = serde_json::json!({ "character": character, "idleMs": idle });
                 let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:active', {{ detail: {detail} }}));"));
