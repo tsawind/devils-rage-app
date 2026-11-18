@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "clientbar",
+  "description": "The client bar laid over the top of an EVE client (clientbar-*): lock, drag to move the client, snapshot / video, its spot and profile, minimise, close. Local page only.",
+  "windows": ["clientbar-*"],
+  "webviews": ["clientbar-*"],
+  "permissions": ["core:default"]
+}

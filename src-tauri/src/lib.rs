@@ -13,6 +13,7 @@ mod audiodetect;
 mod bar;
 mod capture;
 mod chatlog;
+mod clientbar;
 mod clientwindows;
 mod clipboard;
 mod cycle;
@@ -427,6 +428,17 @@ pub fn run() {
             profiles::tuning_apply,
             setups::setups_look,
             setups::setups_compare,
+            clientbar::clientbar_state,
+            clientbar::clientbar_set,
+            clientbar::clientbar_corner,
+            clientbar::clientbar_info,
+            clientbar::clientbar_lock,
+            clientbar::clientbar_menu,
+            clientbar::clientbar_drag,
+            clientbar::clientbar_minimize,
+            clientbar::clientbar_close,
+            clientbar::clientbar_focus_client,
+            clientbar::clientbar_open_page,
             groupsetup::group_setup_create,
             groupsetup::group_setup_update,
             piscan::piscan_planets,
@@ -589,6 +601,7 @@ pub fn run() {
             #[cfg(desktop)]
             launch::register_cycle_hotkeys(&handle);
             previews::start_watch(handle.clone());
+            clientbar::start(handle.clone());
             if let Err(err) = tray::build(&handle) {
                 log::warn!("tray icon: {err}");
             }

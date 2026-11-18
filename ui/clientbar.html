@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Client bar</title>
+<style>
+  :root { --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; --purple:#a970ff; --line:#33333b; --text:#e6e6ea; --muted:#8a8a92; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; overflow: hidden; font: 12px/1.4 "Segoe UI", system-ui, sans-serif; color: var(--text); user-select: none; }
+  .bar { height: 34px; display: flex; align-items: center; gap: 2px; padding: 0 4px; background: rgba(12, 12, 15, .86);
+         border: 1px solid var(--line); border-top: 0; border-radius: 0 0 9px 9px; }
+  .b { width: 30px; height: 28px; border: 0; border-radius: 6px; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; padding: 0; }
+  .b:hover { background: #22222a; color: var(--text); }
+  .b svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .b.drag { width: 46px; cursor: grab; }
+  .b.drag.off { cursor: not-allowed; opacity: .35; }
+  .b.drag:not(.off) { color: var(--ok); }
+  .b.lock.open { color: #ffcf5a; }
+  .b.cam { color: var(--purple); }
+  .b.cam.rec { color: #ff4d4d; }
+  .b.x:hover { background: var(--red); color: #fff; }
+  .b.x.sure { background: var(--red-hi); color: #fff; width: 58px; font-size: 11px; font-weight: 600; }
+  .gap { flex: 1; }
+  .sep { width: 10px; }
+  .menu { position: absolute; top: 38px; left: 0; right: 0; background: rgba(16, 16, 20, .97); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; display: none; }
+  .menu.on { display: block; }
+  .menu h4 { margin: 0 0 4px; font-size: 13px; }
+  .menu .m { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  .menu button.it { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 4px 6px; border-radius: 6px; cursor: pointer; font: inherit; }
+  .menu button.it:hover { background: #22222a; }
+  .menu .row { display: flex; gap: 4px; margin: 4px 0; }
+  .menu .row button { flex: 1; background: #121216; border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 2px 0; cursor: pointer; font: inherit; }
+  .menu .row button.on { border-color: var(--red-hi); background: #1c0d0e; }
+  .say { color: var(--muted); font-size: 11px; min-height: 1.3em; margin-top: 4px; word-break: break-word; }
+  .say.ok { color: var(--ok); }
+  .say.bad { color: #f08a8a; }
+  hr { border: 0; border-top: 1px solid #25252c; margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <button class="b lock" id="lock" title="Locked: click to unlock moving this client"></button>
+  <button class="b drag off" id="drag" title="Unlock first, then hold and drag to move the client (snaps to corners, edges and middle lines; never resized)">
+    <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
+  <span class="sep"></span>
+  <button class="b cam" id="cam" title="Snapshot / video of this client">
+    <svg viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="13" height="11" rx="2"/><path d="M15.5 10.5l6-3.5v10l-6-3.5z"/></svg></button>
+  <button class="b" id="gear" title="This client: spot, profile, launch groups, bar settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+  <span class="gap"></span>
+  <button class="b" id="min" title="Minimise this client">
+    <svg viewBox="0 0 24 24"><path d="M5 17h14"/></svg></button>
+  <button class="b x" id="close" title="Close this client (click twice)">
+    <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+</div>
+
+<div class="menu" id="camMenu">
+  <h4 id="camTitle">Recordings</h4>
+  <button class="it" id="snap">📷 Snapshot of this client</button>
+  <button class="it" id="vid">⏺ Record video of this client (2/s)</button>
+  <button class="it" id="vid10">⏺ Record video, fast (10/s)</button>
+  <button class="it" id="folder">📁 Open the recordings folder</button>
+  <div class="say" id="camSay"></div>
+</div>
+
+<div class="menu" id="gearMenu">
+  <h4 id="who"></h4>
+  <div class="m" id="where"></div>
+  <div class="m" id="profile"></div>
+  <hr>
+  <div class="m">Bar sits</div>
+  <div class="row" id="corners">
+    <button data-c="left">Left</button><button data-c="center">Middle</button><button data-c="right">Right</button>
+  </div>
+  <hr>
+  <button class="it" data-page="setups.html">Setups (where clients open, keys, overview)</button>
+  <button class="it" data-page="profiles.html">Client settings (profiles, copies, backups)</button>
+  <button class="it" data-page="tuning.html">Client tuning (graphics, sound tiers)</button>
+  <button class="it" data-page="launch.html">Launch groups</button>
+  <hr>
+  <button class="it" id="hide">Hide this client's bar</button>
+  <div class="say" id="gearSay"></div>
+</div>
+
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  const NAME = window.__CLIENT_NAME__ || "";
+  const LOCKED = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+  const OPEN = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.8-1.2"/></svg>';
+  let locked = true, menu = null, closeArmed = null;
+
+  function showLock() {
+    $("lock").innerHTML = locked ? LOCKED : OPEN;
+    $("lock").classList.toggle("open", !locked);
+    $("lock").title = locked ? "Locked: click to unlock moving this client" : "Unlocked: drag ✥ to move; click to lock";
+    $("drag").classList.toggle("off", locked);
+  }
+  const say = (id, text, cls) => { $(id).textContent = text || ""; $(id).className = "say" + (cls ? " " + cls : ""); };
+  const back = () => invoke("clientbar_focus_client", { name: NAME }).catch(() => {});
+
+  function openMenu(which) {
+    closeMenus();
+    menu = which;
+    $(which).classList.add("on");
+    const h = $(which).offsetHeight + 44;
+    invoke("clientbar_menu", { height: h }).catch(() => {});
+  }
+  function closeMenus() {
+    if (!menu) return;
+    $(menu).classList.remove("on");
+    menu = null;
+    invoke("clientbar_menu", { height: null }).catch(() => {});
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenus(); back(); } });
+  window.addEventListener("blur", () => { closeMenus(); disarmClose(); });
+
+  $("lock").addEventListener("click", async () => {
+    locked = !locked;
+    showLock();
+    await invoke("clientbar_lock", { name: NAME, locked }).catch(() => {});
+    if (locked) back();
+  });
+
+  $("drag").addEventListener("pointerdown", async (e) => {
+    if (locked || e.button !== 0) return;
+    closeMenus();
+    try { await invoke("clientbar_drag", { name: NAME }); } catch (err) { console.warn(err); }
+  });
+
+  $("min").addEventListener("click", () => { closeMenus(); invoke("clientbar_minimize", { name: NAME }).catch(() => {}); });
+
+  function disarmClose() {
+    clearTimeout(closeArmed); closeArmed = null;
+    $("close").classList.remove("sure");
+    $("close").innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  }
+  $("close").addEventListener("click", () => {
+    if (!closeArmed) {
+      $("close").classList.add("sure");
+      $("close").textContent = "Close?";
+      closeArmed = setTimeout(disarmClose, 2500);
+      return;
+    }
+    disarmClose();
+    invoke("clientbar_close", { name: NAME }).catch(() => {});
+  });
+
+  // 📹 Recordings of this client (the dev Snapshot / Video tools, aimed at this client).
+  const target = { kind: "client", name: NAME };
+  let videoTimer = null;
+  async function videoState() {
+    const s = await invoke("dev_video_status").catch(() => null);
+    const on = !!s?.on;
+    $("cam").classList.toggle("rec", on);
+    $("vid").textContent = on ? `⏹ Stop video (${s.secs}s, ${s.frames} pictures, ${s.mb.toFixed(0)} MB)` : "⏺ Record video of this client (2/s)";
+    $("vid10").style.display = on ? "none" : "";
+    return on;
+  }
+  $("cam").addEventListener("click", async () => {
+    if (menu === "camMenu") { closeMenus(); back(); return; }
+    $("camTitle").textContent = "Recordings · " + NAME;
+    await videoState();
+    openMenu("camMenu");
+  });
+  $("snap").addEventListener("click", async () => {
+    say("camSay", "Taking it…");
+    try { say("camSay", "Saved " + await invoke("dev_snapshot_take", { target }), "ok"); } catch (e) { say("camSay", String(e), "bad"); }
+  });
+  async function video(fps) {
+    if (await videoState()) {
+      await invoke("dev_video_stop").catch(() => {});
+      clearInterval(videoTimer); videoTimer = null;
+      setTimeout(videoState, 300);
+      say("camSay", "Stopped.", "ok");
+      return;
+    }
+    try {
+      await invoke("dev_video_start", { spec: { target, boxes: [], fps, quality: 80, half: false } });
+      say("camSay", `Recording at ${fps}/s…`, "ok");
+      clearInterval(videoTimer); videoTimer = setInterval(videoState, 1000);
+      setTimeout(videoState, 300);
+    } catch (e) { say("camSay", String(e), "bad"); }
+  }
+  $("vid").addEventListener("click", () => video(2));
+  $("vid10").addEventListener("click", () => video(10));
+  $("folder").addEventListener("click", () => invoke("dev_open_recordings").then(m => say("camSay", m)).catch(e => say("camSay", String(e), "bad")));
+  setInterval(() => { if (menu !== "camMenu") videoState(); }, 3000);
+
+  // ⚙ This client.
+  $("gear").addEventListener("click", async () => {
+    if (menu === "gearMenu") { closeMenus(); back(); return; }
+    $("who").textContent = NAME;
+    const info = await invoke("clientbar_info", { name: NAME }).catch(() => null);
+    const f = info?.frame;
+    $("where").textContent = f ? `${f.w}×${f.h} at ${f.x}, ${f.y}` : "Minimised";
+    const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [], groups: [] }));
+    const acct = (seat.accounts || []).find(a => (a.characters || []).some(c => c.name === NAME));
+    const groups = (seat.groups || []).map(x => x.group).filter(g => (g.members || []).some(m => m.name === NAME)).map(g => g.name);
+    $("profile").textContent = (acct ? `Account ${acct.nickname}${acct.profile ? " · settings_" + acct.profile : ""}` : "Account not in SeAT yet") +
+      (groups.length ? ` · launch group${groups.length > 1 ? "s" : ""}: ${groups.join(", ")}` : "");
+    const st = await invoke("clientbar_state").catch(() => null);
+    document.querySelectorAll("#corners button").forEach(b => b.classList.toggle("on", b.dataset.c === st?.corner));
+    say("gearSay", "");
+    openMenu("gearMenu");
+  });
+  document.querySelectorAll("#corners button").forEach(b => b.addEventListener("click", async () => {
+    await invoke("clientbar_corner", { corner: b.dataset.c }).catch(() => {});
+    document.querySelectorAll("#corners button").forEach(x => x.classList.toggle("on", x === b));
+  }));
+  document.querySelectorAll("[data-page]").forEach(b => b.addEventListener("click", () => {
+    closeMenus();
+    invoke("clientbar_open_page", { page: b.dataset.page }).catch(e => say("gearSay", String(e), "bad"));
+  }));
+  $("hide").addEventListener("click", () => invoke("clientbar_set", { name: NAME, on: false }).catch(e => say("gearSay", String(e), "bad")));
+
+  invoke("clientbar_info", { name: NAME }).then(i => { locked = i?.locked !== false; showLock(); }).catch(showLock);
+  showLock();
+</script>
+</body>
+</html>

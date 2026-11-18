@@ -134,6 +134,10 @@ pub fn hold(app: &AppHandle) {
         return;
     }
     for (name, handle) in crate::clipboard::open_clients() {
+        // Patch 74: a client whose bar is unlocked (or being dragged) is being moved on purpose.
+        if crate::clientbar::unlocked(&name) {
+            continue;
+        }
         let Some(spot) = with(app, |layout| spot_now(layout, &name)) else { continue };
         let Some(now) = window_spot(handle) else { continue };
         // Moved off its spot, or resized by more than rounding: put it back.
@@ -141,6 +145,22 @@ pub fn hold(app: &AppHandle) {
             win::place(handle, spot);
         }
     }
+}
+
+/// Patch 74: remember one client's new spot (dropped from its bar), in its stack's spot when it's in one.
+pub fn remember_one(app: &AppHandle, name: &str, spot: Spot) {
+    if !keeps_a_spot(name) {
+        return;
+    }
+    with(app, |layout| match layout.in_stack.get(name).cloned() {
+        Some(stack) => {
+            layout.stacks.entry(stack).or_default().insert(name.to_string(), spot);
+        }
+        None => {
+            layout.spots.insert(name.to_string(), spot);
+        }
+    });
+    save(app);
 }
 
 /// Remember where every open client is now.

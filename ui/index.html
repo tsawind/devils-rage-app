@@ -190,9 +190,14 @@
     <button id="cwRemember" title="Remember where every logged-in client's window is and how big">Remember where they are</button>
     <button id="cwPlace" title="Move every open client back to its remembered spot">Put them back</button>
     <label title="Move a client to its spot when it starts or logs in"><input type="checkbox" id="cwAuto"> Put back by themselves</label>
-    <button id="cwArrange" title="For Fixed Window clients (no title bar): a handle over each client; drag to move its window, pull the corner to resize. Done snaps, remembers and locks them.">Arrange windows</button>
+    <button id="cwArrange" title="For Fixed Window clients (no title bar): a handle over each client; drag to move its window, pull the corner to resize. Done leaves them exactly where you dropped them and remembers them.">Arrange windows</button>
     <label title="A client moved off its remembered spot goes straight back (for Windowed mode; Fixed Window clients can't be dragged anyway). Use Arrange windows to change spots."><input type="checkbox" id="cwLock"> Lock windows</label>
     <button id="pImport" title="Bring in thumbnail spots and cycle groups (with their pedal hotkeys) from your EVE-O Preview settings file">Import EVE-O Preview settings…</button>
+  </div>
+  <div class="plinks" id="cbRow">
+    <span class="soon" style="margin: 0" title="A slim bar over the top of a client: lock, drag to move the whole client (snaps to corners, edges and middle lines, never resized), snapshot / video, its profile, minimise, close. Best with EVE's Fixed Window mode.">Client bars:</span>
+    <span id="cbList"></span>
+    <select id="cbAdd" style="background:#0d0d10;border:1px solid #2c2c33;border-radius:6px;color:#e6e6ea;font:inherit;padding:1px 4px"></select>
   </div>
   <p class="soon" id="soon"></p>
 
@@ -329,6 +334,33 @@
     } catch (e) { soon.textContent = String(e); }
   });
   cwAuto.addEventListener("change", () => invoke("client_windows_auto", { on: cwAuto.checked }).catch(() => {}));
+  // Patch 74: client bars (lock, drag, snapshot / video, profile, minimise, close) over chosen clients.
+  async function clientBars() {
+    const st = await invoke("clientbar_state").catch(() => null);
+    if (!st) return;
+    const list = document.getElementById("cbList"), add = document.getElementById("cbAdd");
+    list.innerHTML = "";
+    if (!st.clients.length) { const s2 = document.createElement("span"); s2.className = "soon"; s2.style.margin = "0"; s2.textContent = "none yet"; list.append(s2); }
+    st.clients.forEach(name => {
+      const b = document.createElement("button");
+      b.textContent = name + " ✕";
+      b.title = "Take the bar off " + name;
+      b.addEventListener("click", async () => { await invoke("clientbar_set", { name, on: false }).catch(() => {}); clientBars(); });
+      list.append(b, document.createTextNode(" "));
+    });
+    add.innerHTML = "";
+    add.append(new Option("+ Add a client…", ""));
+    st.open.filter(n => !st.clients.includes(n)).forEach(n => add.append(new Option(n, n)));
+  }
+  document.getElementById("cbAdd").addEventListener("change", async (e) => {
+    const name = e.target.value;
+    if (!name) return;
+    try { await invoke("clientbar_set", { name, on: true }); soon.textContent = `${name} has a bar now: 🔒 unlock, then hold ✥ to move it.`; }
+    catch (err) { soon.textContent = String(err); }
+    clientBars();
+  });
+  document.getElementById("cbAdd").addEventListener("focus", clientBars);
+  clientBars();
   const cwSay = async (cmd) => { try { soon.textContent = await invoke(cmd); } catch (e) { soon.textContent = String(e); } };
   document.getElementById("cwRemember").addEventListener("click", () => cwSay("client_windows_remember"));
   document.getElementById("cwPlace").addEventListener("click", () => cwSay("client_windows_place"));
