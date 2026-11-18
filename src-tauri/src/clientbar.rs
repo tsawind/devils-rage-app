@@ -22,8 +22,8 @@ use crate::clientwindows::Spot;
 const PREFIX: &str = "clientbar-";
 /// The bar's size in logical pixels (menus make it taller while open).
 const BAR_W: f64 = 300.0;
-/// A shrunk bar: just ⚙ and ✕.
-const BAR_MINI_W: f64 = 72.0;
+/// A shrunk bar: just ‹, ⚙ and ✕.
+const BAR_MINI_W: f64 = 100.0;
 const BAR_H: f64 = 34.0;
 /// How close (physical pixels) a dropped client must be to a line to snap to it.
 const SNAP: i32 = 60;
@@ -38,7 +38,7 @@ pub struct BarSettings {
     /// When `every` is off: only these clients get a bar.
     #[serde(default)]
     pub clients: BTreeSet<String>,
-    /// Bars shrunk to just ⚙ and ✕.
+    /// Bars shrunk (›) to just ⚙ and ✕.
     #[serde(default)]
     pub mini: BTreeSet<String>,
     /// "right" (default), "center" or "left" (past EVE's Neocom).
@@ -676,7 +676,7 @@ mod tests {
         assert_eq!(bar_spot(f, "left", 1.0, BAR_W), (64, 0));
         assert_eq!(bar_spot(f, "center", 1.0, BAR_W), (810, 0));
         assert_eq!(bar_spot(f, "right", 1.0, BAR_W), (1612, 0));
-        assert_eq!(bar_spot(f, "right", 1.0, BAR_MINI_W), (1840, 0));
+        assert_eq!(bar_spot(f, "right", 1.0, BAR_MINI_W), (1812, 0));
         assert_eq!(bar_spot(f, "left", 1.5, BAR_W), (96, 0));
     }
 

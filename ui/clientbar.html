@@ -35,7 +35,9 @@
   .say.ok { color: var(--ok); }
   .say.bad { color: #f08a8a; }
   hr { border: 0; border-top: 1px solid #25252c; margin: 6px 0; }
-  body.mini .bar { width: 72px; }
+  body.mini .bar { width: 100px; }
+  .b.fold { width: 20px; }
+  body.mini .b.fold svg { transform: rotate(180deg); }
   body.mini.right .bar { margin-left: auto; }
   body.mini.center .bar { margin: 0 auto; }
   body.mini .full { display: none; }
@@ -43,6 +45,8 @@
 </head>
 <body>
 <div class="bar">
+  <button class="b fold" id="fold" title="Shrink the bar to just ⚙ and ✕">
+    <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
   <button class="full b lock" id="lock" title="Locked: click to unlock moving this client"></button>
   <button class="full b drag off" id="drag" title="Unlock first, then hold and drag to move the client (snaps to corners, edges and middle lines; never resized)">
     <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
@@ -87,7 +91,6 @@
   <button class="it" data-page="tuning.html">Client tuning (graphics, sound tiers)</button>
   <button class="it" data-page="launch.html">Launch groups</button>
   <hr>
-  <button class="it" id="shrink">Shrink this bar (only ⚙ and ✕)</button>
   <button class="it" id="hide">Take the bar off this client</button>
   <div class="say" id="gearSay"></div>
 </div>
@@ -223,7 +226,7 @@
     invoke("clientbar_open_page", { page: b.dataset.page }).catch(e => say("gearSay", String(e), "bad"));
   }));
   $("hide").addEventListener("click", () => invoke("clientbar_set", { name: NAME, on: false }).catch(e => say("gearSay", String(e), "bad")));
-  $("shrink").addEventListener("click", async () => {
+  $("fold").addEventListener("click", async () => {
     const mini = !document.body.classList.contains("mini");
     await invoke("clientbar_mini", { name: NAME, on: mini }).catch(() => {});
     closeMenus(); applyState(await invoke("clientbar_state").catch(() => null)); back();
@@ -244,7 +247,7 @@
     document.body.classList.toggle("mini", mini);
     document.body.classList.toggle("right", st.corner === "right");
     document.body.classList.toggle("center", st.corner === "center");
-    $("shrink").textContent = mini ? "Show the full bar" : "Shrink this bar (only ⚙ and ✕)";
+    $("fold").title = mini ? "Show the whole bar" : "Shrink the bar to just ⚙ and ✕";
   }
   const refreshState = () => invoke("clientbar_state").then(applyState).catch(() => {});
   setInterval(() => { if (!menu) refreshState(); }, 2000);
