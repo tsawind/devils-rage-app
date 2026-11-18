@@ -476,6 +476,8 @@ fn follow_switches(app: &AppHandle, seen: &mut HashMap<String, (bool, Spot)>) {
             continue;
         }
         let scale = app.get_webview_window(crate::MAIN_WINDOW).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+        // The spot it ends up at is the one to remember for the next switch.
+        seen.remove(&name);
         let app = app.clone();
         log::info!("{name} switched to {}", if captioned { "Window mode" } else { "Fixed Window" });
         std::thread::spawn(move || {
@@ -487,8 +489,6 @@ fn follow_switches(app: &AppHandle, seen: &mut HashMap<String, (bool, Spot)>) {
                 crate::clientwindows::remember_one(&app, &name, to);
             }
         });
-        // The spot it ends up at is the one to remember for the next switch.
-        seen.remove(&name);
     }
 }
 
