@@ -9,6 +9,64 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 static CACHE: Mutex<Option<HashMap<u32, Option<String>>>> = Mutex::new(None);
+/// Patch 74 (Tsa, 18 Nov: "I want guarantees"): the EVE account each client was signed in to, by
+/// process. Read from the launcher's sign-in token on the start-up line: only the account number
+/// is kept; the token itself is dropped at once and never stored or logged.
+static ACCOUNTS: Mutex<Option<HashMap<u32, Option<u64>>>> = Mutex::new(None);
+
+/// Base64url (no padding) to bytes; None on anything else.
+fn base64url(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let (mut buf, mut bits) = (0u32, 0u32);
+    for c in text.bytes().filter(|c| *c != b'=') {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            _ => return None,
+        } as u32;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
+/// The EVE account number in a start-up line's sign-in token, and a description of the token's
+/// shape for the log (part count and claim names: never a value).
+pub fn account_in(line: &str) -> (Option<u64>, String) {
+    let all = args(line);
+    let token = all.iter().enumerate().find_map(|(i, arg)| {
+        let (key, value) = key_of(arg)?;
+        (key == "ssotoken").then(|| value.filter(|v| !v.is_empty()).map(str::to_string).or_else(|| all.get(i + 1).cloned()))?
+    });
+    let Some(token) = token else { return (None, "no ssotoken".into()) };
+    let parts: Vec<&str> = token.split('.').collect();
+    let Some(payload) = parts.get(1).filter(|_| parts.len() == 3).and_then(|p| base64url(p)).and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) else {
+        return (None, format!("ssotoken: {} part(s), not a readable JWT", parts.len()));
+    };
+    let names: Vec<String> = payload.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+    // "sub": "USER:EVE:12345678" (an account) or "CHARACTER:EVE:…" (a character).
+    let sub = payload.get("sub").and_then(|v| v.as_str()).unwrap_or("");
+    let kind = sub.split(':').next().unwrap_or("").to_string();
+    let account = sub.strip_prefix("USER:EVE:").and_then(|n| n.parse::<u64>().ok());
+    (account, format!("ssotoken: JWT, claims [{}], sub kind {:?}", names.join(", "), kind))
+}
+
+/// The EVE account a client window was signed in to (cached per process; read with its profile).
+pub fn account_of_window(handle: isize) -> Option<u64> {
+    let pid = pid_of(handle)?;
+    if !CACHE.lock().unwrap().as_ref().is_some_and(|c| c.contains_key(&pid)) {
+        let _ = profile_of_window(handle);
+    }
+    ACCOUNTS.lock().unwrap().as_ref().and_then(|c| c.get(&pid).copied()).flatten()
+}
 
 /// Split a Windows command line into arguments (quotes respected).
 fn args(line: &str) -> Vec<String> {
@@ -103,10 +161,22 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
     if let Some(hit) = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(&pid).cloned()) {
         return hit;
     }
+    let mut account = None;
     let profile = read_line(pid).and_then(|line| {
         log::info!("EVE client {pid} start-up options (names only): {}", option_names(&line).join(" "));
+        let (found, shape) = account_in(&line);
+        log::info!("EVE client {pid} {shape}; account {}", if found.is_some() { "found" } else { "not found" });
+        account = found;
         profile_in(&line)
     });
+    {
+        let mut guard = ACCOUNTS.lock().unwrap();
+        let accounts = guard.get_or_insert_with(HashMap::new);
+        if accounts.len() > 200 {
+            accounts.clear();
+        }
+        accounts.insert(pid, account);
+    }
     let mut guard = CACHE.lock().unwrap();
     let cache = guard.get_or_insert_with(HashMap::new);
     if cache.len() > 200 {
@@ -150,5 +220,17 @@ mod tests {
         assert_eq!(profile_in("exefile.exe /settingsprofile settings_3"), Some("3".into()));
         assert_eq!(profile_in("exefile.exe /noconsole"), None);
         assert_eq!(profile_in("exefile.exe /settingsprofile=../../evil"), None);
+    }
+
+    #[test]
+    fn finds_the_account_in_the_sign_in_token() {
+        // header.payload.signature, payload {"sub":"USER:EVE:7205846","name":"x"} in base64url.
+        let payload = "eyJzdWIiOiJVU0VSOkVWRTo3MjA1ODQ2IiwibmFtZSI6IngifQ";
+        let line = format!("exefile.exe /noconsole /ssoToken=aGVhZA.{payload}.c2ln /settingsprofile=1");
+        let (account, shape) = account_in(&line);
+        assert_eq!(account, Some(7_205_846));
+        assert!(shape.contains("sub kind \"USER\"") && !shape.contains("7205846"));
+        assert_eq!(account_in("exefile.exe /ssoToken=opaque").0, None);
+        assert_eq!(account_in("exefile.exe /noconsole").1, "no ssotoken");
     }
 }

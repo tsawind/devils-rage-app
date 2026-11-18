@@ -97,7 +97,13 @@ pub fn pc_accounts() -> serde_json::Value {
         })
         .collect();
     let hidden = crate::incognito::incognito_state()["hidden"].clone();
-    serde_json::json!({ "accounts": accounts, "hidden": hidden })
+    // Logged-in clients and the EVE account each was signed in to (from its own start-up line):
+    // certain, so Your accounts can flag a character sitting on another EVE account than its own.
+    let running: Vec<serde_json::Value> = crate::clipboard::open_eve_windows()
+        .into_iter()
+        .filter_map(|(name, handle)| Some(serde_json::json!({ "name": name, "user_id": crate::startline::account_of_window(handle)? })))
+        .collect();
+    serde_json::json!({ "accounts": accounts, "hidden": hidden, "running": running })
 }
 
 /// Hand `pc_accounts` to a SeAT page in the app (its Your accounts asked), with each character's
