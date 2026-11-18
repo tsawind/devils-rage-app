@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 use crate::clientwindows::Spot;
@@ -615,9 +615,11 @@ pub fn start(app: AppHandle) {
             // label -> (shown, place, region key)
             let mut shown: HashMap<String, (bool, Place, (bool, i32, i32, i32))> = HashMap::new();
             let mut modes: HashMap<String, (bool, Spot)> = HashMap::new();
+            let mut logins: HashMap<isize, LoginWatch> = HashMap::new();
             loop {
                 std::thread::sleep(Duration::from_millis(150));
                 follow_switches(&app, &mut modes);
+                remember_moved_logins(&app, &mut logins);
                 let wanted = settings(&app);
                 // Window-mode clients get the small bar left of Windows' own –, ☐, ✕; Fixed Window
                 // clients get our title bar (or the small bar when floating).
@@ -843,12 +845,79 @@ pub fn clientbar_login_profile(name: String) -> Option<String> {
 #[tauri::command]
 pub fn clientbar_place_like(app: AppHandle, name: String, like: Vec<String>) -> bool {
     let Some(handle) = handle_of(&name) else { return false };
-    for character in like.iter().take(10) {
-        if let Some(spot) = crate::clientwindows::remembered(&app, character) {
+    // Its own spot first (an account's login screen remembers where you put it).
+    if crate::clientwindows::keeps_a_spot(&name) {
+        if let Some(spot) = crate::clientwindows::remembered(&app, &name) {
+            log::info!("{name}: to its own spot");
             return crate::clientwindows::place_window(handle, spot);
         }
     }
+    // Else near one of its account's characters. Their spot may be from the other display mode
+    // (a Fixed Window spot is the bare client; a Window-mode one has Windows' title bar and
+    // invisible borders), so only move it there and snap it; never take that size.
+    let (Some(rect), Some(frame)) = (win::window_rect(handle), win::frame(handle)) else { return false };
+    for character in like.iter().take(10) {
+        let Some(spot) = crate::clientwindows::remembered(&app, character) else { continue };
+        let scale = app.get_webview_window(crate::MAIN_WINDOW).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+        let to = like_spot(rect, frame, spot, win::captioned(handle), scale, win::work_area(Spot { x: spot.x, y: spot.y, w: frame.w, h: frame.h }));
+        log::info!("{name}: near {character}'s spot");
+        return crate::clientwindows::place_window(handle, to);
+    }
     false
+}
+
+/// Where a login screen goes near a character's remembered `spot`: its own size kept, its
+/// visible frame (with our title bar when it's Fixed Window) snapped on that screen.
+pub fn like_spot(rect: Spot, frame: Spot, spot: Spot, captioned: bool, scale: f64, work: Option<Spot>) -> Spot {
+    let at = Spot { x: spot.x, y: spot.y, w: frame.w, h: frame.h };
+    let (fx, fy) = match work {
+        Some(work) if captioned => snap(at, work),
+        Some(work) => {
+            let (top, side) = chrome(scale);
+            let (ox, oy) = snap(outer_of(at, scale), work);
+            (ox + side, oy + top)
+        }
+        None => (at.x, at.y),
+    };
+    Spot { x: rect.x + (fx - frame.x), y: rect.y + (fy - frame.y), w: rect.w, h: rect.h }
+}
+
+/// Patch 74: an account's login screen remembers where you put it (snapped or dragged by Windows'
+/// own title bar too) once it has sat still a second. Not in its first seconds (while it's being
+/// put in its spot) and not while a mouse button is down.
+struct LoginWatch {
+    first: Instant,
+    last: Spot,
+    changed: Instant,
+    saved: bool,
+}
+
+const LOGIN_SETTLE_GRACE: Duration = Duration::from_secs(6);
+
+fn remember_moved_logins(app: &AppHandle, watch: &mut HashMap<isize, LoginWatch>) {
+    let logins: Vec<(String, isize)> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| n.starts_with("Login ") && crate::clientwindows::keeps_a_spot(n)).collect();
+    watch.retain(|h, _| logins.iter().any(|(_, handle)| handle == h));
+    let now = Instant::now();
+    for (name, handle) in logins {
+        let Some(rect) = crate::clientwindows::window_spot(handle) else { continue };
+        let entry = watch.entry(handle).or_insert(LoginWatch { first: now, last: rect, changed: now, saved: true });
+        if now.duration_since(entry.first) < LOGIN_SETTLE_GRACE {
+            entry.last = rect;
+            continue;
+        }
+        if rect != entry.last {
+            entry.last = rect;
+            entry.changed = now;
+            entry.saved = false;
+            continue;
+        }
+        if entry.saved || now.duration_since(entry.changed) < Duration::from_secs(1) || win::button_down() || DRAGGING.lock().unwrap().is_some() {
+            continue;
+        }
+        entry.saved = true;
+        crate::clientwindows::remember_one(app, &name, rect);
+        log::info!("{name}: remembered its spot {}x{} at {},{}", rect.w, rect.h, rect.x, rect.y);
+    }
 }
 
 /// The mapper's "Pop out (on top of EVE)" for this client's character.
@@ -1136,6 +1205,21 @@ mod tests {
     use super::*;
 
     const WORK: Spot = Spot { x: 0, y: 0, w: 3840, h: 2112 };
+
+    #[test]
+    fn a_login_screen_near_a_fixed_characters_spot_keeps_its_size() {
+        let work = Spot { x: 0, y: 0, w: 3840, h: 2112 };
+        // Tsawind is Fixed Window: his spot is the bare 1918x1024 client under our title bar.
+        let tsawind = Spot { x: 1, y: 31, w: 1918, h: 1024 };
+        // A Window-mode login screen (Windows' 7 px invisible borders round its frame) goes to the
+        // corner as it is, not squeezed into Tsawind's rectangle (that gave 1902x985).
+        let rect = Spot { x: 493, y: 500, w: 1934, h: 1063 };
+        let frame = Spot { x: 500, y: 500, w: 1920, h: 1056 };
+        assert_eq!(like_spot(rect, frame, tsawind, true, 1.0, Some(work)), Spot { x: -7, y: 0, w: 1934, h: 1063 });
+        // A Fixed Window login screen goes under room for our title bar.
+        let fixed = Spot { x: 500, y: 500, w: 1918, h: 1024 };
+        assert_eq!(like_spot(fixed, fixed, tsawind, false, 1.0, Some(work)), Spot { x: 1, y: 31, w: 1918, h: 1024 });
+    }
 
     #[test]
     fn snaps_to_corners_edges_and_middle_lines() {

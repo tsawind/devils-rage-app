@@ -427,6 +427,13 @@ fn login_numbers(handles: &[isize]) -> Vec<Option<usize>> {
         .collect()
 }
 
+/// Whether this is an account's own login screen ("Login 1" … up to the number of accounts):
+/// those keep the same name every time, so they can have a spot of their own.
+pub fn is_account_login(name: &str) -> bool {
+    let count = ACCOUNT_LOGINS.lock().unwrap().len();
+    name.strip_prefix("Login ").and_then(|n| n.parse::<usize>().ok()).is_some_and(|n| n >= 1 && n <= count)
+}
+
 /// The login-screen names that belong to accounts, in Your accounts order: "Login 1" is the
 /// first account's, and so on.
 pub fn account_login_names() -> Vec<String> {

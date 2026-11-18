@@ -64,9 +64,10 @@ pub fn same_size(a: Spot, b: Spot) -> bool {
     (a.w - b.w).abs() <= 10 && (a.h - b.h).abs() <= 10
 }
 
-/// Characters only: login screens ("Login 3") change number, so they have no spot of their own.
+/// Characters, and accounts' own login screens (Patch 74: "Login 1" is always the first
+/// account's). Other login screens change number, so they have no spot of their own.
 pub fn keeps_a_spot(name: &str) -> bool {
-    !name.starts_with("Login ") && name != crate::cycle::LOGIN_SCREENS
+    (!name.starts_with("Login ") || crate::clipboard::is_account_login(name)) && name != crate::cycle::LOGIN_SCREENS
 }
 
 #[cfg(windows)]
