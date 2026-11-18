@@ -77,36 +77,31 @@ pub fn handle(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
             Ok(()) => reply(StatusCode::OK, b"{\"done\":true}".to_vec(), &origin),
             Err(e) => reply(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({ "error": e }).to_string().into_bytes(), &origin),
         },
-        // Patch 74: which characters the EVE launcher loaded for each EVE account on this PC, and
-        // which of them are incognito, so Your accounts can show them where they belong (greyed).
-        // Only for our SeAT's page (checked above); the page shows them and never sends the
-        // incognito ones on.
-        ("GET", "/pc-accounts") => {
-            let accounts: Vec<serde_json::Value> = crate::launch::launcher_accounts()
-                .into_iter()
-                .map(|(user, ids)| {
-                    let characters: Vec<serde_json::Value> = ids.into_iter().map(|id| serde_json::json!({ "id": id, "incognito": !crate::incognito::is_public_id(id) })).collect();
-                    serde_json::json!({ "user_id": user, "characters": characters })
-                })
-                .collect();
-            let hidden = crate::incognito::incognito_state()["hidden"].clone();
-            reply(StatusCode::OK, serde_json::json!({ "accounts": accounts, "hidden": hidden }).to_string().into_bytes(), &origin)
-        }
-        // Patch 74: hide a character known to SeAT from the mapper / SeAT (or share it again).
-        ("POST", "/incognito-hide") => {
-            #[derive(serde::Deserialize)]
-            struct Hide {
-                name: String,
-                hidden: bool,
-            }
-            match serde_json::from_slice::<Hide>(request.body()) {
-                Ok(h) if !h.name.trim().is_empty() && h.name.len() <= 40 => {
-                    crate::incognito::incognito_hide(app.clone(), h.name, h.hidden);
-                    reply(StatusCode::OK, b"{\"saved\":true}".to_vec(), &origin)
-                }
-                _ => reply(StatusCode::BAD_REQUEST, b"{}".to_vec(), &origin),
-            }
-        }
+        ("GET", "/pc-accounts") => reply(StatusCode::OK, pc_accounts().to_string().into_bytes(), &origin),
         _ => reply(StatusCode::NOT_FOUND, b"{}".to_vec(), &origin),
+    }
+}
+
+/// Patch 74: which characters the EVE launcher loaded for each EVE account on this PC, and which
+/// of them are incognito, so Your accounts can show them where they belong (greyed). Only for our
+/// SeAT's page; the page shows them and never sends the incognito ones on.
+pub fn pc_accounts() -> serde_json::Value {
+    let accounts: Vec<serde_json::Value> = crate::launch::launcher_accounts()
+        .into_iter()
+        .map(|(user, ids)| {
+            let characters: Vec<serde_json::Value> = ids.into_iter().map(|id| serde_json::json!({ "id": id, "incognito": !crate::incognito::is_public_id(id) })).collect();
+            serde_json::json!({ "user_id": user, "characters": characters })
+        })
+        .collect();
+    let hidden = crate::incognito::incognito_state()["hidden"].clone();
+    serde_json::json!({ "accounts": accounts, "hidden": hidden })
+}
+
+/// Hand `pc_accounts` to a SeAT page in the app (its Your accounts asked).
+pub fn send_pc_accounts(app: &AppHandle, me: &str) {
+    use tauri::Manager;
+    if let Some(view) = app.get_webview(me) {
+        let detail = pc_accounts();
+        let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-accounts', {{ detail: {detail} }}));"));
     }
 }

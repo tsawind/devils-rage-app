@@ -800,6 +800,17 @@ fn new_window_handler(
                 "/clipboard" | "/attention" => log::warn!("ignored {} from a non-mapper window ({me})", url.path()),
                 // Patch 50: "Connect to my EVE PC" on the PI screen (a SeAT page).
                 "/parsec" if from_seat(&app, &me) => parsec::connect(&app),
+                // Patch 74: Your accounts (a SeAT page) asks what's on this PC, or hides / shares a
+                // character on this PC. Answered into that page only.
+                "/pc-accounts" if from_seat(&app, &me) => seatsync::send_pc_accounts(&app, &me),
+                "/incognito-hide" if from_seat(&app, &me) => {
+                    let name = url.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.chars().take(40).collect::<String>()).unwrap_or_default();
+                    let hidden = url.query_pairs().any(|(k, v)| k == "hidden" && v == "1");
+                    if !name.trim().is_empty() {
+                        incognito::incognito_hide(app.clone(), name, hidden);
+                    }
+                    seatsync::send_pc_accounts(&app, &me);
+                }
                 "/parsec" => log::warn!("ignored /parsec from a non-SeAT window ({me})"),
                 _ => scanner::signal(&app, &me, &url),
             }
