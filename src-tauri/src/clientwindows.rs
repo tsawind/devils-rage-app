@@ -411,10 +411,11 @@ mod tests {
     #[test]
     fn a_spot_from_the_other_display_mode_is_not_used_as_it_is() {
         let mut layout = ClientLayout::default();
-        // (Off Windows every window counts as Window mode.)
-        layout.fixed.insert("Tsawind".into(), true);
+        // What mode a made-up window handle counts as depends on the platform: ask.
+        let fixed_now = !win::captioned(1);
+        layout.fixed.insert("Tsawind".into(), !fixed_now);
         assert!(!same_mode(&layout, "Tsawind", 1, TOP_LEFT));
-        layout.fixed.insert("Tsawind".into(), false);
+        layout.fixed.insert("Tsawind".into(), fixed_now);
         assert!(same_mode(&layout, "Tsawind", 1, TOP_LEFT));
         // An older spot with no mode noted, size unknown: not trusted for sizing.
         assert!(!same_mode(&layout, "Girl Shady", 1, TOP_LEFT));
