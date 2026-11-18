@@ -158,10 +158,31 @@ pub fn send_pc_accounts(app: &AppHandle, me: &str) {
                 }
             }
         }
-        let ids: Vec<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();
+        // Each EVE account's login name and tier, as its sign-in token said (this PC only).
+        let info: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::infos(&app)
+            .into_iter()
+            .map(|(user, i)| (user.to_string(), serde_json::json!({ "login": i.login, "tier": i.tier, "at": i.at })))
+            .collect();
+        detail["info"] = serde_json::Value::Object(info);
+        // Every other character with settings on this PC that no account list has.
+        let placed: std::collections::BTreeSet<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();
+        let others: Vec<serde_json::Value> = crate::pcaccounts::others(&app, &placed)
+            .into_iter()
+            .map(|(id, last, profiles)| serde_json::json!({ "id": id, "last": last, "profiles": profiles, "incognito": !crate::incognito::is_public_id(id) }))
+            .collect();
+        detail["others"] = serde_json::Value::Array(others);
+        let mut ids: Vec<u64> = placed.into_iter().collect();
+        ids.extend(detail["others"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64()));
         let names = crate::profiles::profiles_names(ids).await;
         if let Some(accounts) = detail["accounts"].as_array_mut() {
             for character in accounts.iter_mut().filter_map(|a| a["characters"].as_array_mut()).flatten() {
+                if let Some(name) = character["id"].as_u64().and_then(|id| names.get(&id)) {
+                    character["name"] = serde_json::Value::String(name.clone());
+                }
+            }
+        }
+        if let Some(others) = detail["others"].as_array_mut() {
+            for character in others.iter_mut() {
                 if let Some(name) = character["id"].as_u64().and_then(|id| names.get(&id)) {
                     character["name"] = serde_json::Value::String(name.clone());
                 }

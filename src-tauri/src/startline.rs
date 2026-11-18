@@ -13,6 +13,20 @@ static CACHE: Mutex<Option<HashMap<u32, Option<String>>>> = Mutex::new(None);
 /// process. Read from the launcher's sign-in token on the start-up line: only the account number
 /// is kept; the token itself is dropped at once and never stored or logged.
 static ACCOUNTS: Mutex<Option<HashMap<u32, Option<u64>>>> = Mutex::new(None);
+/// Patch 74 (Tsa, 18 Nov: "do those"): what the token says about each EVE account: its login name
+/// (for Your accounts' login hint, this PC only) and its tier (Omega / Alpha). Account → (login, tier).
+static INFO: Mutex<Option<HashMap<u64, (Option<String>, Option<String>)>>> = Mutex::new(None);
+
+/// The login name and tier the tokens named for each EVE account seen so far.
+pub fn account_info() -> HashMap<u64, (Option<String>, Option<String>)> {
+    INFO.lock().unwrap().clone().unwrap_or_default()
+}
+
+/// A short plain text claim (letters, digits, a few marks), else None.
+fn plain(v: Option<&serde_json::Value>, max: usize) -> Option<String> {
+    let text = v?.as_str()?.trim();
+    (!text.is_empty() && text.len() <= max && text.chars().all(|c| c.is_alphanumeric() || " _-.@".contains(c))).then(|| text.to_string())
+}
 
 /// Base64url (no padding) to bytes; None on anything else.
 fn base64url(text: &str) -> Option<Vec<u8>> {
@@ -41,22 +55,30 @@ fn base64url(text: &str) -> Option<Vec<u8>> {
 /// The EVE account number in a start-up line's sign-in token, and a description of the token's
 /// shape for the log (part count and claim names: never a value).
 pub fn account_in(line: &str) -> (Option<u64>, String) {
+    let (account, shape, _) = signed_in(line);
+    (account, shape)
+}
+
+/// `account_in` plus the token's login name and tier claims.
+fn signed_in(line: &str) -> (Option<u64>, String, (Option<String>, Option<String>)) {
     let all = args(line);
     let token = all.iter().enumerate().find_map(|(i, arg)| {
         let (key, value) = key_of(arg)?;
         (key == "ssotoken").then(|| value.filter(|v| !v.is_empty()).map(str::to_string).or_else(|| all.get(i + 1).cloned()))?
     });
-    let Some(token) = token else { return (None, "no ssotoken".into()) };
+    let Some(token) = token else { return (None, "no ssotoken".into(), (None, None)) };
     let parts: Vec<&str> = token.split('.').collect();
     let Some(payload) = parts.get(1).filter(|_| parts.len() == 3).and_then(|p| base64url(p)).and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) else {
-        return (None, format!("ssotoken: {} part(s), not a readable JWT", parts.len()));
+        return (None, format!("ssotoken: {} part(s), not a readable JWT", parts.len()), (None, None));
     };
     let names: Vec<String> = payload.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
     // "sub": "USER:EVE:12345678" (an account) or "CHARACTER:EVE:…" (a character).
     let sub = payload.get("sub").and_then(|v| v.as_str()).unwrap_or("");
     let kind = sub.split(':').next().unwrap_or("").to_string();
     let account = sub.strip_prefix("USER:EVE:").and_then(|n| n.parse::<u64>().ok());
-    (account, format!("ssotoken: JWT, claims [{}], sub kind {:?}", names.join(", "), kind))
+    let tier = plain(payload.get("tier"), 20).or_else(|| payload.get("tier").filter(|v| !v.is_null()).map(|v| v.to_string().chars().filter(|c| c.is_alphanumeric()).take(20).collect()));
+    let extra = (plain(payload.get("name"), 64), tier);
+    (account, format!("ssotoken: JWT, claims [{}], sub kind {:?}", names.join(", "), kind), extra)
 }
 
 /// Like `account_of_window`, but never waits (None until its start-up line has been read).
@@ -170,7 +192,10 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
     let mut account = None;
     let profile = read_line(pid).and_then(|line| {
         log::info!("EVE client {pid} start-up options (names only): {}", option_names(&line).join(" "));
-        let (found, shape) = account_in(&line);
+        let (found, shape, extra) = signed_in(&line);
+        if let Some(user) = found {
+            INFO.lock().unwrap().get_or_insert_with(HashMap::new).insert(user, extra);
+        }
         log::info!("EVE client {pid} {shape}; account {}", if found.is_some() { "found" } else { "not found" });
         account = found;
         profile_in(&line)
@@ -235,6 +260,7 @@ mod tests {
         let line = format!("exefile.exe /noconsole /ssoToken=aGVhZA.{payload}.c2ln /settingsprofile=1");
         let (account, shape) = account_in(&line);
         assert_eq!(account, Some(7_205_846));
+        assert_eq!(signed_in(&line).2, (Some("x".to_string()), None));
         assert!(shape.contains("sub kind \"USER\"") && !shape.contains("7205846"));
         assert_eq!(account_in("exefile.exe /ssoToken=opaque").0, None);
         assert_eq!(account_in("exefile.exe /noconsole").1, "no ssotoken");

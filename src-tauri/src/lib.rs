@@ -21,7 +21,7 @@ mod clipboard;
 mod cycle;
 mod groupsetup;
 mod incognito;
-// Kept for the profile-folder cleanup (which account each folder belongs to, stray files).
+// `deduce` is kept for the profile-folder cleanup (which account each folder belongs to).
 #[allow(dead_code)]
 mod pcaccounts;
 mod launch;
@@ -807,6 +807,14 @@ fn new_window_handler(
                 // Patch 74: Your accounts (a SeAT page) asks what's on this PC, or hides / shares a
                 // character on this PC. Answered into that page only.
                 "/pc-accounts" if from_seat(&app, &me) => seatsync::send_pc_accounts(&app, &me),
+                "/pc-other-hide" if from_seat(&app, &me) => {
+                    let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
+                    let hidden = url.query_pairs().any(|(k, v)| k == "hidden" && v == "1");
+                    if let Some(id) = id {
+                        pcaccounts::hide_other(&app, id, hidden);
+                    }
+                    seatsync::send_pc_accounts(&app, &me);
+                }
                 "/incognito-hide" if from_seat(&app, &me) => {
                     let name = url.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.chars().take(40).collect::<String>()).unwrap_or_default();
                     let hidden = url.query_pairs().any(|(k, v)| k == "hidden" && v == "1");

@@ -195,6 +195,7 @@ fn with_seen<T>(app: &tauri::AppHandle, f: impl FnOnce(&mut BTreeMap<String, u64
 /// Note the EVE account of every logged-in client whose start-up line has been read (the rest are
 /// read in the background and noted next time).
 pub fn note_running(app: &tauri::AppHandle) {
+    note_info(app);
     let mut changed = false;
     for (name, handle) in crate::clipboard::open_eve_windows() {
         if crate::startline::known_profile_of_window(handle).is_none() {
@@ -217,4 +218,103 @@ pub fn note_running(app: &tauri::AppHandle) {
 /// Every character seen logged in here, with its EVE account.
 pub fn seen(app: &tauri::AppHandle) -> BTreeMap<String, u64> {
     with_seen(app, |seen| seen.clone())
+}
+
+/// Patch 74: what each EVE account's sign-in token said (login name, tier, when), and the other
+/// characters on this PC the pilot chose to hide from Your accounts. This PC only.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AccountInfo {
+    #[serde(default)]
+    pub login: Option<String>,
+    #[serde(default)]
+    pub tier: Option<String>,
+    /// When a client last said so (unix seconds).
+    #[serde(default)]
+    pub at: u64,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct InfoStore {
+    #[serde(default)]
+    accounts: BTreeMap<u64, AccountInfo>,
+    #[serde(default)]
+    hidden_others: BTreeSet<u64>,
+}
+
+static INFO_STORE: std::sync::Mutex<Option<InfoStore>> = std::sync::Mutex::new(None);
+
+fn info_file(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    app.path().app_config_dir().ok().map(|dir| dir.join("pc-account-info.json"))
+}
+
+fn with_info<T>(app: &tauri::AppHandle, f: impl FnOnce(&mut InfoStore) -> T) -> T {
+    let mut guard = INFO_STORE.lock().unwrap();
+    let store = guard.get_or_insert_with(|| info_file(app).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+    f(store)
+}
+
+fn save_info(app: &tauri::AppHandle) {
+    let text = with_info(app, |s| serde_json::to_string_pretty(s).unwrap_or_default());
+    if let Some(path) = info_file(app) {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// Take in what the tokens read so far said about each account (called with `note_running`).
+pub fn note_info(app: &tauri::AppHandle) {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut changed = false;
+    for (user, (login, tier)) in crate::startline::account_info() {
+        changed |= with_info(app, |s| {
+            let entry = s.accounts.entry(user).or_default();
+            let new = AccountInfo { login: login.clone().or(entry.login.clone()), tier: tier.clone().or(entry.tier.clone()), at: entry.at };
+            if new.login != entry.login || new.tier != entry.tier {
+                *entry = AccountInfo { at: now, ..new };
+                true
+            } else {
+                false
+            }
+        });
+    }
+    if changed {
+        save_info(app);
+    }
+}
+
+/// Every EVE account's login name and tier, as last seen.
+pub fn infos(app: &tauri::AppHandle) -> BTreeMap<u64, AccountInfo> {
+    with_info(app, |s| s.accounts.clone())
+}
+
+/// Hide (or show again) an "other character" in Your accounts.
+pub fn hide_other(app: &tauri::AppHandle, id: u64, hidden: bool) {
+    with_info(app, |s| {
+        if hidden {
+            s.hidden_others.insert(id);
+        } else {
+            s.hidden_others.remove(&id);
+        }
+    });
+    save_info(app);
+}
+
+/// Characters with settings on this PC (profile folders) that no account list has: id, when last
+/// played (its newest settings file, ms) and the profile folders it's in. Hidden ones left out.
+pub fn others(app: &tauri::AppHandle, placed: &BTreeSet<u64>) -> Vec<(u64, u64, Vec<String>)> {
+    let hidden = with_info(app, |s| s.hidden_others.clone());
+    let mut found: BTreeMap<u64, (u64, Vec<String>)> = BTreeMap::new();
+    for f in folders() {
+        for (c, t) in &f.chars {
+            let e = found.entry(*c).or_default();
+            e.0 = e.0.max(*t);
+            e.1.push(f.profile.clone());
+        }
+    }
+    let mut out: Vec<(u64, u64, Vec<String>)> = found.into_iter().filter(|(c, _)| !placed.contains(c) && !hidden.contains(c)).map(|(c, (t, p))| (c, t, p)).collect();
+    out.sort_by_key(|(_, t, _)| std::cmp::Reverse(*t));
+    out
 }
