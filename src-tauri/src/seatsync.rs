@@ -164,6 +164,7 @@ pub fn send_pc_accounts(app: &AppHandle, me: &str) {
             .map(|(user, i)| (user.to_string(), serde_json::json!({ "login": i.login, "tier": i.tier, "at": i.at })))
             .collect();
         detail["info"] = serde_json::Value::Object(info);
+        detail["seen"] = serde_json::Value::Array(seen.iter().map(|(name, user)| serde_json::json!({ "name": name, "user_id": user })).collect());
         // Every other character with settings on this PC that no account list has.
         let placed: std::collections::BTreeSet<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();
         let others: Vec<serde_json::Value> = crate::pcaccounts::others(&app, &placed)

@@ -807,6 +807,21 @@ fn new_window_handler(
                 // Patch 74: Your accounts (a SeAT page) asks what's on this PC, or hides / shares a
                 // character on this PC. Answered into that page only.
                 "/pc-accounts" if from_seat(&app, &me) => seatsync::send_pc_accounts(&app, &me),
+                // Patch 74: move one character's settings files aside (the archive folder), asked on Your accounts.
+                "/pc-other-archive" if from_seat(&app, &me) => {
+                    let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
+                    let name = url.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.chars().take(40).collect::<String>());
+                    if let Some(id) = id {
+                        let said = match pcaccounts::archive_character(id, name.as_deref()) {
+                            Ok(n) => format!("Moved {n} settings file(s) to the {} folder.", pcaccounts::ARCHIVE),
+                            Err(e) => e,
+                        };
+                        if let Some(view) = app.get_webview(&me) {
+                            let detail = serde_json::json!({ "id": id, "said": said });
+                            let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-archived', {{ detail: {detail} }}));"));
+                        }
+                    }
+                }
                 "/pc-other-hide" if from_seat(&app, &me) => {
                     let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
                     let hidden = url.query_pairs().any(|(k, v)| k == "hidden" && v == "1");

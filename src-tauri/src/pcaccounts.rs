@@ -318,3 +318,42 @@ pub fn others(app: &tauri::AppHandle, placed: &BTreeSet<u64>) -> Vec<(u64, u64, 
     out.sort_by_key(|(_, t, _)| std::cmp::Reverse(*t));
     out
 }
+
+/// The folder (beside the profile folders) where removed characters' settings files go. Never
+/// deleted: moved aside, each under its profile folder's name, so it can be put back by hand.
+pub const ARCHIVE: &str = "Devils Rage archived characters";
+
+/// Move one character's settings files (core_char_<id>.dat in every profile folder) into the
+/// archive folder. Refused while that character is logged in (EVE would write them again).
+pub fn archive_character(id: u64, name: Option<&str>) -> Result<usize, String> {
+    if let Some(name) = name {
+        if crate::clipboard::open_eve_characters().iter().any(|n| n.eq_ignore_ascii_case(name)) {
+            return Err(format!("{name} is logged in: close that client first."));
+        }
+    }
+    let root = crate::profiles::root()?;
+    let file = format!("core_char_{id}.dat");
+    let mut moved = 0;
+    for dir in std::fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
+        let folder = dir.file_name().to_string_lossy().to_string();
+        if crate::profiles::profile_of(&folder).is_none() {
+            continue;
+        }
+        let from = dir.path().join(&file);
+        if !from.is_file() {
+            continue;
+        }
+        let to_dir = root.join(ARCHIVE).join(&folder);
+        std::fs::create_dir_all(&to_dir).map_err(|e| e.to_string())?;
+        let mut to = to_dir.join(&file);
+        let mut n = 2;
+        while to.exists() {
+            to = to_dir.join(format!("core_char_{id} ({n}).dat"));
+            n += 1;
+        }
+        std::fs::rename(&from, &to).map_err(|e| format!("couldn't move {folder}\\{file}: {e}"))?;
+        moved += 1;
+    }
+    log::info!("archived character {id}'s settings files: {moved}");
+    Ok(moved)
+}
