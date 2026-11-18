@@ -32,17 +32,17 @@
   <div class="logo" data-drag><span>DR</span></div>
   <button class="tab" data-act="home">Home</button>
   <button class="tab" data-act="mapper">Mapper</button>
-  <button class="tab" data-act="seat">SeAT</button>
-  <button class="tab" data-act="accounts">Your accounts</button>
-  <button class="tab" data-act="pi">PI</button>
-  <button class="tab" data-act="settings">Settings</button>
   <button class="tab" data-act="reload" title="Reload this page (F5)">Reload</button>
-  <button class="tab" data-act="updates">Check for updates</button>
+  <button class="tab" data-act="pi">PI</button>
+  <button class="tab" data-act="assets">Assets</button>
+  <button class="tab" data-act="accounts">Your accounts</button>
+  <button class="tab" data-act="settings">Settings</button>
+  <button class="tab" data-act="updates" title="Check for updates">Updates</button>
+  <div class="drag" data-drag></div>
+  <!-- Patch 74: developer buttons, far right (dev channel only). -->
   <button class="tab dev" data-act="record" id="rec" title="Record everything (dev): the whole app window twice a second and, while a planet scan runs, EVE's pictures 5 a second, with every detail, in 30 s files in the app's recordings folder (up to an hour). Nothing leaves the PC.">Record</button>
   <button class="tab dev" data-act="snapshot" id="snap" title="Snapshot (dev): the app window, EVE's picture when scanning, and every detail (status, the end of the log) into the app's recordings folder">Snapshot</button>
-  <button class="tab dev" data-act="video" id="video" title="Capture (dev): one monitor, EVE client or the app, only the boxes you draw: snapshots, or video at the rate, quality and size you pick, in small files">Video…</button>
-  <button class="tab dev" data-act="snapshot-pick" title="Capture (dev): draw boxes on a monitor, EVE client or the app, then press Snapshot as often as you like">Snapshot of…</button>
-  <div class="drag" data-drag></div>
+  <button class="tab dev" data-act="video" id="video" title="Capture (dev): draw boxes on a monitor, EVE client or the app, then take snapshots or video at the rate, quality and size you pick, in small files">Capture…</button>
   <div class="ver" data-drag id="ver"></div>
   <button class="win" data-act="minimize" title="Minimise" aria-label="Minimise"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
   <button class="win" data-act="maximize" id="max" title="Maximise" aria-label="Maximise"><svg viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
@@ -83,7 +83,7 @@
         rec.textContent = st.recording != null ? `● Stop ${Math.floor(st.recording / 60)}:${String(st.recording % 60).padStart(2, "0")}` : "Record";
         const vid = document.getElementById("video");
         vid.classList.toggle("rec", st.video != null);
-        vid.textContent = st.video != null ? `● Video ${Math.floor(st.video / 60)}:${String(st.video % 60).padStart(2, "0")}` : "Video…";
+        vid.textContent = st.video != null ? `● Video ${Math.floor(st.video / 60)}:${String(st.video % 60).padStart(2, "0")}` : "Capture…";
         document.getElementById("snap").textContent = st.snapshot ? "Saved ✓" : "Snapshot";
         document.getElementById("ver").textContent = st.channel === "stable" ? st.version : `${st.version} · ${st.channel}`;
       }

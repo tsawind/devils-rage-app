@@ -131,6 +131,10 @@
       <input id="lpPath" class="in" spellcheck="false" autocomplete="off" placeholder="C:\Users\you\AppData\Local\eve-online\eve-online.exe">
       <button class="b" id="lpSave">Save</button>
     </div>
+    <div class="row">
+      <div class="l">Import from EVE-O Preview<small>Thumbnail spots and cycle groups (with their pedal hotkeys) from your EVE-O-Preview.json, once</small></div>
+      <button class="b" id="eveoImport">Import…</button>
+    </div>
   </section>
 
   <section>
@@ -267,6 +271,9 @@
   $("psOpen").addEventListener("click", () => { invoke("open_parsec"); toast("Opening Parsec…"); });
   $("psSave").addEventListener("click", () => set("parsec_peer_id", $("psId").value.trim()));
   $("lpSave").addEventListener("click", () => set("launcher_path", $("lpPath").value.trim()));
+  $("eveoImport").addEventListener("click", async () => {
+    try { toast(await invoke("import_eveo")); } catch (e) { toast(String(e)); }
+  });
   $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
   $("copyLog").addEventListener("click", async () => {
     try {

@@ -45,6 +45,8 @@ pub fn bar_state(app: AppHandle) -> BarState {
                 }
             } else if path.ends_with("settings.html") {
                 "settings"
+            } else if path.ends_with("assets.html") {
+                "assets"
             } else if path.ends_with("index.html") || path == "/" {
                 "home"
             } else {

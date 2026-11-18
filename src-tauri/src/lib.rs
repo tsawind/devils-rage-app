@@ -249,6 +249,7 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         "settings" => go(app, app_url("settings.html")),
+        "assets" => go(app, app_url("assets.html")),
         "admin" => {
             if let Ok(url) = format!("{MAPPER_URL}/desktop-app/admin").parse() {
                 go(app, url);
