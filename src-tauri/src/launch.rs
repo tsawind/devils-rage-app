@@ -138,6 +138,9 @@ pub struct SeatAccount {
     pub profile: Option<String>,
     #[serde(default)]
     pub order: u32,
+    /// Patch 74: the EVE account it is (the launcher's account number), when SeAT knows it.
+    #[serde(default)]
+    pub launcher_user_id: Option<u64>,
     #[serde(default)]
     pub characters: Vec<SeatCharacter>,
 }
@@ -239,7 +242,7 @@ fn nickname_key(nickname: &str) -> (u8, u64, String) {
 pub fn set_account_logins(seat: &SeatData) {
     let mut accounts: Vec<&SeatAccount> = seat.accounts.iter().collect();
     accounts.sort_by_key(|a| nickname_key(&a.nickname));
-    crate::clipboard::set_account_logins(accounts.iter().map(|a| a.profile.clone().filter(|p| !p.trim().is_empty())).collect());
+    crate::clipboard::set_account_logins(accounts.iter().map(|a| (a.profile.clone().filter(|p| !p.trim().is_empty()), a.launcher_user_id)).collect());
 }
 
 /// Read the saved accounts once on start-up so login screens get their account's number.

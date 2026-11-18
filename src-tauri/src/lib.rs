@@ -436,6 +436,7 @@ pub fn run() {
             setups::setups_look,
             setups::setups_compare,
             clientbar::clientbar_state,
+            clientbar::clientbar_login_account,
             incognito::incognito_state,
             incognito::incognito_hide,
             clientbar::clientbar_set,

@@ -844,6 +844,12 @@ pub fn clientbar_login_profile(name: String) -> Option<String> {
     handle_of(&name).and_then(crate::startline::profile_of_window)
 }
 
+/// Patch 74: the EVE account a client is signed in to (from its sign-in token), if known.
+#[tauri::command]
+pub fn clientbar_login_account(name: String) -> Option<u64> {
+    handle_of(&name).and_then(crate::startline::account_of_window)
+}
+
 /// Put a login screen where one of its account's characters is remembered (first one found).
 #[tauri::command]
 pub fn clientbar_place_like(app: AppHandle, name: String, like: Vec<String>) -> bool {

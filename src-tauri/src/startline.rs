@@ -59,6 +59,12 @@ pub fn account_in(line: &str) -> (Option<u64>, String) {
     (account, format!("ssotoken: JWT, claims [{}], sub kind {:?}", names.join(", "), kind))
 }
 
+/// Like `account_of_window`, but never waits (None until its start-up line has been read).
+pub fn known_account_of_window(handle: isize) -> Option<u64> {
+    let pid = pid_of(handle)?;
+    ACCOUNTS.lock().unwrap().as_ref().and_then(|c| c.get(&pid).copied()).flatten()
+}
+
 /// The EVE account a client window was signed in to (cached per process; read with its profile).
 pub fn account_of_window(handle: isize) -> Option<u64> {
     let pid = pid_of(handle)?;

@@ -214,18 +214,26 @@
     }
     drag();
   });
-  // A login screen ("Login 2"): its account from the profile it was started with.
+  // A login screen ("Login 2"): its account from its sign-in token (certain), else from the
+  // profile it was started with.
   let loginLabel = "";
   const titleText = () => "EVE - " + NAME + (loginLabel ? " · " + loginLabel : "");
   $("title").textContent = titleText();
   if (NAME.startsWith("Login ")) {
     (async () => {
       const profile = await invoke("clientbar_login_profile", { name: NAME }).catch(() => null);
-      if (!profile) return;
-      profileHint = profile;
+      const user = await invoke("clientbar_login_account", { name: NAME }).catch(() => null);
+      if (!profile && !user) return;
+      if (profile) profileHint = profile;
       const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [] }));
-      const acct = (seat.accounts || []).find(a => String(a.profile) === String(profile));
-      loginLabel = acct ? `Account ${acct.nickname} (${(acct.characters || []).map(c => c.name).join(", ")})` : `settings_${profile}`;
+      const accounts = seat.accounts || [];
+      const byUser = user ? accounts.find(a => a.launcher_user_id != null && String(a.launcher_user_id) === String(user)) : null;
+      // By profile only when that account isn't known to be another EVE account than this one.
+      const byProfile = profile ? accounts.find(a => String(a.profile) === String(profile)) : null;
+      const profileOk = byProfile && !(user && byProfile.launcher_user_id != null && String(byProfile.launcher_user_id) !== String(user));
+      const acct = byUser || (profileOk ? byProfile : null);
+      const warn = byUser && profile && String(byUser.profile) !== String(profile) ? ` ⚠ started with settings_${profile}` : "";
+      loginLabel = acct ? `Account ${acct.nickname} (${(acct.characters || []).map(c => c.name).join(", ")})${warn}` : user ? `EVE account ${user} (not in Your accounts)` : `settings_${profile}`;
       $("title").textContent = titleText();
       if (acct) invoke("clientbar_place_like", { name: NAME, like: (acct.characters || []).map(c => c.name) }).catch(() => {});
     })();

@@ -367,8 +367,8 @@ pub fn open_clients() -> Vec<(String, isize)> {
 static LOGIN_NUMBERS: Mutex<Vec<(isize, usize)>> = Mutex::new(Vec::new());
 
 /// Patch 74: login screens are tied to accounts. Account N in Your accounts order (by nickname)
-/// owns "Login N"; this holds each account's settings profile in that order (None: no profile).
-static ACCOUNT_LOGINS: Mutex<Vec<Option<String>>> = Mutex::new(Vec::new());
+/// owns "Login N"; this holds each account's settings profile and EVE account number in that order.
+static ACCOUNT_LOGINS: Mutex<Vec<(Option<String>, Option<u64>)>> = Mutex::new(Vec::new());
 
 /// When each login window was first seen while its profile was still being read.
 static WAITING_SINCE: Mutex<Vec<(isize, std::time::Instant)>> = Mutex::new(Vec::new());
@@ -377,18 +377,20 @@ static WAITING_SINCE: Mutex<Vec<(isize, std::time::Instant)>> = Mutex::new(Vec::
 const PROFILE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Set the accounts' profiles in Your accounts order (on start-up and after every SeAT sync).
-pub fn set_account_logins(profiles: Vec<Option<String>>) {
-    *ACCOUNT_LOGINS.lock().unwrap() = profiles;
+pub fn set_account_logins(accounts: Vec<(Option<String>, Option<u64>)>) {
+    *ACCOUNT_LOGINS.lock().unwrap() = accounts;
 }
 
-/// The login number (0-based) for a login screen started with `profile`: its account's own
-/// number when that's free, else the lowest free number after every account's.
-fn pick_login_number(profile: Option<&str>, accounts: &[Option<String>], used: &[usize]) -> usize {
-    if let Some(profile) = profile {
-        if let Some(n) = accounts.iter().position(|p| p.as_deref() == Some(profile)) {
-            if !used.contains(&n) {
-                return n;
-            }
+/// The login number (0-based) for a login screen signed in to EVE account `user` and started with
+/// `profile`: the account it really is (from its sign-in token) first, else the account that
+/// profile belongs to, when that number is free; else the lowest free number after every account's.
+fn pick_login_number(user: Option<u64>, profile: Option<&str>, accounts: &[(Option<String>, Option<u64>)], used: &[usize]) -> usize {
+    let by_user = user.and_then(|u| accounts.iter().position(|(_, id)| *id == Some(u)));
+    // The profile only counts when the token didn't name an account we know.
+    let by_profile = if by_user.is_none() { profile.and_then(|p| accounts.iter().position(|(q, _)| q.as_deref() == Some(p))) } else { None };
+    if let Some(n) = by_user.or(by_profile) {
+        if !used.contains(&n) {
+            return n;
         }
     }
     (accounts.len()..).find(|n| !used.contains(n)).unwrap_or(accounts.len())
@@ -425,7 +427,8 @@ fn login_numbers(handles: &[isize]) -> Vec<Option<usize>> {
                 }
             };
             let used: Vec<usize> = known.iter().map(|(_, n)| *n).collect();
-            let n = pick_login_number(profile.as_deref(), &accounts, &used);
+            let user = crate::startline::known_account_of_window(*handle);
+            let n = pick_login_number(user, profile.as_deref(), &accounts, &used);
             known.push((*handle, n));
             Some(n)
         })
@@ -516,17 +519,21 @@ mod tests {
 
     #[test]
     fn login_screens_take_their_accounts_number() {
-        let accounts = vec![Some("1".to_string()), None, Some("29".to_string())];
+        let accounts = vec![(Some("1".to_string()), Some(7_205_846)), (None, None), (Some("29".to_string()), Some(555))];
         // Account 01's login screen is Login 1, account 03's is Login 3.
-        assert_eq!(pick_login_number(Some("1"), &accounts, &[]), 0);
-        assert_eq!(pick_login_number(Some("29"), &accounts, &[0]), 2);
+        assert_eq!(pick_login_number(None, Some("1"), &accounts, &[]), 0);
+        assert_eq!(pick_login_number(None, Some("29"), &accounts, &[0]), 2);
         // Unknown profile, or no profile: after every account's number.
-        assert_eq!(pick_login_number(Some("77"), &accounts, &[]), 3);
-        assert_eq!(pick_login_number(None, &accounts, &[3]), 4);
+        assert_eq!(pick_login_number(None, Some("77"), &accounts, &[]), 3);
+        assert_eq!(pick_login_number(None, None, &accounts, &[3]), 4);
         // The same account open twice: the second one gets a free number after the accounts'.
-        assert_eq!(pick_login_number(Some("1"), &accounts, &[0]), 3);
+        assert_eq!(pick_login_number(None, Some("1"), &accounts, &[0]), 3);
         // No accounts synced: plain lowest free number.
-        assert_eq!(pick_login_number(Some("1"), &[], &[0, 2]), 1);
+        assert_eq!(pick_login_number(None, Some("1"), &[], &[0, 2]), 1);
+        // The sign-in token wins over the profile: account 03 started with settings_1 is Login 3.
+        assert_eq!(pick_login_number(Some(555), Some("1"), &accounts, &[]), 2);
+        // A token naming an EVE account we don't have: not taken for account 01 by its profile.
+        assert_eq!(pick_login_number(Some(999), Some("1"), &accounts, &[]), 3);
     }
 
     #[test]
