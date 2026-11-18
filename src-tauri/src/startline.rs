@@ -116,6 +116,27 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
     profile
 }
 
+/// Processes whose start-up line is being read in the background right now.
+static READING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Like `profile_of_window`, but never waits: `None` while the line is still being read (a
+/// background thread reads it), `Some(profile)` once known. For the 150 ms window loops.
+pub fn known_profile_of_window(handle: isize) -> Option<Option<String>> {
+    let Some(pid) = pid_of(handle) else { return Some(None) };
+    if let Some(hit) = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(&pid).cloned()) {
+        return Some(hit);
+    }
+    let mut reading = READING.lock().unwrap();
+    if !reading.contains(&pid) {
+        reading.push(pid);
+        std::thread::spawn(move || {
+            let _ = profile_of_window(handle);
+            READING.lock().unwrap().retain(|p| *p != pid);
+        });
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

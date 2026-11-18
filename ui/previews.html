@@ -58,28 +58,29 @@
     const data = await invoke("preview_settings").catch((e) => { say(String(e)); return { clients: [] }; });
     const body = document.getElementById("rows");
     body.innerHTML = "";
-    // Patch 74: grouped by account, in Your accounts order: the account's login screen (when one is
-    // running, from the profile it was started with), then its characters; then everyone else;
-    // then the other login screens, in number order.
+    // Patch 74: grouped by account, in Your accounts order: the account's own login screen
+    // ("Login 1" is the first account's, running or not), then its characters; then everyone
+    // else; then login screens that aren't an account's, in number order.
     const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [] }));
-    const accounts = [...(seat.accounts || [])].sort((a, b) => String(a.nickname).localeCompare(String(b.nickname), undefined, { numeric: true }));
+    const nick = (n) => String(n ?? "");
+    const accounts = [...(seat.accounts || [])].sort((a, b) => {
+      const x = /^\s*\d+\s*$/.test(nick(a.nickname)), y = /^\s*\d+\s*$/.test(nick(b.nickname));
+      if (x !== y) return x ? -1 : 1;
+      return x ? Number(a.nickname) - Number(b.nickname) : nick(a.nickname).toLowerCase().localeCompare(nick(b.nickname).toLowerCase());
+    });
     const byName = new Map(data.clients.map(c => [c.name, c]));
-    const loginOf = new Map();
-    for (const c of data.clients.filter(c => c.running && /^Login \d+$/.test(c.name))) {
-      const profile = await invoke("clientbar_login_profile", { name: c.name }).catch(() => null);
-      const acct = profile && accounts.find(a => String(a.profile) === String(profile));
-      if (acct) loginOf.set(c.name, acct.nickname);
-    }
+    const accountLogins = data.accountLogins || [];
     const order = [], used = new Set();
     const push = (c, note) => { if (c && !used.has(c.name)) { used.add(c.name); order.push({ c, note }); } };
-    for (const a of accounts) {
+    accounts.forEach((a, i) => {
       const rows = [];
-      for (const [login, nick] of loginOf) if (nick === a.nickname) rows.push([byName.get(login), "login screen"]);
+      const login = byName.get(accountLogins[i]);
+      if (login) rows.push([login, "login screen" + (a.profile ? ` · settings_${a.profile}` : " · no profile set")]);
       for (const ch of a.characters || []) if (byName.has(ch.name)) rows.push([byName.get(ch.name)]);
-      if (!rows.length) continue;
+      if (!rows.length) return;
       order.push({ header: `Account ${a.nickname}` });
       rows.forEach(([c, note]) => push(c, note));
-    }
+    });
     const others = data.clients.filter(c => !used.has(c.name) && !/^Login \d+$/.test(c.name));
     if (others.length) { order.push({ header: "Not in an account" }); others.forEach(c => push(c)); }
     const logins = data.clients.filter(c => !used.has(c.name)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));

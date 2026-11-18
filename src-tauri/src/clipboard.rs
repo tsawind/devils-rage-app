@@ -353,28 +353,84 @@ pub fn open_clients() -> Vec<(String, isize)> {
     let mut all = open_eve_windows();
     let logins = open_login_windows();
     let numbers = login_numbers(&logins);
-    all.extend(logins.into_iter().zip(numbers).map(|(handle, n)| (login_label(n), handle)));
+    all.extend(logins.into_iter().zip(numbers).filter_map(|(handle, n)| Some((login_label(n?), handle))));
     all
 }
 
 /// Each login-screen window keeps its number while it's open (others logging in or closing
-/// don't renumber it); a new one takes the lowest free number.
+/// don't renumber it).
 static LOGIN_NUMBERS: Mutex<Vec<(isize, usize)>> = Mutex::new(Vec::new());
 
-fn login_numbers(handles: &[isize]) -> Vec<usize> {
+/// Patch 74: login screens are tied to accounts. Account N in Your accounts order (by nickname)
+/// owns "Login N"; this holds each account's settings profile in that order (None: no profile).
+static ACCOUNT_LOGINS: Mutex<Vec<Option<String>>> = Mutex::new(Vec::new());
+
+/// When each login window was first seen while its profile was still being read.
+static WAITING_SINCE: Mutex<Vec<(isize, std::time::Instant)>> = Mutex::new(Vec::new());
+
+/// How long a new login screen may stay out of the list while we find out its account.
+const PROFILE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Set the accounts' profiles in Your accounts order (on start-up and after every SeAT sync).
+pub fn set_account_logins(profiles: Vec<Option<String>>) {
+    *ACCOUNT_LOGINS.lock().unwrap() = profiles;
+}
+
+/// The login number (0-based) for a login screen started with `profile`: its account's own
+/// number when that's free, else the lowest free number after every account's.
+fn pick_login_number(profile: Option<&str>, accounts: &[Option<String>], used: &[usize]) -> usize {
+    if let Some(profile) = profile {
+        if let Some(n) = accounts.iter().position(|p| p.as_deref() == Some(profile)) {
+            if !used.contains(&n) {
+                return n;
+            }
+        }
+    }
+    (accounts.len()..).find(|n| !used.contains(n)).unwrap_or(accounts.len())
+}
+
+/// Numbers for these login windows; `None` for one whose account we're still finding out
+/// (left out of the list for up to five seconds, so it doesn't change name a moment later).
+fn login_numbers(handles: &[isize]) -> Vec<Option<usize>> {
+    let accounts = ACCOUNT_LOGINS.lock().unwrap().clone();
     let mut known = LOGIN_NUMBERS.lock().unwrap();
     known.retain(|(handle, _)| handles.contains(handle));
+    let mut waiting = WAITING_SINCE.lock().unwrap();
+    waiting.retain(|(handle, _)| handles.contains(handle));
     handles
         .iter()
         .map(|handle| {
             if let Some((_, n)) = known.iter().find(|(h, _)| h == handle) {
-                return *n;
+                return Some(*n);
             }
-            let n = (0..).find(|n| !known.iter().any(|(_, used)| used == n)).unwrap_or(0);
+            let profile = match crate::startline::known_profile_of_window(*handle) {
+                Some(profile) => profile,
+                None => {
+                    let since = match waiting.iter().find(|(h, _)| h == handle) {
+                        Some((_, t)) => *t,
+                        None => {
+                            waiting.push((*handle, std::time::Instant::now()));
+                            return None;
+                        }
+                    };
+                    if since.elapsed() < PROFILE_WAIT {
+                        return None;
+                    }
+                    None
+                }
+            };
+            let used: Vec<usize> = known.iter().map(|(_, n)| *n).collect();
+            let n = pick_login_number(profile.as_deref(), &accounts, &used);
             known.push((*handle, n));
-            n
+            Some(n)
         })
         .collect()
+}
+
+/// The login-screen names that belong to accounts, in Your accounts order: "Login 1" is the
+/// first account's, and so on.
+pub fn account_login_names() -> Vec<String> {
+    (0..ACCOUNT_LOGINS.lock().unwrap().len()).map(login_label).collect()
 }
 
 /// Whether a client name is a login screen ("Login 3").
@@ -437,13 +493,28 @@ mod tests {
 
     #[test]
     fn login_numbers_stay_put() {
-        assert_eq!(login_numbers(&[101, 102, 103]), vec![0, 1, 2]);
+        assert_eq!(login_numbers(&[101, 102, 103]), vec![Some(0), Some(1), Some(2)]);
         // 102 logged in: the others keep their numbers.
-        assert_eq!(login_numbers(&[101, 103]), vec![0, 2]);
+        assert_eq!(login_numbers(&[101, 103]), vec![Some(0), Some(2)]);
         // A new one takes the free number.
-        assert_eq!(login_numbers(&[101, 103, 104]), vec![0, 2, 1]);
+        assert_eq!(login_numbers(&[101, 103, 104]), vec![Some(0), Some(2), Some(1)]);
         assert!(is_login_label("Login 12") && !is_login_label("Login Screen Guy"));
         login_numbers(&[]);
+    }
+
+    #[test]
+    fn login_screens_take_their_accounts_number() {
+        let accounts = vec![Some("1".to_string()), None, Some("29".to_string())];
+        // Account 01's login screen is Login 1, account 03's is Login 3.
+        assert_eq!(pick_login_number(Some("1"), &accounts, &[]), 0);
+        assert_eq!(pick_login_number(Some("29"), &accounts, &[0]), 2);
+        // Unknown profile, or no profile: after every account's number.
+        assert_eq!(pick_login_number(Some("77"), &accounts, &[]), 3);
+        assert_eq!(pick_login_number(None, &accounts, &[3]), 4);
+        // The same account open twice: the second one gets a free number after the accounts'.
+        assert_eq!(pick_login_number(Some("1"), &accounts, &[0]), 3);
+        // No accounts synced: plain lowest free number.
+        assert_eq!(pick_login_number(Some("1"), &[], &[0, 2]), 1);
     }
 
     #[test]

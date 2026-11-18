@@ -815,7 +815,9 @@ pub fn set_preview_spot(app: AppHandle, name: String, x: i32, y: i32, w: u32, h:
 pub fn preview_settings(app: AppHandle) -> serde_json::Value {
     let open: Vec<String> = crate::clipboard::open_clients().into_iter().map(|(n, _)| n).collect();
     let mut names: Vec<String> = with_layout(&app, |layout| layout.clients.keys().cloned().collect());
-    for name in &open {
+    // Every account's own login screen ("Login 1" for the first account), running or not.
+    let account_logins = crate::clipboard::account_login_names();
+    for name in open.iter().chain(&account_logins) {
         if !names.contains(name) {
             names.push(name.clone());
         }
@@ -842,7 +844,7 @@ pub fn preview_settings(app: AppHandle) -> serde_json::Value {
             })
         })
         .collect();
-    serde_json::json!({ "clients": rows })
+    serde_json::json!({ "clients": rows, "accountLogins": account_logins })
 }
 
 /// Resize the calling preview (its corner handle in edit mode), in physical pixels.

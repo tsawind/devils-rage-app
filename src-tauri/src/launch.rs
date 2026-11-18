@@ -227,6 +227,26 @@ fn load_prefs(app: &AppHandle) -> SeatPrefs {
     config_file(app, "seat-group-prefs.json").and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
+/// Sort key for an account nickname, numbers by value ("2" before "10"), like the pages do.
+fn nickname_key(nickname: &str) -> (u8, u64, String) {
+    match nickname.trim().parse::<u64>() {
+        Ok(n) => (0, n, String::new()),
+        Err(_) => (1, 0, nickname.to_lowercase()),
+    }
+}
+
+/// Patch 74: tie login screens to accounts. Account N in Your accounts order owns "Login N".
+pub fn set_account_logins(seat: &SeatData) {
+    let mut accounts: Vec<&SeatAccount> = seat.accounts.iter().collect();
+    accounts.sort_by_key(|a| nickname_key(&a.nickname));
+    crate::clipboard::set_account_logins(accounts.iter().map(|a| a.profile.clone().filter(|p| !p.trim().is_empty())).collect());
+}
+
+/// Read the saved accounts once on start-up so login screens get their account's number.
+pub fn load_account_logins(app: &AppHandle) {
+    set_account_logins(&load_seat(app));
+}
+
 /// This PC's pedal keys and switches for one SeAT group (defaults when none saved).
 pub(crate) fn seat_group_prefs(app: &AppHandle, id: u64) -> GroupPrefs {
     load_prefs(app).groups.remove(&id.to_string()).unwrap_or_default()
@@ -236,6 +256,7 @@ pub(crate) fn seat_group_prefs(app: &AppHandle, id: u64) -> GroupPrefs {
 pub fn store_seat(app: &AppHandle, data: &SeatData) -> Result<(), String> {
     write_json(config_file(app, "seat-groups.json").ok_or("no config folder")?, data)?;
     log::info!("launch groups from SeAT: {} accounts, {} groups", data.accounts.len(), data.groups.len());
+    set_account_logins(data);
     #[cfg(desktop)]
     register_cycle_hotkeys(app);
     crate::previews::refresh_modes(app);

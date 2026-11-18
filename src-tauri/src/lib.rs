@@ -612,6 +612,7 @@ pub fn run() {
             let _ = window.show();
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
+            launch::load_account_logins(&handle);
             clipboard::start(handle.clone());
             #[cfg(desktop)]
             launch::register_cycle_hotkeys(&handle);
