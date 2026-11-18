@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>move preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  #g { position: absolute; inset: 0; border: 3px dashed rgba(255, 255, 255, .55); border-radius: 8px; box-sizing: border-box;
+       display: grid; place-items: center; font: 600 22px "Segoe UI", system-ui, sans-serif; color: rgba(255, 255, 255, .75);
+       transition: background .08s, border-color .08s; }
+  #g.snap { border: 3px solid rgba(255, 255, 255, .85); background: rgba(150, 150, 160, .35); }
+</style>
+</head>
+<body>
+<div id="g"></div>
+<script>
+  // Patch 74: where a client dragged by its bar will land (grey = it snaps here).
+  window.mode = (snap, name) => {
+    const g = document.getElementById("g");
+    g.classList.toggle("snap", !!snap);
+    g.textContent = snap ? `${name} snaps here` : name;
+  };
+</script>
+</body>
+</html>

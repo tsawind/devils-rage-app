@@ -223,6 +223,9 @@ pub const PREFS: &[(&str, &str)] = &[
         "Always show ship names on brackets",
     ),
     ("breakpadUpload", "Send crash reports to CCP"),
+    // Tsa 17 Nov: shown so it can be checked; EVE's own prefs.ini has newbie=1 on every install
+    // (his characters play normally with it), so no tier sets it.
+    ("newbie", "newbie= (EVE's default is 1)"),
 ];
 
 pub fn lever(key: &str) -> Option<&'static Lever> {

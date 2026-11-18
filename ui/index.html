@@ -196,6 +196,7 @@
   </div>
   <div class="plinks" id="cbRow">
     <span class="soon" style="margin: 0" title="A slim bar over the top of a client: lock, drag to move the whole client (snaps to corners, edges and middle lines, never resized), snapshot / video, its profile, minimise, close. Best with EVE's Fixed Window mode.">Client bars:</span>
+    <label title="A bar on every logged-in client, like previews"><input type="checkbox" id="cbEvery"> on every client</label>
     <span id="cbList"></span>
     <select id="cbAdd" style="background:#0d0d10;border:1px solid #2c2c33;border-radius:6px;color:#e6e6ea;font:inherit;padding:1px 4px"></select>
   </div>
@@ -339,19 +340,30 @@
     const st = await invoke("clientbar_state").catch(() => null);
     if (!st) return;
     const list = document.getElementById("cbList"), add = document.getElementById("cbAdd");
+    document.getElementById("cbEvery").checked = !!st.every;
     list.innerHTML = "";
-    if (!st.clients.length) { const s2 = document.createElement("span"); s2.className = "soon"; s2.style.margin = "0"; s2.textContent = "none yet"; list.append(s2); }
-    st.clients.forEach(name => {
+    const chip = (text, title, onClick) => {
       const b = document.createElement("button");
-      b.textContent = name + " ✕";
-      b.title = "Take the bar off " + name;
-      b.addEventListener("click", async () => { await invoke("clientbar_set", { name, on: false }).catch(() => {}); clientBars(); });
+      b.textContent = text; b.title = title;
+      b.addEventListener("click", async () => { await onClick(); clientBars(); });
       list.append(b, document.createTextNode(" "));
-    });
+    };
+    if (st.every) {
+      (st.off || []).forEach(name => chip(`${name} (off) ↺`, `Give ${name} its bar back`, () => invoke("clientbar_set", { name, on: true }).catch(() => {})));
+    } else {
+      if (!st.clients.length) { const s2 = document.createElement("span"); s2.className = "soon"; s2.style.margin = "0"; s2.textContent = "none yet"; list.append(s2); }
+      st.clients.forEach(name => chip(name + " ✕", "Take the bar off " + name, () => invoke("clientbar_set", { name, on: false }).catch(() => {})));
+    }
     add.innerHTML = "";
+    const offer = st.every ? (st.off || []) : st.open.filter(n => !st.clients.includes(n));
+    add.style.display = offer.length ? "" : "none";
     add.append(new Option("+ Add a client…", ""));
-    st.open.filter(n => !st.clients.includes(n)).forEach(n => add.append(new Option(n, n)));
+    offer.forEach(n => add.append(new Option(n, n)));
   }
+  document.getElementById("cbEvery").addEventListener("change", async (e) => {
+    await invoke("clientbar_every", { on: e.target.checked }).catch(() => {});
+    clientBars();
+  });
   document.getElementById("cbAdd").addEventListener("change", async (e) => {
     const name = e.target.value;
     if (!name) return;

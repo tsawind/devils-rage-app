@@ -439,6 +439,9 @@ pub fn run() {
             clientbar::clientbar_close,
             clientbar::clientbar_focus_client,
             clientbar::clientbar_open_page,
+            clientbar::clientbar_every,
+            clientbar::clientbar_mini,
+            clientbar::clientbar_camera,
             groupsetup::group_setup_create,
             groupsetup::group_setup_update,
             piscan::piscan_planets,
@@ -524,6 +527,8 @@ pub fn run() {
                 RECONNECT,
                 include_str!("pip.js")
             );
+
+            let _ = APP_MARKER.set(marker.clone());
 
             // The main window: no Windows title bar; our slim dark bar on top (bar.html,
             // the app's own page) and the page below it (start screen, mapper, SeAT).
@@ -869,6 +874,27 @@ fn new_window_handler(
             Err(_) => NewWindowResponse::Allow,
         }
     }
+}
+
+/// The mapper's marker script, kept for windows the app opens itself (patch 74: the client bar's 📹).
+static APP_MARKER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Patch 74: the client bar's 📹 — is Share a camera open? If not, open it for the map the
+/// mapper shows. Ok(true) = it was already open (the bar can talk to it now).
+pub(crate) fn camera_share(app: &AppHandle) -> Result<bool, String> {
+    if app.get_webview("cameras").is_some() {
+        return Ok(true);
+    }
+    let mapper = app.get_webview(MAPPER_VIEW).and_then(|v| v.url().ok()).ok_or("the mapper isn't open")?;
+    let parts: Vec<&str> = mapper.path().trim_matches('/').split('/').collect();
+    let slug = match parts.as_slice() {
+        ["maps", slug, ..] if from_mapper(app, MAPPER_VIEW) => *slug,
+        _ => return Err("Open your map in the app first, then try again.".into()),
+    };
+    let url = mapper.join(&format!("/maps/{slug}/cameras/share")).map_err(|e| e.to_string())?;
+    let marker = APP_MARKER.get().cloned().unwrap_or_default();
+    open_camera_window(app, &marker, url);
+    Ok(false)
 }
 
 /// Cameras: opens (or brings up) the cameras / camera wall window. Built off the page's own

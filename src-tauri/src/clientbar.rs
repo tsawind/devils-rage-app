@@ -22,27 +22,60 @@ use crate::clientwindows::Spot;
 const PREFIX: &str = "clientbar-";
 /// The bar's size in logical pixels (menus make it taller while open).
 const BAR_W: f64 = 300.0;
+/// A shrunk bar: just ⚙ and ✕.
+const BAR_MINI_W: f64 = 72.0;
 const BAR_H: f64 = 34.0;
 /// How close (physical pixels) a dropped client must be to a line to snap to it.
 const SNAP: i32 = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BarSettings {
-    /// The characters that get a bar.
+    /// Every logged-in client gets a bar (like previews), except those in `off`.
+    #[serde(default = "yes")]
+    pub every: bool,
+    #[serde(default)]
+    pub off: BTreeSet<String>,
+    /// When `every` is off: only these clients get a bar.
     #[serde(default)]
     pub clients: BTreeSet<String>,
-    /// "left" (past EVE's Neocom), "center" or "right".
+    /// Bars shrunk to just ⚙ and ✕.
+    #[serde(default)]
+    pub mini: BTreeSet<String>,
+    /// "right" (default), "center" or "left" (past EVE's Neocom).
     #[serde(default = "default_corner")]
     pub corner: String,
+    #[serde(default)]
+    pub version: u32,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_corner() -> String {
-    "left".into()
+    "right".into()
 }
 
 impl Default for BarSettings {
     fn default() -> Self {
-        Self { clients: BTreeSet::new(), corner: default_corner() }
+        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), mini: BTreeSet::new(), corner: default_corner(), version: 1 }
+    }
+}
+
+impl BarSettings {
+    /// Whether this client gets a bar (login screens never do).
+    pub fn wants(&self, name: &str) -> bool {
+        crate::clientwindows::keeps_a_spot(name) && if self.every { !self.off.contains(name) } else { self.clients.contains(name) }
+    }
+
+    /// Settings from dev.189 (one client, bar on the left) move to every client, bar top right.
+    fn upgrade(mut self) -> Self {
+        if self.version < 1 {
+            self.every = true;
+            self.corner = default_corner();
+            self.version = 1;
+        }
+        self
     }
 }
 
@@ -60,7 +93,7 @@ fn path(app: &AppHandle) -> Option<std::path::PathBuf> {
 fn settings(app: &AppHandle) -> BarSettings {
     let mut guard = SETTINGS.lock().unwrap();
     if guard.is_none() {
-        *guard = Some(path(app).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+        *guard = Some(path(app).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<BarSettings>(&t).ok()).map(BarSettings::upgrade).unwrap_or_default());
     }
     guard.clone().unwrap_or_default()
 }
@@ -91,13 +124,14 @@ fn handle_of(name: &str) -> Option<isize> {
     crate::clipboard::open_clients().into_iter().find(|(n, _)| n == name).map(|(_, h)| h)
 }
 
-/// Where the bar goes over a client (physical pixels), given the visible frame of the client.
-pub fn bar_spot(frame: Spot, corner: &str, scale: f64) -> (i32, i32) {
-    let w = (BAR_W * scale).round() as i32;
+/// Where the bar goes over a client (physical pixels), given the visible frame of the client and
+/// the bar's width (logical).
+pub fn bar_spot(frame: Spot, corner: &str, scale: f64, width: f64) -> (i32, i32) {
+    let w = (width * scale).round() as i32;
     let x = match corner {
         "center" => frame.x + (frame.w - w) / 2,
-        "right" => frame.x + frame.w - w - (8.0 * scale) as i32,
-        _ => frame.x + (64.0 * scale) as i32,
+        "left" => frame.x + (64.0 * scale) as i32,
+        _ => frame.x + frame.w - w - (8.0 * scale) as i32,
     };
     (x, frame.y)
 }
@@ -297,11 +331,11 @@ pub fn start(app: AppHandle) {
     std::thread::Builder::new()
         .name("client-bars".into())
         .spawn(move || {
-            let mut shown: HashMap<String, (bool, i32, i32, f64)> = HashMap::new();
+            let mut shown: HashMap<String, (bool, i32, i32, f64, f64)> = HashMap::new();
             loop {
                 std::thread::sleep(Duration::from_millis(150));
                 let wanted = settings(&app);
-                let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| wanted.clients.contains(n)).collect();
+                let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| wanted.wants(n)).collect();
                 // Bars whose client closed or was taken off the list.
                 for (label, window) in app.webview_windows() {
                     if !label.starts_with(PREFIX) {
@@ -327,12 +361,13 @@ pub fn start(app: AppHandle) {
                     let Some(frame) = win::frame(*handle) else {
                         if shown.get(&label).is_none_or(|s| s.0) && tall.is_none() {
                             let _ = window.hide();
-                            shown.insert(label.clone(), (false, 0, 0, 0.0));
+                            shown.insert(label.clone(), (false, 0, 0, 0.0, 0.0));
                         }
                         continue;
                     };
-                    let (x, y) = bar_spot(frame, &wanted.corner, scale);
-                    let (cx, cy) = (x + (BAR_W * scale / 2.0) as i32, y + (BAR_H * scale / 2.0) as i32);
+                    let width = if tall.is_none() && wanted.mini.contains(name) { BAR_MINI_W } else { BAR_W };
+                    let (x, y) = bar_spot(frame, &wanted.corner, scale, width);
+                    let (cx, cy) = (x + (width * scale / 2.0) as i32, y + (BAR_H * scale / 2.0) as i32);
                     let dragging = DRAGGING.lock().unwrap().as_deref() == Some(name.as_str());
                     let see = dragging || tall.is_some() || win::front_at(cx, cy) == Some(*handle);
                     let height = tall.unwrap_or(BAR_H);
@@ -340,13 +375,13 @@ pub fn start(app: AppHandle) {
                     if before.is_none_or(|b| b.1 != x || b.2 != y) {
                         let _ = window.set_position(PhysicalPosition::new(x, y));
                     }
-                    if before.is_none_or(|b| (b.3 - height).abs() > 0.5) {
-                        let _ = window.set_size(LogicalSize::new(BAR_W, height));
+                    if before.is_none_or(|b| (b.3 - height).abs() > 0.5 || (b.4 - width).abs() > 0.5) {
+                        let _ = window.set_size(LogicalSize::new(width, height));
                     }
                     if before.is_none_or(|b| b.0 != see) {
                         let _ = if see { window.show() } else { window.hide() };
                     }
-                    shown.insert(label, (see, x, y, height));
+                    shown.insert(label, (see, x, y, height, width));
                 }
             }
         })
@@ -359,7 +394,7 @@ pub fn clientbar_state(app: AppHandle) -> serde_json::Value {
     let s = settings(&app);
     let mut open: Vec<String> = crate::clipboard::open_clients().into_iter().map(|(n, _)| n).filter(|n| crate::clientwindows::keeps_a_spot(n)).collect();
     open.sort();
-    serde_json::json!({ "clients": s.clients, "corner": s.corner, "open": open })
+    serde_json::json!({ "every": s.every, "off": s.off, "clients": s.clients, "mini": s.mini, "corner": s.corner, "open": open })
 }
 
 /// Give a client a bar, or take it away.
@@ -369,13 +404,54 @@ pub fn clientbar_set(app: AppHandle, name: String, on: bool) -> Result<(), Strin
         return Err("not a character name".into());
     }
     change(&app, |s| {
-        if on {
+        if s.every {
+            if on {
+                s.off.remove(&name);
+            } else {
+                s.off.insert(name);
+            }
+        } else if on {
             s.clients.insert(name);
         } else {
             s.clients.remove(&name);
         }
     });
     Ok(())
+}
+
+/// A bar on every client (like previews), or only on the ones picked.
+#[tauri::command]
+pub fn clientbar_every(app: AppHandle, on: bool) {
+    change(&app, |s| s.every = on);
+}
+
+/// Shrink a bar to just ⚙ and ✕, or show it whole again.
+#[tauri::command]
+pub fn clientbar_mini(app: AppHandle, name: String, on: bool) {
+    change(&app, |s| {
+        if on {
+            s.mini.insert(name);
+        } else {
+            s.mini.remove(&name);
+        }
+    });
+}
+
+/// 📹 Camera on / off for this client: tells the mapper's Share a camera page (the cameras
+/// window), which turns on / off every camera and watch area set up for this client there.
+#[tauri::command]
+pub fn clientbar_camera(app: AppHandle, name: String, on: bool) -> Result<String, String> {
+    if !crate::camera_share(&app)? {
+        return Ok("Opening Share a camera… press again once it has loaded.".into());
+    }
+    let view = app.get_webview("cameras").ok_or("Share a camera closed")?;
+    let detail = serde_json::json!({ "client": name, "on": on });
+    view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:camera', {{ detail: {detail} }}));")).map_err(|e| e.to_string())?;
+    Ok(if on {
+        format!("Asked Share a camera to turn on {name}'s cameras. If nothing starts, share {name}'s EVE window there once.")
+    } else {
+        format!("Asked Share a camera to turn off {name}'s cameras.")
+    })
 }
 
 #[tauri::command]
@@ -427,43 +503,96 @@ pub fn clientbar_menu(window: tauri::WebviewWindow, height: Option<f64>) {
     }
 }
 
-/// ✥ pressed: the client follows the mouse while its button is held, then snaps and is
-/// remembered at its new spot. Never resized.
+/// The see-through outline shown while dragging: where the client will land (grey and filled
+/// when it will snap there, like Windows' snap preview). Moving it is cheap, so it keeps up with
+/// the mouse; the client itself moves once, when let go.
+const GHOST: &str = "dragghost";
+
+fn ghost(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    if let Some(window) = app.get_webview_window(GHOST) {
+        return Some(window);
+    }
+    let window = WebviewWindowBuilder::new(app, GHOST, WebviewUrl::App("ghost.html".into()))
+        .title("move preview")
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .resizable(false)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|err| log::warn!("couldn't open the move preview: {err}"))
+        .ok()?;
+    let _ = window.set_ignore_cursor_events(true);
+    Some(window)
+}
+
+/// ✥ pressed: an outline follows the mouse while its button is held (snapping shown in grey);
+/// let go and the client moves there once, at its exact size, and is remembered at its new spot.
 #[tauri::command]
 pub fn clientbar_drag(app: AppHandle, name: String) -> Result<(), String> {
     if !unlocked(&name) {
         return Err("Unlock it first (🔒).".into());
     }
     let handle = handle_of(&name).ok_or("that client is closed")?;
-    let start_rect = win::window_rect(handle).ok_or("that client is minimised")?;
-    let start_mouse = win::cursor().ok_or("no mouse position")?;
+    let rect0 = win::window_rect(handle).ok_or("that client is minimised")?;
+    let frame0 = win::frame(handle).ok_or("that client is minimised")?;
+    let mouse0 = win::cursor().ok_or("no mouse position")?;
     *DRAGGING.lock().unwrap() = Some(name.clone());
     std::thread::Builder::new()
         .name("client-drag".into())
         .spawn(move || {
-            let mut last = start_mouse;
+            let outline = ghost(&app);
+            let mut last = mouse0;
+            let mut target = frame0;
+            let mut moved = false;
+            let mut snapping: Option<bool> = None;
+            let mut placed: Option<Spot> = None;
             // Up to 10 minutes of holding; stops the moment the button is let go.
-            for _ in 0..(10 * 60 * 125) {
+            for _ in 0..(10 * 60 * 250) {
                 if !win::button_down() {
                     break;
                 }
                 if let Some(now) = win::cursor() {
                     if now != last {
                         last = now;
-                        let to = Spot { x: start_rect.x + now.0 - start_mouse.0, y: start_rect.y + now.1 - start_mouse.1, w: start_rect.w, h: start_rect.h };
-                        crate::clientwindows::place_window(handle, to);
+                        let (dx, dy) = (now.0 - mouse0.0, now.1 - mouse0.1);
+                        moved |= dx.abs() > 3 || dy.abs() > 3;
+                        if moved {
+                            let raw = Spot { x: frame0.x + dx, y: frame0.y + dy, ..frame0 };
+                            let (sx, sy) = win::work_area(raw).map_or((raw.x, raw.y), |work| snap(raw, work));
+                            target = Spot { x: sx, y: sy, ..frame0 };
+                            if let Some(window) = &outline {
+                                let snaps = (sx, sy) != (raw.x, raw.y);
+                                if snapping != Some(snaps) {
+                                    snapping = Some(snaps);
+                                    let _ = window.eval(format!("window.mode && window.mode({snaps}, {})", serde_json::Value::String(name.clone())));
+                                }
+                                if placed != Some(target) {
+                                    if placed.is_none() || placed.is_some_and(|p| p.w != target.w || p.h != target.h) {
+                                        let _ = window.set_size(tauri::PhysicalSize::new(target.w.max(1) as u32, target.h.max(1) as u32));
+                                    }
+                                    let _ = window.set_position(PhysicalPosition::new(target.x, target.y));
+                                    if placed.is_none() {
+                                        let _ = window.show();
+                                    }
+                                    placed = Some(target);
+                                }
+                            }
+                        }
                     }
                 }
-                std::thread::sleep(Duration::from_millis(8));
+                std::thread::sleep(Duration::from_millis(4));
             }
-            // Snap the part you see to the monitor's edges / middle lines.
-            if let (Some(rect), Some(frame)) = (win::window_rect(handle), win::frame(handle)) {
-                if let Some(work) = win::work_area(frame) {
-                    let (fx, fy) = snap(frame, work);
-                    let to = Spot { x: rect.x + (fx - frame.x), y: rect.y + (fy - frame.y), w: rect.w, h: rect.h };
-                    crate::clientwindows::place_window(handle, to);
-                    crate::clientwindows::remember_one(&app, &name, to);
-                }
+            if let Some(window) = &outline {
+                let _ = window.hide();
+            }
+            if moved {
+                let to = Spot { x: rect0.x + (target.x - frame0.x), y: rect0.y + (target.y - frame0.y), w: rect0.w, h: rect0.h };
+                crate::clientwindows::place_window(handle, to);
+                crate::clientwindows::remember_one(&app, &name, to);
             }
             *DRAGGING.lock().unwrap() = None;
             crate::capture::focus_handle(handle);
@@ -544,10 +673,24 @@ mod tests {
     #[test]
     fn bar_sits_past_the_neocom_or_centered_or_right() {
         let f = Spot { x: 0, y: 0, w: 1920, h: 1056 };
-        assert_eq!(bar_spot(f, "left", 1.0), (64, 0));
-        assert_eq!(bar_spot(f, "center", 1.0), (810, 0));
-        assert_eq!(bar_spot(f, "right", 1.0), (1612, 0));
-        assert_eq!(bar_spot(f, "left", 1.5), (96, 0));
+        assert_eq!(bar_spot(f, "left", 1.0, BAR_W), (64, 0));
+        assert_eq!(bar_spot(f, "center", 1.0, BAR_W), (810, 0));
+        assert_eq!(bar_spot(f, "right", 1.0, BAR_W), (1612, 0));
+        assert_eq!(bar_spot(f, "right", 1.0, BAR_MINI_W), (1840, 0));
+        assert_eq!(bar_spot(f, "left", 1.5, BAR_W), (96, 0));
+    }
+
+    #[test]
+    fn every_client_by_default_and_old_settings_move_to_the_right() {
+        let fresh = BarSettings::default();
+        assert!(fresh.every && fresh.corner == "right");
+        let old: BarSettings = serde_json::from_str(r#"{"clients":["Tsawind"],"corner":"left"}"#).unwrap();
+        let old = old.upgrade();
+        assert!(old.every);
+        assert_eq!(old.corner, "right");
+        let kept: BarSettings = serde_json::from_str(r#"{"every":false,"clients":["Tsawind"],"corner":"left","version":1}"#).unwrap();
+        assert_eq!(kept.clone().upgrade().corner, "left");
+        assert!(!kept.upgrade().every);
     }
 
     #[test]

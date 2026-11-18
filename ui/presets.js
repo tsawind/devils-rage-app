@@ -31,7 +31,7 @@ window.DR_PRESETS = [
   { id: "daily", name: "4 · Daily login", warn: "WARNING: all settings off", danger: true,
     why: "Only for logging in 30+ clients at once to claim the daily. Everything off except the critical sounds: alarms, jump activations, warnings. Smallest font, no crash-report uploads.",
     values: { ...SOUND, ...LOWEST, clientFontSize: 0 },
-    prefs: { breakpadUpload: false } },
+    prefs: { bracketsAlwaysShowShipText: true, breakpadUpload: false } },
 ];
 
 // Every setting in EVE's Settings window, in EVE's order. A row is one of:
@@ -175,6 +175,7 @@ window.DR_LAYOUT = [
       { t: "Message Portraits", v: "No Portrait" },
     ] },
     { title: "Crashes", rows: [{ p: "breakpadUpload", t: "Upload crashes automatically" }] },
+    { title: "Not in EVE's menus (prefs.ini)", rows: [{ p: "newbie", t: "newbie= (EVE writes 1 on every install; shown so you can check it, the tiers leave it alone)" }] },
     { title: "Boarding Cinematic", rows: [{ t: "Show boarding cinematic on first-time boarding", v: OFF }] },
   ] },
   { section: "Shortcuts", groups: [
