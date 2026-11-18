@@ -242,6 +242,11 @@ pub fn place_these(app: &AppHandle, only: Option<&[String]>) -> usize {
 }
 
 /// Where a character's window belongs right now: its stack's spot while it's in one, else its own.
+/// Patch 74: where a character's client is remembered (its stack's spot when it's in one).
+pub fn remembered(app: &AppHandle, name: &str) -> Option<Spot> {
+    with(app, |layout| spot_now(layout, name))
+}
+
 fn spot_now(layout: &ClientLayout, name: &str) -> Option<Spot> {
     layout
         .in_stack

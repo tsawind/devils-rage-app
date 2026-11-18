@@ -833,6 +833,24 @@ pub fn clientbar_move_bar(app: AppHandle, window: tauri::WebviewWindow, name: St
     Ok(())
 }
 
+/// A login screen's settings profile (from its start-up line), so the bar can name its account.
+#[tauri::command]
+pub fn clientbar_login_profile(name: String) -> Option<String> {
+    handle_of(&name).and_then(crate::startline::profile_of_window)
+}
+
+/// Put a login screen where one of its account's characters is remembered (first one found).
+#[tauri::command]
+pub fn clientbar_place_like(app: AppHandle, name: String, like: Vec<String>) -> bool {
+    let Some(handle) = handle_of(&name) else { return false };
+    for character in like.iter().take(10) {
+        if let Some(spot) = crate::clientwindows::remembered(&app, character) {
+            return crate::clientwindows::place_window(handle, spot);
+        }
+    }
+    false
+}
+
 /// The mapper's "Pop out (on top of EVE)" for this client's character.
 #[tauri::command]
 pub fn clientbar_popout(app: AppHandle, id: i64, name: String) -> Result<String, String> {
