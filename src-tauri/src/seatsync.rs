@@ -97,11 +97,24 @@ pub fn pc_accounts() -> serde_json::Value {
     serde_json::json!({ "accounts": accounts, "hidden": hidden })
 }
 
-/// Hand `pc_accounts` to a SeAT page in the app (its Your accounts asked).
+/// Hand `pc_accounts` to a SeAT page in the app (its Your accounts asked), with each character's
+/// name (public ESI lookup from this PC, remembered; the page's own lookup can fail).
 pub fn send_pc_accounts(app: &AppHandle, me: &str) {
-    use tauri::Manager;
-    if let Some(view) = app.get_webview(me) {
-        let detail = pc_accounts();
-        let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-accounts', {{ detail: {detail} }}));"));
-    }
+    let (app, me) = (app.clone(), me.to_string());
+    tauri::async_runtime::spawn(async move {
+        use tauri::Manager;
+        let mut detail = pc_accounts();
+        let ids: Vec<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();
+        let names = crate::profiles::profiles_names(ids).await;
+        if let Some(accounts) = detail["accounts"].as_array_mut() {
+            for character in accounts.iter_mut().filter_map(|a| a["characters"].as_array_mut()).flatten() {
+                if let Some(name) = character["id"].as_u64().and_then(|id| names.get(&id)) {
+                    character["name"] = serde_json::Value::String(name.clone());
+                }
+            }
+        }
+        if let Some(view) = app.get_webview(&me) {
+            let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-accounts', {{ detail: {detail} }}));"));
+        }
+    });
 }
