@@ -24,6 +24,7 @@
   tr.off td { opacity: .55; }
   td.name { font-weight: 600; }
   td.name small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  tr.acct td { padding-top: 12px; color: var(--muted); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--line); }
   input[type=number] { width: 66px; background: #0d0d10; border: 1px solid var(--line); border-radius: 5px; color: var(--text); padding: 2px 5px; font: inherit; }
   input[type=range] { width: 90px; vertical-align: middle; }
   .btn { border: 1px solid var(--line); border-radius: 7px; background: #121216; color: var(--text); padding: 3px 10px; }
@@ -57,10 +58,41 @@
     const data = await invoke("preview_settings").catch((e) => { say(String(e)); return { clients: [] }; });
     const body = document.getElementById("rows");
     body.innerHTML = "";
-    for (const c of data.clients) {
+    // Patch 74: grouped by account, in Your accounts order: the account's login screen (when one is
+    // running, from the profile it was started with), then its characters; then everyone else;
+    // then the other login screens, in number order.
+    const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [] }));
+    const accounts = [...(seat.accounts || [])].sort((a, b) => String(a.nickname).localeCompare(String(b.nickname), undefined, { numeric: true }));
+    const byName = new Map(data.clients.map(c => [c.name, c]));
+    const loginOf = new Map();
+    for (const c of data.clients.filter(c => c.running && /^Login \d+$/.test(c.name))) {
+      const profile = await invoke("clientbar_login_profile", { name: c.name }).catch(() => null);
+      const acct = profile && accounts.find(a => String(a.profile) === String(profile));
+      if (acct) loginOf.set(c.name, acct.nickname);
+    }
+    const order = [], used = new Set();
+    const push = (c, note) => { if (c && !used.has(c.name)) { used.add(c.name); order.push({ c, note }); } };
+    for (const a of accounts) {
+      const rows = [];
+      for (const [login, nick] of loginOf) if (nick === a.nickname) rows.push([byName.get(login), "login screen"]);
+      for (const ch of a.characters || []) if (byName.has(ch.name)) rows.push([byName.get(ch.name)]);
+      if (!rows.length) continue;
+      order.push({ header: `Account ${a.nickname}` });
+      rows.forEach(([c, note]) => push(c, note));
+    }
+    const others = data.clients.filter(c => !used.has(c.name) && !/^Login \d+$/.test(c.name));
+    if (others.length) { order.push({ header: "Not in an account" }); others.forEach(c => push(c)); }
+    const logins = data.clients.filter(c => !used.has(c.name)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    if (logins.length) { order.push({ header: "Login screens" }); logins.forEach(c => push(c)); }
+    for (const item of order) {
+      if (item.header) {
+        const tr = el("tr", "acct"); const td = el("td", null, item.header); td.colSpan = 9; tr.append(td); body.append(tr);
+        continue;
+      }
+      const c = item.c;
       const tr = el("tr", c.enabled ? "" : "off");
       const name = el("td", "name", c.name);
-      name.append(el("small", null, c.previewOpen ? "preview open" : c.running ? "running" : "not running"));
+      name.append(el("small", null, (item.note ? item.note + " · " : "") + (c.previewOpen ? "preview open" : c.running ? "running" : "not running")));
       const shown = el("input"); shown.type = "checkbox"; shown.checked = !!c.enabled;
       shown.addEventListener("change", () => { tr.className = shown.checked ? "" : "off"; invoke("set_preview_client", { name: c.name, enabled: shown.checked }).catch((e) => say(String(e))); });
       const through = el("input"); through.type = "checkbox"; through.checked = !!c.clickThrough;
