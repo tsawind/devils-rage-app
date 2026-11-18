@@ -16,7 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct Folder {
     pub profile: String,
     pub users: BTreeSet<u64>,
-    pub chars: BTreeSet<u64>,
+    /// Character id → when its file was last written (ms).
+    pub chars: BTreeMap<u64, u64>,
 }
 
 /// How a character was placed.
@@ -44,7 +45,17 @@ pub fn deduce(launcher: &[(u64, Vec<u64>)], folders: &[Folder]) -> BTreeMap<u64,
             owner.insert(*c, (*user, How::Launcher));
         }
     }
-    let all_chars: BTreeSet<u64> = folders.iter().flat_map(|f| f.chars.iter().copied()).collect();
+    // Newest first: an account can have more than three character files in its folder (deleted or
+    // transferred characters leave theirs behind), and its current characters are the ones played lately.
+    let mut newest: BTreeMap<u64, u64> = BTreeMap::new();
+    for f in folders {
+        for (c, t) in &f.chars {
+            let e = newest.entry(*c).or_default();
+            *e = (*e).max(*t);
+        }
+    }
+    let mut all_chars: Vec<u64> = newest.keys().copied().collect();
+    all_chars.sort_by_key(|c| std::cmp::Reverse(newest[c]));
     // Each round places the characters whose folders leave one account with room; repeat until
     // nothing changes (a placed character can free up the next one).
     for _ in 0..10 {
@@ -58,7 +69,7 @@ pub fn deduce(launcher: &[(u64, Vec<u64>)], folders: &[Folder]) -> BTreeMap<u64,
                 continue;
             }
             let mut candidates: Option<BTreeSet<u64>> = None;
-            for f in folders.iter().filter(|f| f.chars.contains(c)) {
+            for f in folders.iter().filter(|f| f.chars.contains_key(c)) {
                 candidates = Some(match candidates {
                     None => f.users.clone(),
                     Some(s) => s.intersection(&f.users).copied().collect(),
@@ -102,9 +113,13 @@ pub fn folders() -> Vec<Folder> {
         let mut folder = Folder { profile: profile.to_string(), ..Folder::default() };
         for entry in crate::profiles::entries_in(&dir.path(), crate::profiles::settings_file) {
             match entry.kind {
-                crate::profiles::Kind::Char => folder.chars.insert(entry.id),
-                crate::profiles::Kind::User => folder.users.insert(entry.id),
-            };
+                crate::profiles::Kind::Char => {
+                    folder.chars.insert(entry.id, entry.modified);
+                }
+                crate::profiles::Kind::User => {
+                    folder.users.insert(entry.id);
+                }
+            }
         }
         if !folder.users.is_empty() {
             out.push(folder);
@@ -118,7 +133,7 @@ mod tests {
     use super::*;
 
     fn folder(profile: &str, users: &[u64], chars: &[u64]) -> Folder {
-        Folder { profile: profile.into(), users: users.iter().copied().collect(), chars: chars.iter().copied().collect() }
+        Folder { profile: profile.into(), users: users.iter().copied().collect(), chars: chars.iter().map(|c| (*c, 1)).collect() }
     }
 
     #[test]
@@ -138,6 +153,18 @@ mod tests {
         assert!(!got.values().any(|a| a.characters.iter().any(|(c, _)| *c == 30 || *c == 31)));
         // 21 is only in "3" (accounts 2 and 3): can't tell either.
         assert!(!got.values().any(|a| a.characters.iter().any(|(c, _)| *c == 21)));
+    }
+
+    #[test]
+    fn an_account_with_old_character_files_keeps_its_newest_three() {
+        let mut f = folder("2", &[2], &[]);
+        for (c, t) in [(20, 100), (21, 900), (22, 500), (23, 800), (24, 50), (25, 700)] {
+            f.chars.insert(c, t);
+        }
+        let got = deduce(&[], &[f]);
+        let mut placed: Vec<u64> = got[&2].characters.iter().map(|(c, _)| *c).collect();
+        placed.sort();
+        assert_eq!(placed, vec![21, 23, 25]);
     }
 
     #[test]
