@@ -84,6 +84,11 @@ impl Default for BarSettings {
 impl BarSettings {
     /// Whether this client gets a bar (login screens never do).
     pub fn wants(&self, name: &str) -> bool {
+        // Login screens ("Login 2") get one too when every client does (Tsa, 17 Nov); their name
+        // changes at login, so they can't be picked one by one.
+        if name.starts_with("Login ") {
+            return self.every;
+        }
         crate::clientwindows::keeps_a_spot(name) && if self.every { !self.off.contains(name) } else { self.clients.contains(name) }
     }
 
@@ -495,7 +500,28 @@ pub fn after_switch(to_fixed: bool, old: Spot, now_rect: Spot, now_frame: Spot, 
 
 /// Watches every client's display mode; when one switches, puts it back in its spot (twice: EVE
 /// can move the window again just after) and remembers it there.
+/// Login screens already put into a converted client's spot (by window handle).
+static PLACED_LOGINS: Mutex<Option<HashSet<isize>>> = Mutex::new(None);
+
 fn follow_switches(app: &AppHandle, seen: &mut HashMap<String, (bool, Spot)>) {
+    // A client launched again after the Devil's window mode switch shows its login screen first:
+    // a new Fixed Window login screen of exactly the converted size goes into that spot at once.
+    let logins: Vec<isize> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| n.starts_with("Login ")).map(|(_, h)| h).collect();
+    {
+        let mut placed = PLACED_LOGINS.lock().unwrap();
+        let placed = placed.get_or_insert_with(HashSet::new);
+        placed.retain(|h| logins.contains(h));
+        for handle in logins {
+            if placed.contains(&handle) || win::captioned(handle) {
+                continue;
+            }
+            let Some(rect) = win::window_rect(handle) else { continue };
+            if let Some(to) = crate::windowfix::pending_fixed_of_size(rect.w, rect.h) {
+                placed.insert(handle);
+                crate::clientwindows::place_window(handle, Spot { w: rect.w, h: rect.h, ..to });
+            }
+        }
+    }
     let clients: Vec<(String, isize)> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| crate::clientwindows::keeps_a_spot(n)).collect();
     seen.retain(|name, _| clients.iter().any(|(n, _)| n == name));
     for (name, handle) in clients {

@@ -26,6 +26,18 @@ pub fn pending(name: &str) -> Option<(bool, Spot)> {
     PENDING.lock().unwrap().as_ref().and_then(|m| m.get(name).copied())
 }
 
+/// The spot of the one converted Fixed Window client of this size waiting to be launched again
+/// (None when there's none, or more than one: then the login screen can't be told apart).
+pub fn pending_fixed_of_size(w: i32, h: i32) -> Option<Spot> {
+    let guard = PENDING.lock().unwrap();
+    let mut hits = guard.as_ref()?.values().filter(|(fixed, to)| *fixed && (to.w - w).abs() <= 2 && (to.h - h).abs() <= 2);
+    let first = hits.next().map(|(_, to)| *to);
+    if hits.next().is_some() {
+        return None;
+    }
+    first
+}
+
 pub fn done(name: &str) {
     if let Some(m) = PENDING.lock().unwrap().as_mut() {
         m.remove(name);
