@@ -161,6 +161,10 @@
       <svg viewBox="0 0 24 24"><path d="M5 4v16M12 4v16M19 4v16"/><circle cx="5" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="7" r="2"/></svg>
       <div><b>Client tuning</b><span>Sound, graphics and multibox presets, plus a setup guide</span></div>
     </button>
+    <button class="tool" data-tool="setups" data-sec="groups">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="8" height="6" rx="1.2"/><rect x="13" y="5" width="8" height="6" rx="1.2"/><rect x="3" y="13" width="18" height="6" rx="1.2"/></svg>
+      <div><b>Setups</b><span>Where every client opens, each account's keys, overview and effects, compare setups (look only)</span></div>
+    </button>
   </div>
   <div class="plinks">
     <button id="pEdit" title="Arrange previews: drag, resize from the corner, choose shown / click-through / opacity per client. Done locks them.">Edit preview layout</button>
@@ -244,6 +248,7 @@
       if (btn.dataset.tool === "launch") { location.href = "launch.html"; return; }
       if (btn.dataset.tool === "settings") { location.href = "profiles.html"; return; }
       if (btn.dataset.tool === "tuning") { location.href = "tuning.html"; return; }
+      if (btn.dataset.tool === "setups") { location.href = "setups.html"; return; }
       if (btn.dataset.tool === "newgroup") { location.href = "newgroup.html"; return; }
       if (btn.dataset.tool === "piscan") { location.href = "piscan.html"; return; }
       if (btn.dataset.tool === "piscanold") { location.href = "piscan-old.html"; return; }

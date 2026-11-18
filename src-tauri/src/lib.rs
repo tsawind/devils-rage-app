@@ -7,6 +7,7 @@ use tauri::{
 use tauri_plugin_opener::OpenerExt;
 
 mod appconfig;
+mod blue;
 mod arrange;
 mod audiodetect;
 mod bar;
@@ -30,6 +31,7 @@ mod profiles;
 mod scanner;
 mod seatsync;
 mod settings;
+mod setups;
 mod tray;
 mod tuning;
 #[cfg(desktop)]
@@ -423,6 +425,8 @@ pub fn run() {
             profiles::profiles_apply_group,
             profiles::tuning_read,
             profiles::tuning_apply,
+            setups::setups_look,
+            setups::setups_compare,
             groupsetup::group_setup_create,
             groupsetup::group_setup_update,
             piscan::piscan_planets,

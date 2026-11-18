@@ -348,7 +348,7 @@ pub fn profiles_restore(backup: String, force: bool) -> Result<String, String> {
 // ---- Copying settings ---------------------------------------------------------------------------
 
 /// "settings_12/core_char_93976142.dat" or a template's file name -> its path, checked.
-fn resolve(root: &Path, spec: &str) -> Result<(PathBuf, Kind), String> {
+pub(crate) fn resolve(root: &Path, spec: &str) -> Result<(PathBuf, Kind), String> {
     match spec.split_once('/') {
         Some((dir, file)) => {
             profile_of(dir).ok_or("not a profile")?;

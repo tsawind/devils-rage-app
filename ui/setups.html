@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setups</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
+          --red:#a8181f; --red-hi:#d6242c; --ok:#adff2f; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+         display: flex; flex-direction: column; user-select: none; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header .logo { border: 2px solid var(--red); border-radius: 8px; padding: 1px 8px; color: var(--red-hi); font-weight: 700; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .badge { font-size: 11px; color: var(--ok); border: 1px solid #3c5a14; border-radius: 10px; padding: 1px 8px; }
+  header .grow { flex: 1; }
+  button { font: inherit; cursor: pointer; }
+  .back { background: none; border: 0; color: var(--muted); }
+  .back:hover { color: var(--text); }
+  main { flex: 1; overflow: auto; padding: 18px 20px 40px; max-width: 1180px; width: 100%; margin: 0 auto; }
+  h2 { font-size: 15px; margin: 24px 0 6px; }
+  .note { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .warn { color: #f0c9a8; border: 1px solid #5a2a14; background: #1c120d; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 14px; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 12px 14px; margin-bottom: 10px; }
+  .btn { border: 1px solid var(--line); border-radius: 8px; background: #121216; color: var(--text); padding: 6px 12px; }
+  .btn:hover { border-color: var(--red-hi); }
+  .btn.small { padding: 2px 9px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .muted { color: var(--muted); }
+  .status { min-height: 1.5em; margin: 8px 0; color: var(--muted); }
+  .status.bad { color: #f08a8a; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #1f1f25; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--card); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .chip { display: inline-block; border-radius: 6px; padding: 0 7px; margin: 1px 3px 1px 0; font-size: 12px; border: 1px solid var(--line); white-space: nowrap; }
+  .grp { display: inline-block; min-width: 22px; text-align: center; border-radius: 6px; font-weight: 700; font-size: 12px; color: #0d0d10; padding: 0 5px; }
+  .dots { display: inline-flex; gap: 3px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid #555; }
+  .dot.on { background: var(--ok); border-color: var(--ok); }
+  .bad { color: #f08a8a; }
+  .okc { color: var(--ok); }
+  svg.map { width: 100%; max-width: 760px; display: block; margin: 6px 0 10px; background: #0a0a0d; border: 1px solid var(--line); border-radius: 8px; }
+  .pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .pick label { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
+  .pick label.on { border-color: var(--red-hi); background: #1c0d0e; }
+  .pick input { display: none; }
+  .cmp td.diff { color: #ffd27a; }
+  .cmp td.miss { color: #6c6c74; }
+  .cmp tr.part td { background: #1b1b21; color: var(--text); font-weight: 600; }
+  .cmp td { max-width: 260px; word-break: break-word; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .scroll { overflow: auto; max-height: 70vh; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">DR</span>
+  <h1>Setups</h1>
+  <span class="badge">look only · changes nothing</span>
+  <span class="grow"></span>
+  <button class="btn small" id="reload">Read again</button>
+  <button class="back" id="home">← Home</button>
+</header>
+<main>
+  <p class="note">Step 1 of the setup plan: this page reads every EVE client profile and shows where each client opens, what each
+    account's keys, overview and effects are, and which client size each character's windows were arranged for. Same letter = identical.
+    Nothing is changed here; EVE saves a client's settings when it closes, so this is how things stood at each client's last close.</p>
+  <div class="warn" id="err" hidden></div>
+
+  <h2>1 · Where each client opens</h2>
+  <p class="note">Every spot a profile opens a window at. Profiles that share a spot open on top of each other (a stack).</p>
+  <div class="card">
+    <svg class="map" id="map"></svg>
+    <table id="spots"></table>
+  </div>
+
+  <h2>2 · Accounts</h2>
+  <p class="note">One row per account file. An account that has run in more than one profile has a copy in each, and the copies can drift apart.</p>
+  <div class="card scroll"><table id="accounts"></table></div>
+
+  <h2>3 · Characters</h2>
+  <p class="note">Windows each character has placed, and the client size they were placed at (a layout fits a client of that size; 2131×1137 is 1918×1024 at 90% UI scale).</p>
+  <div class="card scroll"><table id="chars"></table></div>
+
+  <h2>4 · Compare setups</h2>
+  <p class="note">Pick 2 to 8 characters. Each is read with its own character file and the account file beside it, and only the settings that differ are shown.</p>
+  <div class="card">
+    <div class="pick" id="pick"></div>
+    <div class="row">
+      <button class="btn" id="compare">Compare</button>
+      <label class="muted"><input type="checkbox" id="showSame"> show identical settings too</label>
+      <span class="status" id="cmpStatus"></span>
+    </div>
+    <div class="scroll" style="margin-top: 8px"><table class="cmp" id="cmp"></table></div>
+  </div>
+</main>
+
+<script src="presets.js"></script>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const when = (ms) => ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  // Tsa's picks (17 Nov): the setups to start the Devil's templates from.
+  const GOOD = ["luigisquirrel", "tsawind", "darkness holder", "wickedwrench", "thewrecker", "the wrecker", "the nocnitsa"];
+  const EFFECTS = [["turretsEnabled", "Turrets"], ["effectsEnabled", "Effects"], ["missilesEnabled", "Missiles"], ["explosionEffectsEnabled", "Explosions"],
+                   ["droneModelsEnabled", "Drones"], ["trailsEnabled", "Trails"], ["gpuParticlesEnabled", "GPU particles"], ["modelSkinsInSpaceEnabled", "Skins"]];
+  const COLORS = ["#adff2f", "#7ad7ff", "#ffb347", "#ff8ad8", "#c9a7ff", "#ffe066", "#8affc1", "#ff7b7b", "#b0b0b8"];
+
+  let look = null, tuning = null, accounts = [], labels = {}, names = {}, picked = new Set();
+
+  async function load() {
+    $("err").hidden = true;
+    try {
+      [look, tuning] = await Promise.all([invoke("setups_look"), invoke("tuning_read").catch(() => null)]);
+    } catch (e) { $("err").textContent = String(e); $("err").hidden = false; return; }
+    const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [] }));
+    accounts = seat.accounts || [];
+    const scan = await invoke("profiles_scan").catch(() => null);
+    labels = {}; (scan?.profiles || []).forEach(p => { if (p.label) labels[p.name] = p.label; });
+    accounts.forEach(a => { (a.characters || []).forEach(c => { names[c.id] = names[c.id] || c.name; }); });
+    render();
+    const ids = [...new Set(look.folders.flatMap(f => f.characters.map(c => c.id)))].filter(id => !names[id]);
+    if (ids.length) { Object.assign(names, await invoke("profiles_names", { ids }).catch(() => ({}))); render(); }
+  }
+
+  const folderLabel = (name) => {
+    if (labels[name]) return labels[name];
+    const a = accounts.find(x => x.profile === name);
+    return a ? `Account ${a.nickname} · ${(a.characters || []).map(c => c.name).join(", ")}` : "";
+  };
+  const who = (id) => names[id] || "Character " + id;
+
+  // Same fingerprint -> same letter, in order of first appearance.
+  function lettering(values) {
+    const map = new Map();
+    values.forEach(v => { if (v && !map.has(v)) map.set(v, map.size); });
+    return (v) => {
+      if (!v) return el("span", "muted", "–");
+      const i = map.get(v);
+      const g = el("span", "grp", String.fromCharCode(65 + (i % 26)));
+      g.style.background = COLORS[i % COLORS.length];
+      g.title = "Fingerprint " + v;
+      return g;
+    };
+  }
+
+  // Graphics: which tier a profile is closest to (device levers only; sound is the same on every tier).
+  function tierOf(folder) {
+    const prof = tuning?.profiles?.[folder];
+    if (!prof || !prof.hasFile || !window.DR_PRESETS) return null;
+    const device = new Set((tuning.levers || []).filter(l => l.section === "device").map(l => l.key));
+    const same = (a, b) => (a !== "" && b !== "" && !isNaN(Number(a)) && !isNaN(Number(b))) ? Number(a) === Number(b) : String(a) === String(b);
+    let best = null;
+    window.DR_PRESETS.filter(p => !p.mine).forEach(p => {
+      const keys = Object.keys(p.values).filter(k => device.has(k) && prof.values[k] != null);
+      if (!keys.length) return;
+      const off = keys.filter(k => !same(prof.values[k], p.values[k]));
+      if (!best || off.length < best.off.length) best = { preset: p, off, total: keys.length };
+    });
+    return best;
+  }
+  function tierCell(folder) {
+    const t = tierOf(folder);
+    if (!t) return el("span", "muted", "–");
+    const s = el("span", t.off.length ? "" : "okc", "Tier " + t.preset.name.split("·")[0].trim() + (t.off.length ? ` (${t.off.length} differ)` : " ✓"));
+    s.title = t.preset.name + (t.off.length ? "\nDifferent: " + t.off.join(", ") : "\nEvery graphics setting matches");
+    return s;
+  }
+
+  const MODES = { 0: "Fullscreen", 1: "Window", 2: "Fixed window" };
+  function spotKey(s) {
+    if (!s) return "none";
+    if (s.mode === 2) return `fixed ${s.fixed_width}x${s.fixed_height}`;
+    if (s.mode === 0) return "fullscreen";
+    return `win ${s.left},${s.top} ${s.width}x${s.height}`;
+  }
+  function spotText(s) {
+    if (!s) return "No graphics file yet";
+    if (s.mode === 2) return `Fixed window ${s.fixed_width ?? "?"}×${s.fixed_height ?? "?"}`;
+    if (s.mode === 0) return "Fullscreen";
+    if (s.left == null) return "Window, no spot saved yet";
+    return `Window ${s.width}×${s.height} at ${s.left}, ${s.top}`;
+  }
+
+  function renderSpots() {
+    const groups = new Map();
+    look.folders.forEach(f => {
+      const k = spotKey(f.seat);
+      if (!groups.has(k)) groups.set(k, { seat: f.seat, folders: [] });
+      groups.get(k).folders.push(f);
+    });
+    const list = [...groups.values()].sort((a, b) => b.folders.length - a.folders.length);
+    // Map of the windowed spots (fixed windows drawn at 0,0).
+    const svg = $("map"); svg.innerHTML = "";
+    const rects = list.map((g, i) => {
+      const s = g.seat;
+      if (!s) return null;
+      if (s.mode === 2 && s.fixed_width) return { i, x: 0, y: 0, w: s.fixed_width, h: s.fixed_height, g };
+      if (s.mode === 1 && s.left != null) return { i, x: s.left, y: s.top, w: s.width, h: s.height, g };
+      return null;
+    }).filter(Boolean);
+    if (rects.length) {
+      const minX = Math.min(...rects.map(r => r.x)), minY = Math.min(...rects.map(r => r.y));
+      const maxX = Math.max(...rects.map(r => r.x + r.w)), maxY = Math.max(...rects.map(r => r.y + r.h));
+      svg.setAttribute("viewBox", `${minX - 20} ${minY - 20} ${maxX - minX + 40} ${maxY - minY + 40}`);
+      const ns = "http://www.w3.org/2000/svg";
+      rects.forEach(r => {
+        const c = COLORS[r.i % COLORS.length];
+        const rect = document.createElementNS(ns, "rect");
+        Object.entries({ x: r.x + 6, y: r.y + 6, width: Math.max(r.w - 12, 10), height: Math.max(r.h - 12, 10), rx: 18, fill: c, "fill-opacity": .12, stroke: c, "stroke-width": 6 }).forEach(([k, v]) => rect.setAttribute(k, v));
+        const text = document.createElementNS(ns, "text");
+        Object.entries({ x: r.x + 40, y: r.y + 110, fill: c, "font-size": 80, "font-weight": 700 }).forEach(([k, v]) => text.setAttribute(k, v));
+        text.textContent = `${String.fromCharCode(65 + r.i)} · ${r.g.folders.length} profile${r.g.folders.length === 1 ? "" : "s"}`;
+        svg.append(rect, text);
+      });
+    } else svg.setAttribute("viewBox", "0 0 10 1");
+    const t = $("spots"); t.innerHTML = "";
+    const head = el("tr"); ["", "Opens as", "UI scale", "Profiles"].forEach(h => head.append(el("th", null, h))); t.append(head);
+    list.forEach((g, i) => {
+      const tr = el("tr");
+      const letter = el("span", "grp", String.fromCharCode(65 + i)); letter.style.background = COLORS[i % COLORS.length];
+      const td0 = el("td"); td0.append(letter);
+      const profs = el("td");
+      g.folders.forEach(f => { const c = el("span", "chip", "settings_" + f.name); c.title = folderLabel(f.name); profs.append(c); });
+      tr.append(td0, el("td", null, spotText(g.seat)), el("td", "num", g.seat?.ui_scale != null ? Math.round(g.seat.ui_scale * 100) + "%" : "–"), profs);
+      t.append(tr);
+    });
+  }
+
+  function renderAccounts() {
+    const all = look.folders.flatMap(f => f.accounts.map(a => ({ ...a, folder: f.name })));
+    const keyL = lettering(all.map(a => a.keys_fp));
+    const ovL = lettering(all.map(a => a.overview_fp));
+    const fx = (a) => EFFECTS.map(([k]) => a.effects[k] ?? "?").join("");
+    const fxL = lettering(all.map(a => Object.keys(a.effects).length ? fx(a) : ""));
+    const copies = {}; all.forEach(a => { (copies[a.id] = copies[a.id] || []).push(a); });
+    const t = $("accounts"); t.innerHTML = "";
+    const head = el("tr");
+    ["Profile", "Whose", "Account", "Keys", "Overview", "Effects", "Graphics tier", "Saved", "Copies elsewhere"].forEach(h => head.append(el("th", null, h)));
+    t.append(head);
+    all.forEach(a => {
+      const tr = el("tr");
+      const keys = el("td"); keys.append(keyL(a.keys_fp), el("span", "muted", a.keys_fp ? ` ${a.keys} custom` : ""));
+      const ov = el("td"); ov.append(ovL(a.overview_fp), el("span", "muted", a.overview_preset ? " " + a.overview_preset : ""));
+      const ef = el("td");
+      if (a.error) ef.append(el("span", "bad", "couldn't read: " + a.error));
+      else {
+        ef.append(fxL(Object.keys(a.effects).length ? fx(a) : ""), document.createTextNode(" "));
+        const dots = el("span", "dots");
+        EFFECTS.forEach(([k, label]) => { const d = el("span", "dot" + (a.effects[k] === "1" ? " on" : "")); d.title = label + ": " + (a.effects[k] === "1" ? "on" : a.effects[k] === "0" ? "off" : "not set yet"); dots.append(d); });
+        ef.append(dots);
+      }
+      const others = (copies[a.id] || []).filter(o => o.folder !== a.folder);
+      const cp = el("td");
+      others.forEach(o => {
+        const same = o.keys_fp === a.keys_fp && o.overview_fp === a.overview_fp && fx(o) === fx(a);
+        const c = el("span", "chip " + (same ? "okc" : "bad"), `settings_${o.folder} ${same ? "same" : "differs"}`);
+        cp.append(c);
+      });
+      const whose = folderLabel(a.folder);
+      tr.append(el("td", null, "settings_" + a.folder), el("td", "muted", whose.length > 46 ? whose.slice(0, 45) + "…" : whose),
+        el("td", null, String(a.id)), keys, ov, ef, (() => { const td = el("td"); td.append(tierCell(a.folder)); return td; })(),
+        el("td", "muted", when(a.modified)), cp);
+      t.append(tr);
+    });
+    if (!all.length) t.append(el("tr")).append(el("td", "muted", "No account files found."));
+  }
+
+  // A character's freshest file (the profile it last closed in).
+  function charIndex() {
+    const by = {};
+    look.folders.forEach(f => f.characters.forEach(c => {
+      const prev = by[c.id];
+      const entry = { ...c, folder: f.name, copies: (prev?.copies || 0) + 1 };
+      by[c.id] = !prev || c.modified > prev.modified ? entry : { ...prev, copies: entry.copies };
+    }));
+    return by;
+  }
+
+  function renderChars() {
+    const by = charIndex();
+    const list = Object.values(by).sort((a, b) => b.modified - a.modified);
+    const layL = lettering(list.map(c => c.layout_fp));
+    const t = $("chars"); t.innerHTML = "";
+    const head = el("tr"); ["Character", "Newest in", "Windows placed", "Placed at client size", "Layout", "Saved", "Files"].forEach(h => head.append(el("th", null, h))); t.append(head);
+    list.forEach(c => {
+      const tr = el("tr");
+      const sizes = el("td");
+      if (c.error) sizes.append(el("span", "bad", "couldn't read: " + c.error));
+      else c.sizes.slice(0, 3).forEach(([w, h, n]) => sizes.append(el("span", "chip", `${w}×${h} · ${n}`)));
+      const lay = el("td"); lay.append(layL(c.layout_fp));
+      tr.append(el("td", null, who(c.id)), el("td", null, "settings_" + c.folder), el("td", "num", String(c.open_windows)), sizes, lay,
+        el("td", "muted", when(c.modified)), el("td", "muted", c.copies > 1 ? `${c.copies} profiles` : ""));
+      t.append(tr);
+    });
+  }
+
+  function renderPick() {
+    const by = charIndex();
+    const list = Object.values(by).sort((a, b) => who(a.id).localeCompare(who(b.id)));
+    if (!picked.size) list.forEach(c => { if (GOOD.includes(who(c.id).toLowerCase())) picked.add(c.id); });
+    const host = $("pick"); host.innerHTML = "";
+    list.forEach(c => {
+      const l = el("label", picked.has(c.id) ? "on" : "");
+      const box = el("input"); box.type = "checkbox"; box.checked = picked.has(c.id);
+      box.addEventListener("change", () => { box.checked ? picked.add(c.id) : picked.delete(c.id); l.className = box.checked ? "on" : ""; });
+      l.append(box, document.createTextNode(who(c.id)));
+      host.append(l);
+    });
+  }
+
+  // Windows key codes -> names, for the Keys rows.
+  const VK = { 1: "Mouse L", 2: "Mouse R", 4: "Mouse M", 5: "Mouse 4", 6: "Mouse 5", 8: "Backspace", 9: "Tab", 13: "Enter", 16: "Shift", 17: "Ctrl", 18: "Alt",
+    19: "Pause", 20: "Caps", 27: "Esc", 32: "Space", 33: "PgUp", 34: "PgDn", 35: "End", 36: "Home", 37: "←", 38: "↑", 39: "→", 40: "↓", 45: "Ins", 46: "Del",
+    186: ";", 187: "=", 188: ",", 189: "-", 190: ".", 191: "/", 192: "`", 219: "[", 220: "\\", 221: "]", 222: "'" };
+  const vkName = (n) => VK[n] || (n >= 48 && n <= 57 || n >= 65 && n <= 90 ? String.fromCharCode(n) : n >= 96 && n <= 105 ? "Num" + (n - 96) : n >= 112 && n <= 135 ? "F" + (n - 111) : "#" + n);
+  const keyText = (v) => v === "none" ? "(none)" : v.replace(/^\(|\)$/g, "").split(",").map(s => s.trim()).filter(Boolean).map(s => vkName(Number(s))).join("+");
+  const cmdName = (k) => k.replace(/^Cmd/, "").replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+
+  $("compare").addEventListener("click", async () => {
+    const by = charIndex();
+    const chosen = [...picked].map(id => by[id]).filter(Boolean).slice(0, 8);
+    const say = (t, c) => { $("cmpStatus").textContent = t; $("cmpStatus").className = "status" + (c ? " " + c : ""); };
+    if (chosen.length < 2) { say("Pick at least two.", "bad"); return; }
+    say("Reading…");
+    // Each character with the account file in its profile (the newest one there).
+    const files = [];
+    chosen.forEach(c => {
+      const folder = look.folders.find(f => f.name === c.folder);
+      const acct = [...folder.accounts].sort((a, b) => b.modified - a.modified)[0];
+      c.account = acct ? `settings_${c.folder}/${acct.file}` : null;
+      c.guess = folder.accounts.length > 1;
+      files.push(`settings_${c.folder}/${c.file}`);
+      if (c.account) files.push(c.account);
+    });
+    let read;
+    try { read = await invoke("setups_compare", { files }); } catch (e) { say(String(e), "bad"); return; }
+    const byFile = Object.fromEntries(read.map(r => [r.file, r]));
+    // part -> setting -> [value per character]
+    const table = new Map();
+    chosen.forEach((c, i) => {
+      [`settings_${c.folder}/${c.file}`, c.account].filter(Boolean).forEach(f => {
+        const r = byFile[f];
+        (r?.rows || []).forEach(([part, key, value]) => {
+          if (!table.has(part)) table.set(part, new Map());
+          const m = table.get(part);
+          if (!m.has(key)) m.set(key, new Array(chosen.length).fill(null));
+          m.get(key)[i] = value;
+        });
+      });
+    });
+    const order = ["Keys", "Overview", "Effects, camera & interface", "Audio", "Open windows", "Character options"];
+    const t = $("cmp"); t.innerHTML = "";
+    const head = el("tr"); head.append(el("th", null, "Setting"));
+    chosen.forEach(c => { const th = el("th", null, who(c.id)); th.title = `settings_${c.folder}` + (c.guess ? " (account file: newest in that profile)" : ""); head.append(th); });
+    t.append(head);
+    const showSame = $("showSame").checked;
+    let differ = 0, same = 0;
+    order.filter(p => table.has(p)).forEach(part => {
+      const rows = [...table.get(part).entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      const diffRows = rows.filter(([, vals]) => new Set(vals.map(v => v ?? "")).size > 1);
+      differ += diffRows.length; same += rows.length - diffRows.length;
+      const shown = showSame ? rows : diffRows;
+      const pr = el("tr", "part"); const pc = el("td", null, `${part} · ${diffRows.length} differ, ${rows.length - diffRows.length} same`); pc.colSpan = chosen.length + 1; pr.append(pc); t.append(pr);
+      shown.slice(0, 400).forEach(([key, vals]) => {
+        const tr = el("tr");
+        const counts = {}; vals.forEach(v => { counts[v ?? ""] = (counts[v ?? ""] || 0) + 1; });
+        const common = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+        tr.append(el("td", null, part === "Keys" ? cmdName(key) : key));
+        vals.forEach(v => {
+          const text = v == null ? "not set" : part === "Keys" ? keyText(v) : v;
+          tr.append(el("td", v == null ? "miss" : (v !== common ? "diff" : ""), text));
+        });
+        t.append(tr);
+      });
+      if (shown.length > 400) { const r = el("tr"); const c = el("td", "muted", `…and ${shown.length - 400} more`); c.colSpan = chosen.length + 1; r.append(c); t.append(r); }
+    });
+    say(`${differ} settings differ, ${same} are the same.`);
+  });
+
+  function render() {
+    renderSpots(); renderAccounts(); renderChars(); renderPick();
+  }
+
+  $("reload").addEventListener("click", load);
+  $("home").addEventListener("click", () => { location.href = "index.html#groups"; });
+  load();
+</script>
+</body>
+</html>
