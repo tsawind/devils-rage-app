@@ -386,8 +386,13 @@ pub fn set_account_logins(accounts: Vec<(Option<String>, Option<u64>)>) {
 /// profile belongs to, when that number is free; else the lowest free number after every account's.
 fn pick_login_number(user: Option<u64>, profile: Option<&str>, accounts: &[(Option<String>, Option<u64>)], used: &[usize]) -> usize {
     let by_user = user.and_then(|u| accounts.iter().position(|(_, id)| *id == Some(u)));
-    // The profile only counts when the token didn't name an account we know.
-    let by_profile = if by_user.is_none() { profile.and_then(|p| accounts.iter().position(|(q, _)| q.as_deref() == Some(p))) } else { None };
+    // The profile only counts when the token didn't name an account we know, and never for an
+    // account known to be another EVE account than the one in the token.
+    let by_profile = if by_user.is_none() {
+        profile.and_then(|p| accounts.iter().position(|(q, id)| q.as_deref() == Some(p) && !(user.is_some() && id.is_some() && *id != user)))
+    } else {
+        None
+    };
     if let Some(n) = by_user.or(by_profile) {
         if !used.contains(&n) {
             return n;
