@@ -822,6 +822,25 @@ fn new_window_handler(
                         }
                     }
                 }
+                "/pc-other-delete" if from_seat(&app, &me) => {
+                    let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
+                    let name = url.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.chars().take(40).collect::<String>());
+                    if let Some(id) = id {
+                        let said = match pcaccounts::delete_character(id, name.as_deref()) {
+                            Ok(n) => format!("Deleted {n} settings file(s)."),
+                            Err(e) => e,
+                        };
+                        if let Some(view) = app.get_webview(&me) {
+                            let detail = serde_json::json!({ "id": id, "said": said });
+                            let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-archived', {{ detail: {detail} }}));"));
+                        }
+                    }
+                }
+                "/pc-open-folder" if from_seat(&app, &me) => {
+                    if let Some(id) = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok()) {
+                        pcaccounts::open_folder(id);
+                    }
+                }
                 "/pc-other-hide" if from_seat(&app, &me) => {
                     let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
                     let hidden = url.query_pairs().any(|(k, v)| k == "hidden" && v == "1");

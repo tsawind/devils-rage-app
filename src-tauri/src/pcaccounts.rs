@@ -357,3 +357,67 @@ pub fn archive_character(id: u64, name: Option<&str>) -> Result<usize, String> {
     log::info!("archived character {id}'s settings files: {moved}");
     Ok(moved)
 }
+
+/// Every character with settings on this PC: id → (when last played, ms; its profile folders).
+pub fn all_chars() -> BTreeMap<u64, (u64, Vec<String>)> {
+    let mut found: BTreeMap<u64, (u64, Vec<String>)> = BTreeMap::new();
+    for f in folders() {
+        for (c, t) in &f.chars {
+            let e = found.entry(*c).or_default();
+            e.0 = e.0.max(*t);
+            e.1.push(f.profile.clone());
+        }
+    }
+    found
+}
+
+/// Delete one character's settings files for good (Your accounts asks twice first; archiving is
+/// what it recommends). Refused while that character is logged in.
+pub fn delete_character(id: u64, name: Option<&str>) -> Result<usize, String> {
+    if let Some(name) = name {
+        if crate::clipboard::open_eve_characters().iter().any(|n| n.eq_ignore_ascii_case(name)) {
+            return Err(format!("{name} is logged in: close that client first."));
+        }
+    }
+    let root = crate::profiles::root()?;
+    let file = format!("core_char_{id}.dat");
+    let mut deleted = 0;
+    for dir in std::fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
+        let folder = dir.file_name().to_string_lossy().to_string();
+        if crate::profiles::profile_of(&folder).is_none() {
+            continue;
+        }
+        let path = dir.path().join(&file);
+        if path.is_file() {
+            std::fs::remove_file(&path).map_err(|e| format!("couldn't delete {folder}\\{file}: {e}"))?;
+            deleted += 1;
+        }
+    }
+    log::info!("deleted character {id}'s settings files: {deleted}");
+    Ok(deleted)
+}
+
+/// Show one character's newest settings file in File Explorer (else the settings folder).
+pub fn open_folder(id: u64) {
+    let Ok(root) = crate::profiles::root() else { return };
+    let file = format!("core_char_{id}.dat");
+    let newest = std::fs::read_dir(&root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|d| crate::profiles::profile_of(&d.file_name().to_string_lossy()).is_some())
+        .map(|d| d.path().join(&file))
+        .filter(|p| p.is_file())
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+    #[cfg(windows)]
+    {
+        let mut command = std::process::Command::new("explorer.exe");
+        match &newest {
+            Some(path) => command.arg(format!("/select,{}", path.display())),
+            None => command.arg(root.as_os_str()),
+        };
+        let _ = command.spawn();
+    }
+    #[cfg(not(windows))]
+    let _ = newest;
+}

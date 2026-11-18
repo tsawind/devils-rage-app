@@ -172,6 +172,12 @@ pub fn send_pc_accounts(app: &AppHandle, me: &str) {
             .map(|(id, last, profiles)| serde_json::json!({ "id": id, "last": last, "profiles": profiles, "incognito": !crate::incognito::is_public_id(id) }))
             .collect();
         detail["others"] = serde_json::Value::Array(others);
+        // Every character's last-played date and profile folders on this PC (shown on its row).
+        let chars: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::all_chars()
+            .into_iter()
+            .map(|(id, (last, profiles))| (id.to_string(), serde_json::json!({ "last": last, "profiles": profiles })))
+            .collect();
+        detail["chars"] = serde_json::Value::Object(chars);
         let mut ids: Vec<u64> = placed.into_iter().collect();
         ids.extend(detail["others"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64()));
         let names = crate::profiles::profiles_names(ids).await;
