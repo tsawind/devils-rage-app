@@ -849,7 +849,7 @@ pub fn clientbar_place_like(app: AppHandle, name: String, like: Vec<String>) -> 
     if crate::clientwindows::keeps_a_spot(&name) {
         if let Some(spot) = crate::clientwindows::remembered(&app, &name) {
             log::info!("{name}: to its own spot");
-            return crate::clientwindows::place_window(handle, spot);
+            return crate::clientwindows::place_in_spot(&app, &name, handle, spot);
         }
     }
     // Else near one of its account's characters. Their spot may be from the other display mode
@@ -864,6 +864,14 @@ pub fn clientbar_place_like(app: AppHandle, name: String, like: Vec<String>) -> 
         return crate::clientwindows::place_window(handle, to);
     }
     false
+}
+
+/// Where a client goes for a spot remembered in the other display mode: moved there and snapped,
+/// its own size kept (see `like_spot`).
+pub fn near_spot(app: &AppHandle, handle: isize, spot: Spot) -> Option<Spot> {
+    let (rect, frame) = (win::window_rect(handle)?, win::frame(handle)?);
+    let scale = app.get_webview_window(crate::MAIN_WINDOW).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+    Some(like_spot(rect, frame, spot, win::captioned(handle), scale, win::work_area(Spot { x: spot.x, y: spot.y, w: frame.w, h: frame.h })))
 }
 
 /// Where a login screen goes near a character's remembered `spot`: its own size kept, its

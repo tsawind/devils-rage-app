@@ -245,6 +245,7 @@ pub fn run(app: AppHandle, name: String, handle: isize, to_fixed: bool, width: i
             PENDING.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.clone(), (to_fixed, to));
             if to_fixed {
                 crate::clientwindows::remember_one(&app, &name, to);
+                crate::clientwindows::note_mode(&app, &name, true);
             }
             let profile = file.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let mode = if to_fixed { "Fixed Window" } else { "Window mode" };

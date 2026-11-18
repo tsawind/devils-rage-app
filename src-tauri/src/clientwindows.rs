@@ -33,6 +33,11 @@ pub struct ClientLayout {
     /// Patch 117: lock windows: a client moved off its spot (windowed mode) goes straight back.
     #[serde(default)]
     pub lock: bool,
+    /// Patch 74: whether each client's spot was remembered from a Fixed Window client (true) or
+    /// a Window-mode one (false). A spot from the other mode is a different rectangle (the bare
+    /// client vs. Windows' title bar and invisible borders), so it's only moved to, never sized to.
+    #[serde(default)]
+    pub fixed: BTreeMap<String, bool>,
 }
 
 static LAYOUT: Mutex<Option<ClientLayout>> = Mutex::new(None);
@@ -87,7 +92,7 @@ mod win {
         Some(Spot { x: rect.left, y: rect.top, w: rect.right - rect.left, h: rect.bottom - rect.top })
     }
 
-    fn captioned(handle: isize) -> bool {
+    pub fn captioned(handle: isize) -> bool {
         use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, GWL_STYLE, WS_CAPTION};
         // SAFETY: reads the window's style bits.
         let style = unsafe { GetWindowLongPtrW(handle as HWND, GWL_STYLE) } as u32;
@@ -119,6 +124,9 @@ mod win {
     pub fn place(_handle: isize, _spot: Spot) -> bool {
         false
     }
+    pub fn captioned(_handle: isize) -> bool {
+        true
+    }
 }
 
 /// A client window's spot now (None while minimised).
@@ -129,6 +137,49 @@ pub fn window_spot(handle: isize) -> Option<Spot> {
 /// Move a client window (its title-bar drag, done for it).
 pub fn place_window(handle: isize, spot: Spot) -> bool {
     win::place(handle, spot)
+}
+
+/// Whether a spot remembered for `name` can be used as it is for this window: it was remembered
+/// in the window's display mode, or (an older spot, mode not noted) it's the same size.
+fn same_mode(layout: &ClientLayout, name: &str, handle: isize, spot: Spot) -> bool {
+    let fixed_now = !win::captioned(handle);
+    match layout.fixed.get(name) {
+        Some(fixed) => *fixed == fixed_now,
+        None => window_spot(handle).is_some_and(|now| same_size(now, spot)),
+    }
+}
+
+/// Put a client in its remembered spot. A spot from the other display mode: moved there and
+/// snapped, keeping its own size (Tsa, 18 Nov: Tsawind's Fixed Window spot shrank his Window-mode
+/// client to 1902x985).
+fn place_named(app: &AppHandle, name: &str, handle: isize, spot: Spot) -> bool {
+    if with(app, |layout| same_mode(layout, name, handle, spot)) {
+        return win::place(handle, spot);
+    }
+    match crate::clientbar::near_spot(app, handle, spot) {
+        Some(to) => {
+            log::info!("{name}: spot is from the other display mode; moved there, size kept");
+            win::place(handle, to)
+        }
+        None => false,
+    }
+}
+
+/// Put a named client in its remembered spot (see `place_named`).
+pub fn place_in_spot(app: &AppHandle, name: &str, handle: isize, spot: Spot) -> bool {
+    place_named(app, name, handle, spot)
+}
+
+/// Note which display mode a client's spot was remembered in.
+pub fn note_mode(app: &AppHandle, name: &str, fixed: bool) {
+    with(app, |layout| {
+        layout.fixed.insert(name.to_string(), fixed);
+    });
+    save(app);
+}
+
+fn mode_of_open(name: &str) -> Option<bool> {
+    crate::clipboard::open_clients().into_iter().find(|(n, _)| n == name).map(|(_, h)| !win::captioned(h))
 }
 
 /// Patch 117: Lock windows on / off.
@@ -153,6 +204,10 @@ pub fn hold(app: &AppHandle) {
         }
         let Some(spot) = with(app, |layout| spot_now(layout, &name)) else { continue };
         let Some(now) = window_spot(handle) else { continue };
+        // A spot from the other display mode isn't this window's rectangle: don't keep forcing it.
+        if !with(app, |layout| same_mode(layout, &name, handle, spot)) {
+            continue;
+        }
         // Moved off its spot, or resized by more than rounding: put it back.
         if (now.x - spot.x).abs() > 4 || (now.y - spot.y).abs() > 4 || !same_size(now, spot) {
             win::place(handle, spot);
@@ -165,12 +220,18 @@ pub fn remember_one(app: &AppHandle, name: &str, spot: Spot) {
     if !keeps_a_spot(name) {
         return;
     }
-    with(app, |layout| match layout.in_stack.get(name).cloned() {
-        Some(stack) => {
-            layout.stacks.entry(stack).or_default().insert(name.to_string(), spot);
+    let fixed = mode_of_open(name);
+    with(app, |layout| {
+        match layout.in_stack.get(name).cloned() {
+            Some(stack) => {
+                layout.stacks.entry(stack).or_default().insert(name.to_string(), spot);
+            }
+            None => {
+                layout.spots.insert(name.to_string(), spot);
+            }
         }
-        None => {
-            layout.spots.insert(name.to_string(), spot);
+        if let Some(fixed) = fixed {
+            layout.fixed.insert(name.to_string(), fixed);
         }
     });
     save(app);
@@ -186,13 +247,16 @@ pub fn client_windows_remember(app: AppHandle) -> Result<String, String> {
         }
         if let Some(spot) = win::spot(handle).filter(|s| s.w > 100 && s.h > 100) {
             // A client sitting in a stack: that's its spot in the stack.
-            with(&app, |layout| match layout.in_stack.get(&name).cloned() {
-                Some(stack) => {
-                    layout.stacks.entry(stack).or_default().insert(name.clone(), spot);
+            with(&app, |layout| {
+                match layout.in_stack.get(&name).cloned() {
+                    Some(stack) => {
+                        layout.stacks.entry(stack).or_default().insert(name.clone(), spot);
+                    }
+                    None => {
+                        layout.spots.insert(name.clone(), spot);
+                    }
                 }
-                None => {
-                    layout.spots.insert(name.clone(), spot);
-                }
+                layout.fixed.insert(name.clone(), !win::captioned(handle));
             });
             count += 1;
         }
@@ -234,7 +298,7 @@ pub fn place_these(app: &AppHandle, only: Option<&[String]>) -> usize {
             continue;
         }
         if let Some(spot) = with(app, |layout| spot_now(layout, &name)) {
-            if win::place(handle, spot) {
+            if place_named(app, &name, handle, spot) {
                 moved += 1;
             }
         }
@@ -269,10 +333,16 @@ pub fn stack_changed(app: &AppHandle, name: &str, stack: &str, joined: bool, rem
     }
     let handle = crate::clipboard::open_clients().into_iter().find(|(n, _)| n == name).map(|(_, h)| h);
     let now = handle.and_then(win::spot).filter(|s| s.w > 100 && s.h > 100);
-    let target = with(app, |layout| stack_move(layout, name, stack, joined, remember, still_on, now));
+    let target = with(app, |layout| {
+        let target = stack_move(layout, name, stack, joined, remember, still_on, now);
+        if let (Some(handle), Some(_)) = (handle, now.filter(|_| remember)) {
+            layout.fixed.insert(name.to_string(), !win::captioned(handle));
+        }
+        target
+    });
     save(app);
     if let (Some(handle), Some(target)) = (handle, target) {
-        if win::place(handle, target) {
+        if place_named(app, name, handle, target) {
             log::info!("{name} {} stack {stack}: window moved", if joined { "joined" } else { "left" });
         }
     }
@@ -337,6 +407,18 @@ mod tests {
     const TOP_LEFT: Spot = Spot { x: 0, y: 0, w: 1280, h: 720 };
     const BOTTOM_LEFT: Spot = Spot { x: 0, y: 720, w: 1280, h: 720 };
     const BOTTOM_RIGHT: Spot = Spot { x: 1280, y: 720, w: 1280, h: 720 };
+
+    #[test]
+    fn a_spot_from_the_other_display_mode_is_not_used_as_it_is() {
+        let mut layout = ClientLayout::default();
+        // (Off Windows every window counts as Window mode.)
+        layout.fixed.insert("Tsawind".into(), true);
+        assert!(!same_mode(&layout, "Tsawind", 1, TOP_LEFT));
+        layout.fixed.insert("Tsawind".into(), false);
+        assert!(same_mode(&layout, "Tsawind", 1, TOP_LEFT));
+        // An older spot with no mode noted, size unknown: not trusted for sizing.
+        assert!(!same_mode(&layout, "Girl Shady", 1, TOP_LEFT));
+    }
 
     #[test]
     fn joining_and_leaving_a_stack_moves_the_window_there_and_back() {
