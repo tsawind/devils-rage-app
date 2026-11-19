@@ -378,6 +378,7 @@ pub fn run() {
             commands::open_parsec,
             commands::read_log,
             commands::open_log,
+            commands::open_repair,
             commands::open_devtools,
             commands::open_admin,
             commands::reset_app,

@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "resources": {
+      "../repair/target/release/devils-rage-repair.exe": "Devils Rage Repair.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+[package]
+name = "devils-rage-repair"
+version = "0.1.0"
+description = "Devil's Rage Repair: fixes or reinstalls the Devil's Rage app when it won't start or update"
+authors = ["Tsawind"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.85"
+
+# Its own small program (no app code, no webview), so it still runs when the app is broken.
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+strip = true

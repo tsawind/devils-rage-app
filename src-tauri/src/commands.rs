@@ -232,6 +232,19 @@ pub fn open_log(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Settings → Repair: start Devil's Rage Repair (next to the app). Started through `cmd /c start`
+/// so it isn't the app's child: it closes the app, and must outlive it.
+#[tauri::command]
+pub fn open_repair() -> Result<String, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let repair = exe.parent().ok_or("no app folder")?.join("Devils Rage Repair.exe");
+    if !repair.is_file() {
+        return Err("Devil's Rage Repair isn't next to the app yet (it comes with the next install).".into());
+    }
+    std::process::Command::new("cmd").args(["/c", "start", "\"Devil's Rage Repair\""]).arg(&repair).spawn().map_err(|e| e.to_string())?;
+    Ok("Devil's Rage Repair is open in its own window.".into())
+}
+
 /// Settings → Admin: the mapper's App admin page (the mapper checks who may open it).
 #[tauri::command]
 pub fn open_admin(app: AppHandle) {

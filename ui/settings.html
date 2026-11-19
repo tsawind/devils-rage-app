@@ -138,6 +138,14 @@
   </section>
 
   <section>
+    <h2>Repair</h2>
+    <div class="row">
+      <div class="l">Devil's Rage Repair<small>If the app misbehaves or won't update: reinstall the newest build, go back to stable, or start clean (your settings are backed up first). Also in the Start menu, for when the app won't open at all.</small></div>
+      <button class="b" id="openRepair">Open Repair</button>
+    </div>
+  </section>
+
+  <section>
     <h2>Developer</h2>
     <div class="row">
       <div class="l">Developer tools<small>Show the extra tools below (handy for bug reports)</small></div>
@@ -279,6 +287,9 @@
     try { toast(await invoke("import_eveo")); } catch (e) { toast(String(e)); }
   });
   $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
+  $("openRepair").addEventListener("click", async () => {
+    try { toast(await invoke("open_repair")); } catch (e) { toast(String(e)); }
+  });
   $("openRec").addEventListener("click", async () => {
     try { $("recWhere").textContent = await invoke("dev_open_recordings"); } catch (e) { toast(String(e)); }
   });

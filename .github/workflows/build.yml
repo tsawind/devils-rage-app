@@ -85,7 +85,14 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: './src-tauri -> target'
+          workspaces: |
+            ./src-tauri -> target
+            ./repair -> target
+
+      - name: Devil's Rage Repair (bundled next to the app on Windows)
+        run: |
+          cargo test --manifest-path repair/Cargo.toml
+          cargo build --release --manifest-path repair/Cargo.toml
 
       - name: App tests (chat log reader and friends)
         if: matrix.platform == 'ubuntu-22.04'
