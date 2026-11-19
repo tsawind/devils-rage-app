@@ -19,6 +19,7 @@ const CHECK_EVERY: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// When the last check ran and what it found (shown in Settings).
 static LAST: Mutex<Option<(SystemTime, String)>> = Mutex::new(None);
+static INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn record(outcome: impl Into<String>) {
     let outcome = outcome.into();
@@ -102,11 +103,44 @@ async fn check(app: &AppHandle, manual: bool) -> Result<(), String> {
         return Ok(()); // "Later": ask again at the next check
     }
 
+    // One install at a time (the automatic check and the button could both ask).
+    if INSTALLING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        log::info!("an update is already being installed");
+        return Ok(());
+    }
     log::info!("installing {}", update.version);
-    update
-        .download_and_install(|_, _| {}, || {})
-        .await
-        .map_err(|e| e.to_string())?;
+    // Patch 74: say how the download goes, and give up after a while instead of hanging
+    // (Tsa, 18 Nov: dev.221 never finished downloading and nothing said so).
+    let got = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let last_said = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (got2, said2) = (got.clone(), last_said.clone());
+    let download = update.download_and_install(
+        move |chunk, total| {
+            let now = got2.fetch_add(chunk as u64, std::sync::atomic::Ordering::Relaxed) + chunk as u64;
+            if now - said2.load(std::sync::atomic::Ordering::Relaxed) >= 1_000_000 || Some(now) == total {
+                said2.store(now, std::sync::atomic::Ordering::Relaxed);
+                log::info!("update download: {} of {} KB", now / 1024, total.map_or("?".to_string(), |t| (t / 1024).to_string()));
+            }
+        },
+        || log::info!("update downloaded: starting the installer"),
+    );
+    let result = tokio::time::timeout(Duration::from_secs(180), download).await;
+    INSTALLING.store(false, std::sync::atomic::Ordering::SeqCst);
+    match result {
+        Err(_) => {
+            let got = got.load(std::sync::atomic::Ordering::Relaxed) / 1024;
+            log::warn!("update download stalled after {got} KB");
+            let text = format!("The download stopped after {got} KB. Try again in a minute, or get the installer from the releases page.");
+            tell(app, "Update didn't download", text.clone(), MessageDialogKind::Warning);
+            return Err(text);
+        }
+        Ok(Err(e)) => {
+            log::warn!("update install failed: {e}");
+            tell(app, "Update didn't install", format!("{e}\n\nTry again, or get the installer from the releases page."), MessageDialogKind::Warning);
+            return Err(e.to_string());
+        }
+        Ok(Ok(())) => {}
+    }
     app.restart();
 }
 
