@@ -15,10 +15,10 @@ static CACHE: Mutex<Option<HashMap<u32, Option<String>>>> = Mutex::new(None);
 static ACCOUNTS: Mutex<Option<HashMap<u32, Option<u64>>>> = Mutex::new(None);
 /// Patch 74 (Tsa, 18 Nov: "do those"): what the token says about each EVE account: its login name
 /// (for Your accounts' login hint, this PC only) and its tier (Omega / Alpha). Account → (login, tier).
-static INFO: Mutex<Option<HashMap<u64, (Option<String>, Option<String>)>>> = Mutex::new(None);
+static INFO: Mutex<Option<HashMap<u64, (Option<String>, Option<String>, Option<String>)>>> = Mutex::new(None);
 
-/// The login name and tier the tokens named for each EVE account seen so far.
-pub fn account_info() -> HashMap<u64, (Option<String>, Option<String>)> {
+/// The login name, tier and settings profile the clients said for each EVE account seen so far.
+pub fn account_info() -> HashMap<u64, (Option<String>, Option<String>, Option<String>)> {
     INFO.lock().unwrap().clone().unwrap_or_default()
 }
 
@@ -194,7 +194,7 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
         log::info!("EVE client {pid} start-up options (names only): {}", option_names(&line).join(" "));
         let (found, shape, extra) = signed_in(&line);
         if let Some(user) = found {
-            INFO.lock().unwrap().get_or_insert_with(HashMap::new).insert(user, extra);
+            INFO.lock().unwrap().get_or_insert_with(HashMap::new).insert(user, (extra.0, extra.1, profile_in(&line)));
         }
         log::info!("EVE client {pid} {shape}; account {}", if found.is_some() { "found" } else { "not found" });
         account = found;

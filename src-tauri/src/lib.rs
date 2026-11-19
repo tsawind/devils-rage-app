@@ -812,7 +812,8 @@ fn new_window_handler(
                     let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
                     let name = url.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.chars().take(40).collect::<String>());
                     if let Some(id) = id {
-                        let said = match pcaccounts::archive_character(id, name.as_deref()) {
+                        let folder = url.query_pairs().find(|(k, _)| k == "profile").map(|(_, v)| v.into_owned()).filter(|p| !p.is_empty());
+                        let said = match pcaccounts::archive_character(id, name.as_deref(), folder.as_deref()) {
                             Ok(n) => format!("Moved {n} settings file(s) to the {} folder.", pcaccounts::ARCHIVE),
                             Err(e) => e,
                         };
@@ -826,7 +827,8 @@ fn new_window_handler(
                     let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
                     let name = url.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.chars().take(40).collect::<String>());
                     if let Some(id) = id {
-                        let said = match pcaccounts::delete_character(id, name.as_deref()) {
+                        let folder = url.query_pairs().find(|(k, _)| k == "profile").map(|(_, v)| v.into_owned()).filter(|p| !p.is_empty());
+                        let said = match pcaccounts::delete_character(id, name.as_deref(), folder.as_deref()) {
                             Ok(n) => format!("Deleted {n} settings file(s)."),
                             Err(e) => e,
                         };
@@ -838,7 +840,18 @@ fn new_window_handler(
                 }
                 "/pc-open-folder" if from_seat(&app, &me) => {
                     if let Some(id) = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok()) {
-                        pcaccounts::open_folder(id);
+                        let folder = url.query_pairs().find(|(k, _)| k == "profile").map(|(_, v)| v.into_owned()).filter(|p| !p.is_empty());
+                        pcaccounts::open_folder(id, folder.as_deref());
+                    }
+                }
+                // Patch 74: an account's own profile folder named after its EVE login.
+                "/pc-account-profile" if from_seat(&app, &me) => {
+                    if let Some(user) = url.query_pairs().find(|(k, _)| k == "user").and_then(|(_, v)| v.parse::<u64>().ok()) {
+                        let said = pcaccounts::make_account_profile(&app, user).unwrap_or_else(|e| e);
+                        if let Some(view) = app.get_webview(&me) {
+                            let detail = serde_json::json!({ "user": user, "said": said });
+                            let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-profile', {{ detail: {detail} }}));"));
+                        }
                     }
                 }
                 "/pc-other-hide" if from_seat(&app, &me) => {

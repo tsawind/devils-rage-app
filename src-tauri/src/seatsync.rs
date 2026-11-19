@@ -161,7 +161,11 @@ pub fn send_pc_accounts(app: &AppHandle, me: &str) {
         // Each EVE account's login name and tier, as its sign-in token said (this PC only).
         let info: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::infos(&app)
             .into_iter()
-            .map(|(user, i)| (user.to_string(), serde_json::json!({ "login": i.login, "tier": i.tier, "at": i.at })))
+            .map(|(user, i)| {
+                // Its own profile folder (settings_<login>), when it's there.
+                let own = i.login.as_ref().map(|l| l.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect::<String>()).filter(|n| !n.is_empty() && crate::profiles::root().is_ok_and(|r| r.join(format!("settings_{n}")).is_dir()));
+                (user.to_string(), serde_json::json!({ "login": i.login, "tier": i.tier, "profile": i.profile, "own": own, "at": i.at }))
+            })
             .collect();
         detail["info"] = serde_json::Value::Object(info);
         detail["seen"] = serde_json::Value::Array(seen.iter().map(|(name, user)| serde_json::json!({ "name": name, "user_id": user })).collect());
@@ -175,7 +179,7 @@ pub fn send_pc_accounts(app: &AppHandle, me: &str) {
         // Every character's last-played date and profile folders on this PC (shown on its row).
         let chars: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::all_chars()
             .into_iter()
-            .map(|(id, (last, profiles))| (id.to_string(), serde_json::json!({ "last": last, "profiles": profiles })))
+            .map(|(id, profiles)| (id.to_string(), serde_json::json!({ "last": profiles.first().map(|p| p.1).unwrap_or(0), "profiles": profiles.iter().map(|(p, t)| serde_json::json!({ "name": p, "at": t })).collect::<Vec<_>>() })))
             .collect();
         detail["chars"] = serde_json::Value::Object(chars);
         let mut ids: Vec<u64> = placed.into_iter().collect();

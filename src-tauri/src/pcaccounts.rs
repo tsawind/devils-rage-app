@@ -228,6 +228,9 @@ pub struct AccountInfo {
     pub login: Option<String>,
     #[serde(default)]
     pub tier: Option<String>,
+    /// The settings profile its client was last started with.
+    #[serde(default)]
+    pub profile: Option<String>,
     /// When a client last said so (unix seconds).
     #[serde(default)]
     pub at: u64,
@@ -268,11 +271,11 @@ fn save_info(app: &tauri::AppHandle) {
 pub fn note_info(app: &tauri::AppHandle) {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let mut changed = false;
-    for (user, (login, tier)) in crate::startline::account_info() {
+    for (user, (login, tier, profile)) in crate::startline::account_info() {
         changed |= with_info(app, |s| {
             let entry = s.accounts.entry(user).or_default();
-            let new = AccountInfo { login: login.clone().or(entry.login.clone()), tier: tier.clone().or(entry.tier.clone()), at: entry.at };
-            if new.login != entry.login || new.tier != entry.tier {
+            let new = AccountInfo { login: login.clone().or(entry.login.clone()), tier: tier.clone().or(entry.tier.clone()), profile: profile.clone().or(entry.profile.clone()), at: entry.at };
+            if new.login != entry.login || new.tier != entry.tier || new.profile != entry.profile {
                 *entry = AccountInfo { at: now, ..new };
                 true
             } else {
@@ -325,7 +328,7 @@ pub const ARCHIVE: &str = "Devils Rage archived characters";
 
 /// Move one character's settings files (core_char_<id>.dat in every profile folder) into the
 /// archive folder. Refused while that character is logged in (EVE would write them again).
-pub fn archive_character(id: u64, name: Option<&str>) -> Result<usize, String> {
+pub fn archive_character(id: u64, name: Option<&str>, only: Option<&str>) -> Result<usize, String> {
     if let Some(name) = name {
         if crate::clipboard::open_eve_characters().iter().any(|n| n.eq_ignore_ascii_case(name)) {
             return Err(format!("{name} is logged in: close that client first."));
@@ -334,12 +337,8 @@ pub fn archive_character(id: u64, name: Option<&str>) -> Result<usize, String> {
     let root = crate::profiles::root()?;
     let file = format!("core_char_{id}.dat");
     let mut moved = 0;
-    for dir in std::fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
-        let folder = dir.file_name().to_string_lossy().to_string();
-        if crate::profiles::profile_of(&folder).is_none() {
-            continue;
-        }
-        let from = dir.path().join(&file);
+    for (folder, path) in profile_dirs(only)? {
+        let from = path.join(&file);
         if !from.is_file() {
             continue;
         }
@@ -358,36 +357,95 @@ pub fn archive_character(id: u64, name: Option<&str>) -> Result<usize, String> {
     Ok(moved)
 }
 
-/// Every character with settings on this PC: id → (when last played, ms; its profile folders).
-pub fn all_chars() -> BTreeMap<u64, (u64, Vec<String>)> {
-    let mut found: BTreeMap<u64, (u64, Vec<String>)> = BTreeMap::new();
+/// Every character with settings on this PC: id → its profile folders, newest first, each with
+/// when its file there was last written (ms).
+pub fn all_chars() -> BTreeMap<u64, Vec<(String, u64)>> {
+    let mut found: BTreeMap<u64, Vec<(String, u64)>> = BTreeMap::new();
     for f in folders() {
         for (c, t) in &f.chars {
-            let e = found.entry(*c).or_default();
-            e.0 = e.0.max(*t);
-            e.1.push(f.profile.clone());
+            found.entry(*c).or_default().push((f.profile.clone(), *t));
         }
+    }
+    for list in found.values_mut() {
+        list.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
     }
     found
 }
 
+/// The profile folders a file action covers: one (`only`) or every profile folder.
+fn profile_dirs(only: Option<&str>) -> Result<Vec<(String, std::path::PathBuf)>, String> {
+    let root = crate::profiles::root()?;
+    let mut out = Vec::new();
+    for dir in std::fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
+        let folder = dir.file_name().to_string_lossy().to_string();
+        let Some(profile) = crate::profiles::profile_of(&folder) else { continue };
+        if only.is_some_and(|o| o != profile) {
+            continue;
+        }
+        out.push((folder, dir.path()));
+    }
+    Ok(out)
+}
+
+/// Patch 74: the account's own profile folder, named after its EVE login (settings_tsawind), made
+/// from the profile it has been started with: that profile's game settings (core_public, prefs.ini)
+/// plus only this account's files (its core_user and its characters' core_char), not other accounts'.
+pub fn make_account_profile(app: &tauri::AppHandle, user: u64) -> Result<String, String> {
+    let info = infos(app).remove(&user).ok_or("Log this account in once first (the app learns its login there).")?;
+    let login = info.login.ok_or("Log this account in once first (the app learns its login there).")?;
+    let name: String = login.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    if !crate::profiles::safe_name(&name) {
+        return Err("Its login name can't be a profile name.".into());
+    }
+    let root = crate::profiles::root()?;
+    let target = root.join(format!("settings_{name}"));
+    if target.exists() {
+        return Ok(format!("settings_{name} is already there."));
+    }
+    let from = info.profile.ok_or("Start this account once from the launcher first (the app learns which profile it uses).")?;
+    if !crate::profiles::safe_name(&from) {
+        return Err("Its current profile has an odd name.".into());
+    }
+    let source = root.join(format!("settings_{from}"));
+    if !source.is_dir() {
+        return Err(format!("settings_{from} isn't there any more."));
+    }
+    // This account's characters: the launcher's lists and the clients seen on it.
+    let mut chars: BTreeSet<u64> = crate::launch::launcher_accounts().into_iter().filter(|(u, _)| *u == user).flat_map(|(_, c)| c).collect();
+    let seen_names: Vec<String> = seen(app).into_iter().filter(|(_, u)| *u == user).map(|(n, _)| n.to_lowercase()).collect();
+    let seat = crate::launch::load_seat(app);
+    for c in seat.accounts.iter().flat_map(|a| a.characters.iter()) {
+        if seen_names.contains(&c.name.to_lowercase()) {
+            chars.insert(c.id);
+        }
+    }
+    std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+    let mut copied = 0;
+    let mut keep = vec![format!("core_user_{user}.dat"), "core_public__.yaml".to_string(), "prefs.ini".to_string()];
+    keep.extend(chars.iter().map(|c| format!("core_char_{c}.dat")));
+    for file in keep {
+        let from_file = source.join(&file);
+        if from_file.is_file() {
+            std::fs::copy(&from_file, target.join(&file)).map_err(|e| format!("couldn't copy {file}: {e}"))?;
+            copied += 1;
+        }
+    }
+    log::info!("made settings_{name} for EVE account {user} from settings_{from}: {copied} files");
+    Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters'). Now pick \"{name}\" as this account's client profile in the EVE launcher."))
+}
+
 /// Delete one character's settings files for good (Your accounts asks twice first; archiving is
 /// what it recommends). Refused while that character is logged in.
-pub fn delete_character(id: u64, name: Option<&str>) -> Result<usize, String> {
+pub fn delete_character(id: u64, name: Option<&str>, only: Option<&str>) -> Result<usize, String> {
     if let Some(name) = name {
         if crate::clipboard::open_eve_characters().iter().any(|n| n.eq_ignore_ascii_case(name)) {
             return Err(format!("{name} is logged in: close that client first."));
         }
     }
-    let root = crate::profiles::root()?;
     let file = format!("core_char_{id}.dat");
     let mut deleted = 0;
-    for dir in std::fs::read_dir(&root).map_err(|e| e.to_string())?.flatten() {
-        let folder = dir.file_name().to_string_lossy().to_string();
-        if crate::profiles::profile_of(&folder).is_none() {
-            continue;
-        }
-        let path = dir.path().join(&file);
+    for (folder, dir) in profile_dirs(only)? {
+        let path = dir.join(&file);
         if path.is_file() {
             std::fs::remove_file(&path).map_err(|e| format!("couldn't delete {folder}\\{file}: {e}"))?;
             deleted += 1;
@@ -398,15 +456,13 @@ pub fn delete_character(id: u64, name: Option<&str>) -> Result<usize, String> {
 }
 
 /// Show one character's newest settings file in File Explorer (else the settings folder).
-pub fn open_folder(id: u64) {
+pub fn open_folder(id: u64, only: Option<&str>) {
     let Ok(root) = crate::profiles::root() else { return };
     let file = format!("core_char_{id}.dat");
-    let newest = std::fs::read_dir(&root)
+    let newest = profile_dirs(only)
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|d| crate::profiles::profile_of(&d.file_name().to_string_lossy()).is_some())
-        .map(|d| d.path().join(&file))
+        .map(|(_, d)| d.join(&file))
         .filter(|p| p.is_file())
         .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
     #[cfg(windows)]
