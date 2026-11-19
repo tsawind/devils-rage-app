@@ -76,7 +76,12 @@ fn signed_in(line: &str) -> (Option<u64>, String, (Option<String>, Option<String
     let sub = payload.get("sub").and_then(|v| v.as_str()).unwrap_or("");
     let kind = sub.split(':').next().unwrap_or("").to_string();
     let account = sub.strip_prefix("USER:EVE:").and_then(|n| n.parse::<u64>().ok());
-    let tier = plain(payload.get("tier"), 20).or_else(|| payload.get("tier").filter(|v| !v.is_null()).map(|v| v.to_string().chars().filter(|c| c.is_alphanumeric()).take(20).collect()));
+    // Patch 74: Omega or Alpha. The "tier" claim is the server ("live"); an Omega account has an
+    // active subscription in the token, an Alpha one none (checked on Tsa's PC, 18 Nov).
+    let tier = match payload.get("active_subscriptions") {
+        Some(serde_json::Value::Array(a)) => Some(if a.is_empty() { "alpha" } else { "omega" }.to_string()),
+        _ => None,
+    };
     let extra = (plain(payload.get("name"), 64), tier);
     // What the tier and subscription claims look like (the tier word, and the subscriptions'
     // count and kind only), to learn how EVE marks Alpha.
