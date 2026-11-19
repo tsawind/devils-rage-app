@@ -32,9 +32,88 @@ fn now_secs() -> u64 {
 }
 
 fn folder(app: &AppHandle) -> Result<PathBuf, String> {
+    recordings(app)
+}
+
+/// Where videos, snapshots and scan recordings go (Tsa, 19 Nov: where the app lives, e.g.
+/// C:\Devils Rage\Recordings, so they're easy to find and an uninstall's "delete app data" box
+/// can't take them). If the app's folder can't be written (Program Files), Documents\Devil's
+/// Rage\Recordings; failing that, the old spot in the app's data folder.
+pub fn recordings(app: &AppHandle) -> Result<PathBuf, String> {
+    static CHOSEN: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let chosen = CHOSEN.get_or_init(|| {
+        let writable = |dir: PathBuf| -> Option<PathBuf> {
+            std::fs::create_dir_all(&dir).ok()?;
+            let probe = dir.join(".write-test");
+            std::fs::write(&probe, b"ok").ok()?;
+            let _ = std::fs::remove_file(&probe);
+            Some(dir)
+        };
+        let beside_app = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("Recordings")));
+        let documents = app.path().document_dir().ok().map(|d| d.join("Devil's Rage").join("Recordings"));
+        let found = [beside_app, documents].into_iter().flatten().find_map(writable);
+        if let Some(dir) = &found {
+            log::info!("recordings go to {}", dir.display());
+        }
+        found
+    });
+    if let Some(dir) = chosen {
+        return Ok(dir.clone());
+    }
     let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("recordings");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
+}
+
+/// Move recordings from the old spot (the app's data folder) to the new one, once, in the
+/// background. Anything that can't move stays where it was.
+pub fn move_old_recordings(app: &AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("move-recordings".into()).spawn(move || {
+        let Ok(old) = app.path().app_local_data_dir().map(|d| d.join("recordings")) else { return };
+        let Ok(new) = recordings(&app) else { return };
+        if new == old || !old.is_dir() {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(&old) else { return };
+        let (mut moved, mut left) = (0, 0);
+        for entry in entries.flatten() {
+            let to = new.join(entry.file_name());
+            if to.exists() {
+                left += 1;
+                continue;
+            }
+            if std::fs::rename(entry.path(), &to).is_ok() || copy_then_remove(&entry.path(), &to) {
+                moved += 1;
+            } else {
+                left += 1;
+            }
+        }
+        if left == 0 {
+            let _ = std::fs::remove_dir(&old);
+        }
+        log::info!("moved {moved} old recordings to {} ({left} left behind)", new.display());
+    });
+}
+
+/// Another drive: copy it over, then remove the original (a folder is copied file by file).
+fn copy_then_remove(from: &std::path::Path, to: &std::path::Path) -> bool {
+    fn copy(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        if from.is_dir() {
+            std::fs::create_dir_all(to)?;
+            for entry in std::fs::read_dir(from)? {
+                let entry = entry?;
+                copy(&entry.path(), &to.join(entry.file_name()))?;
+            }
+            Ok(())
+        } else {
+            std::fs::copy(from, to).map(|_| ())
+        }
+    }
+    if copy(from, to).is_err() {
+        return false;
+    }
+    if from.is_dir() { std::fs::remove_dir_all(from).is_ok() } else { std::fs::remove_file(from).is_ok() }
 }
 
 /// The main window's handle (its whole inside: the bar and the page under it).

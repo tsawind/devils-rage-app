@@ -132,6 +132,14 @@ pub fn folders() -> Vec<Folder> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_login_name_becomes_a_safe_folder_name() {
+        assert_eq!(login_folder(Some("Tsawind2")).as_deref(), Some("Tsawind2"));
+        assert_eq!(login_folder(Some("tsa wind.12")).as_deref(), Some("tsawind12"));
+        assert_eq!(login_folder(Some("...")), None);
+        assert_eq!(login_folder(None), None);
+    }
+
     fn folder(profile: &str, users: &[u64], chars: &[u64]) -> Folder {
         Folder { profile: profile.into(), users: users.iter().copied().collect(), chars: chars.iter().map(|c| (*c, 1)).collect() }
     }
@@ -234,6 +242,9 @@ pub struct AccountInfo {
     /// When a client last said so (unix seconds).
     #[serde(default)]
     pub at: u64,
+    /// Its own profile folder's name (without "settings_"), as the pilot named it here.
+    #[serde(default)]
+    pub own: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -274,7 +285,7 @@ pub fn note_info(app: &tauri::AppHandle) {
     for (user, (login, tier, profile)) in crate::startline::account_info() {
         changed |= with_info(app, |s| {
             let entry = s.accounts.entry(user).or_default();
-            let new = AccountInfo { login: login.clone().or(entry.login.clone()), tier: tier.clone().or(entry.tier.clone()), profile: profile.clone().or(entry.profile.clone()), at: entry.at };
+            let new = AccountInfo { login: login.clone().or(entry.login.clone()), tier: tier.clone().or(entry.tier.clone()), profile: profile.clone().or(entry.profile.clone()), ..entry.clone() };
             if new.login != entry.login || new.tier != entry.tier || new.profile != entry.profile {
                 *entry = AccountInfo { at: now, ..new };
                 true
@@ -390,21 +401,34 @@ fn profile_dirs(only: Option<&str>) -> Result<Vec<(String, std::path::PathBuf)>,
 /// Patch 74: the account's own profile folder, named after its EVE login (settings_tsawind), made
 /// from the profile it has been started with: that profile's game settings (core_public, prefs.ini)
 /// plus only this account's files (its core_user and its characters' core_char), not other accounts'.
-pub fn make_account_profile(app: &tauri::AppHandle, user: u64) -> Result<String, String> {
+pub fn make_account_profile(app: &tauri::AppHandle, user: u64, wanted: Option<&str>, from: Option<&str>) -> Result<String, String> {
     let info = infos(app).remove(&user).ok_or("Log this account in once first (the app learns its login there).")?;
-    let login = info.login.ok_or("Log this account in once first (the app learns its login there).")?;
-    let name: String = login.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    let name = match wanted.map(str::trim).filter(|w| !w.is_empty()) {
+        Some(w) => w.to_string(),
+        None => login_folder(info.login.as_deref()).ok_or("Log this account in once first, or type a name.")?,
+    };
     if !crate::profiles::safe_name(&name) {
-        return Err("Its login name can't be a profile name.".into());
+        return Err("Use letters, numbers, - and _ only (up to 40).".into());
     }
     let root = crate::profiles::root()?;
     let target = root.join(format!("settings_{name}"));
     if target.exists() {
-        return Ok(format!("settings_{name} is already there."));
+        return Err(format!("settings_{name} is already there: pick another name, or pick {name} in the launcher if it's this account's."));
     }
-    let from = info.profile.ok_or("Start this account once from the launcher first (the app learns which profile it uses).")?;
+    // Start from: the profile picked on the page, else the one it last started with; "fresh" = EVE's defaults.
+    let from = match from.map(str::trim).filter(|f| !f.is_empty()) {
+        Some("fresh") => None,
+        Some(f) => Some(f.to_string()),
+        None => Some(info.profile.clone().ok_or("Start this account once from the launcher first, or pick a profile to start from.")?),
+    };
+    let Some(from) = from else {
+        std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+        remember_own(app, user, &name);
+        log::info!("made an empty settings_{name} for EVE account {user}");
+        return Ok(format!("Made settings_{name}, empty: EVE starts it with its default settings. Now pick \"{name}\" as this account's client profile in the EVE launcher (not in the list? close the launcher fully, tray icon too, and open it again)."));
+    };
     if !crate::profiles::safe_name(&from) {
-        return Err("Its current profile has an odd name.".into());
+        return Err("That profile has an odd name.".into());
     }
     let source = root.join(format!("settings_{from}"));
     if !source.is_dir() {
@@ -430,8 +454,26 @@ pub fn make_account_profile(app: &tauri::AppHandle, user: u64) -> Result<String,
             copied += 1;
         }
     }
+    remember_own(app, user, &name);
     log::info!("made settings_{name} for EVE account {user} from settings_{from}: {copied} files");
-    Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters'). Now pick \"{name}\" as this account's client profile in the EVE launcher."))
+    Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters'). Now pick \"{name}\" as this account's client profile in the EVE launcher (not in the list? close the launcher fully, tray icon too, and open it again)."))
+}
+
+/// A login name as a folder name (letters, numbers, - and _).
+pub fn login_folder(login: Option<&str>) -> Option<String> {
+    login.map(|l| l.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect::<String>()).filter(|n| crate::profiles::safe_name(n))
+}
+
+fn remember_own(app: &tauri::AppHandle, user: u64, name: &str) {
+    with_info(app, |s| s.accounts.entry(user).or_default().own = Some(name.to_string()));
+    save_info(app);
+}
+
+/// This account's own profile folder, when it's there: the one named here, else settings_<login>
+/// (made before names could be picked).
+pub fn own_profile(info: &AccountInfo) -> Option<String> {
+    let root = crate::profiles::root().ok()?;
+    [info.own.clone(), login_folder(info.login.as_deref())].into_iter().flatten().find(|n| crate::profiles::safe_name(n) && root.join(format!("settings_{n}")).is_dir())
 }
 
 /// Delete one character's settings files for good (Your accounts asks twice first; archiving is

@@ -454,8 +454,7 @@ impl Engine {
         if s.recorder.is_some() {
             return Ok(None);
         }
-        let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("recordings");
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let dir = crate::devrec::recordings(app)?;
         let path = dir.join(format!("scan2-{stamp}.bin"));
         let (tx, rx) = std::sync::mpsc::channel::<(Arc<Frame>, String)>();
         let inner = self.0.clone();

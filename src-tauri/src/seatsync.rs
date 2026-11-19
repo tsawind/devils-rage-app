@@ -163,8 +163,8 @@ pub fn send_pc_accounts(app: &AppHandle, me: &str) {
         let info: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::infos(&app)
             .into_iter()
             .map(|(user, i)| {
-                // Its own profile folder (settings_<login>), when it's there.
-                let own = i.login.as_ref().map(|l| l.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect::<String>()).filter(|n| !n.is_empty() && crate::profiles::root().is_ok_and(|r| r.join(format!("settings_{n}")).is_dir()));
+                // Its own profile folder, when it's there.
+                let own = crate::pcaccounts::own_profile(&i);
                 (user.to_string(), serde_json::json!({ "login": i.login, "tier": i.tier, "profile": i.profile, "own": own, "at": i.at }))
             })
             .collect();

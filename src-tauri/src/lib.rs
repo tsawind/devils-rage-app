@@ -621,6 +621,7 @@ pub fn run() {
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
             incognito::load(&handle);
+            devrec::move_old_recordings(&handle);
             launch::load_account_logins(&handle);
             clipboard::start(handle.clone());
             #[cfg(desktop)]
@@ -847,7 +848,9 @@ fn new_window_handler(
                 // Patch 74: an account's own profile folder named after its EVE login.
                 "/pc-account-profile" if from_seat(&app, &me) => {
                     if let Some(user) = url.query_pairs().find(|(k, _)| k == "user").and_then(|(_, v)| v.parse::<u64>().ok()) {
-                        let said = pcaccounts::make_account_profile(&app, user).unwrap_or_else(|e| e);
+                        let arg = |k: &str| url.query_pairs().find(|(q, _)| q == k).map(|(_, v)| v.chars().take(40).collect::<String>());
+                        let (name, from) = (arg("name"), arg("from"));
+                        let said = pcaccounts::make_account_profile(&app, user, name.as_deref(), from.as_deref()).unwrap_or_else(|e| e);
                         if let Some(view) = app.get_webview(&me) {
                             let detail = serde_json::json!({ "user": user, "said": said });
                             let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-profile', {{ detail: {detail} }}));"));

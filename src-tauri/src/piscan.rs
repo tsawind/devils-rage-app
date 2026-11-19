@@ -6,7 +6,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 fn client() -> reqwest::Client {
     crate::http_client()
@@ -134,7 +134,7 @@ static RECORDING: AtomicBool = AtomicBool::new(false);
 static NOTES: Mutex<Vec<serde_json::Value>> = Mutex::new(Vec::new());
 
 fn recordings_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    app.path().app_local_data_dir().map(|d| d.join("recordings")).map_err(|e| e.to_string())
+    crate::devrec::recordings(app)
 }
 
 /// Start recording a client (stops by itself after `seconds`, at most 3 minutes).

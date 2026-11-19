@@ -149,6 +149,10 @@
       <button class="b" id="copyLog">Copy</button>
     </div>
     <div class="row dev">
+      <div class="l">Recordings<small id="recWhere">Videos, snapshots and scan recordings, kept where the app lives</small></div>
+      <button class="b" id="openRec">Open folder</button>
+    </div>
+    <div class="row dev">
       <div class="l">Browser dev tools<small>Inspect the page in the main window</small></div>
       <button class="b" id="devtools">Open</button>
     </div>
@@ -275,6 +279,9 @@
     try { toast(await invoke("import_eveo")); } catch (e) { toast(String(e)); }
   });
   $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
+  $("openRec").addEventListener("click", async () => {
+    try { $("recWhere").textContent = await invoke("dev_open_recordings"); } catch (e) { toast(String(e)); }
+  });
   $("copyLog").addEventListener("click", async () => {
     try {
       const text = await invoke("read_log");
