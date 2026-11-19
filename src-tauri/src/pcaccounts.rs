@@ -464,6 +464,20 @@ pub fn login_folder(login: Option<&str>) -> Option<String> {
     login.map(|l| l.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect::<String>()).filter(|n| crate::profiles::safe_name(n))
 }
 
+/// An existing profile folder as this account's own (nothing is copied or changed); "" forgets it.
+pub fn set_own(app: &tauri::AppHandle, user: u64, name: &str) -> Result<String, String> {
+    if name.is_empty() {
+        remember_own(app, user, "");
+        return Ok("Forgotten: it has no profile of its own here now (nothing on disk changed).".into());
+    }
+    if !crate::profiles::safe_name(name) || !crate::profiles::root()?.join(format!("settings_{name}")).is_dir() {
+        return Err(format!("settings_{name} isn't there."));
+    }
+    remember_own(app, user, name);
+    log::info!("settings_{name} is EVE account {user}'s own profile now");
+    Ok(format!("settings_{name} is this account's own profile now. Keep picking \"{name}\" for it in the EVE launcher."))
+}
+
 fn remember_own(app: &tauri::AppHandle, user: u64, name: &str) {
     with_info(app, |s| s.accounts.entry(user).or_default().own = Some(name.to_string()));
     save_info(app);
@@ -472,6 +486,9 @@ fn remember_own(app: &tauri::AppHandle, user: u64, name: &str) {
 /// This account's own profile folder, when it's there: the one named here, else settings_<login>
 /// (made before names could be picked).
 pub fn own_profile(info: &AccountInfo) -> Option<String> {
+    if info.own.as_deref() == Some("") {
+        return None; // the pilot said it has none ("Forget" under Advanced editing)
+    }
     let root = crate::profiles::root().ok()?;
     [info.own.clone(), login_folder(info.login.as_deref())].into_iter().flatten().find(|n| crate::profiles::safe_name(n) && root.join(format!("settings_{n}")).is_dir())
 }

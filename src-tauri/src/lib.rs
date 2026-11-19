@@ -28,6 +28,7 @@ mod launch;
 mod clientaudio;
 mod commands;
 mod devrec;
+mod eveapps;
 mod location;
 mod mainwindow;
 mod parsec;
@@ -850,11 +851,25 @@ fn new_window_handler(
                     if let Some(user) = url.query_pairs().find(|(k, _)| k == "user").and_then(|(_, v)| v.parse::<u64>().ok()) {
                         let arg = |k: &str| url.query_pairs().find(|(q, _)| q == k).map(|(_, v)| v.chars().take(40).collect::<String>());
                         let (name, from) = (arg("name"), arg("from"));
-                        let said = pcaccounts::make_account_profile(&app, user, name.as_deref(), from.as_deref()).unwrap_or_else(|e| e);
+                        let said = if url.query_pairs().any(|(k, v)| k == "forget" && v == "1") {
+                            pcaccounts::set_own(&app, user, "")
+                        } else if let Some(existing) = arg("use") {
+                            pcaccounts::set_own(&app, user, &existing)
+                        } else {
+                            pcaccounts::make_account_profile(&app, user, name.as_deref(), from.as_deref())
+                        }
+                        .unwrap_or_else(|e| e);
                         if let Some(view) = app.get_webview(&me) {
                             let detail = serde_json::json!({ "user": user, "said": said });
                             let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-profile', {{ detail: {detail} }}));"));
                         }
+                    }
+                }
+                "/eve-apps" if from_seat(&app, &me) => {
+                    let character = url.query_pairs().find(|(k, _)| k == "character").and_then(|(_, v)| v.parse::<u64>().ok());
+                    let login = url.query_pairs().find(|(k, _)| k == "login").map(|(_, v)| v.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.').take(40).collect::<String>());
+                    if let Some(character) = character {
+                        eveapps::open(&app, character, login.as_deref());
                     }
                 }
                 "/pc-spy" if from_seat(&app, &me) => {
