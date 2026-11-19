@@ -22,6 +22,9 @@ struct Saved {
     /// Characters hidden by hand on this PC (names).
     #[serde(default)]
     hidden: Vec<String>,
+    /// Patch 74: characters marked as spies on this PC (names): hidden too, and their rows locked.
+    #[serde(default)]
+    spies: Vec<String>,
 }
 
 #[derive(Default)]
@@ -59,7 +62,7 @@ pub fn load(app: &AppHandle) {
         known.id_names.insert(*id, key(name));
         known.names.insert(key(name));
     }
-    known.hidden = saved.hidden.iter().map(|n| key(n)).collect();
+    known.hidden = saved.hidden.iter().chain(saved.spies.iter()).map(|n| key(n)).collect();
     known.saved = saved;
     log::info!("incognito: {} characters known to SeAT / the mapper, {} hidden by hand", known.names.len(), known.hidden.len());
     *KNOWN.lock().unwrap() = Some(known);
@@ -123,7 +126,20 @@ pub fn is_public_id(id: u64) -> bool {
 pub fn incognito_state() -> serde_json::Value {
     let guard = KNOWN.lock().unwrap();
     let (known, hidden): (Vec<String>, Vec<String>) = guard.as_ref().map(|k| (k.names.iter().cloned().collect(), k.hidden.iter().cloned().collect())).unwrap_or_default();
-    serde_json::json!({ "known": known, "hidden": hidden })
+    let spies: Vec<String> = guard.as_ref().map(|k| k.saved.spies.clone()).unwrap_or_default();
+    serde_json::json!({ "known": known, "hidden": hidden, "spies": spies })
+}
+
+/// Mark a character as a spy on this PC (or take the mark off). A spy is hidden like an
+/// incognito character, and Your accounts locks its row.
+pub fn set_spy(app: &AppHandle, name: &str, on: bool) {
+    let mut saved = KNOWN.lock().unwrap().as_ref().map(|k| k.saved.clone()).unwrap_or_default();
+    saved.spies.retain(|n| key(n) != key(name));
+    if on {
+        saved.spies.push(name.trim().to_string());
+    }
+    save(app, &saved);
+    load(app);
 }
 
 /// Hide a known character by hand (or show it again). This PC only.

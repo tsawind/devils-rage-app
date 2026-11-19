@@ -96,14 +96,15 @@ pub fn pc_accounts() -> serde_json::Value {
             serde_json::json!({ "user_id": user, "characters": characters })
         })
         .collect();
-    let hidden = crate::incognito::incognito_state()["hidden"].clone();
+    let state = crate::incognito::incognito_state();
+    let (hidden, spies) = (state["hidden"].clone(), state["spies"].clone());
     // Logged-in clients and the EVE account each was signed in to (from its own start-up line):
     // certain, so Your accounts can flag a character sitting on another EVE account than its own.
     let running: Vec<serde_json::Value> = crate::clipboard::open_eve_windows()
         .into_iter()
         .filter_map(|(name, handle)| Some(serde_json::json!({ "name": name, "user_id": crate::startline::account_of_window(handle)? })))
         .collect();
-    serde_json::json!({ "accounts": accounts, "hidden": hidden, "running": running })
+    serde_json::json!({ "accounts": accounts, "hidden": hidden, "spies": spies, "running": running })
 }
 
 /// Character ids for names (EVE's public lookup), for characters seen logged in here.

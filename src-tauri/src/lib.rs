@@ -854,6 +854,13 @@ fn new_window_handler(
                         }
                     }
                 }
+                "/pc-spy" if from_seat(&app, &me) => {
+                    let name = url.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.chars().take(40).collect::<String>()).unwrap_or_default();
+                    let on = url.query_pairs().any(|(k, v)| k == "on" && v == "1");
+                    if !name.trim().is_empty() {
+                        incognito::set_spy(&app, &name, on);
+                    }
+                }
                 "/pc-other-hide" if from_seat(&app, &me) => {
                     let id = url.query_pairs().find(|(k, _)| k == "id").and_then(|(_, v)| v.parse::<u64>().ok());
                     let hidden = url.query_pairs().any(|(k, v)| k == "hidden" && v == "1");
