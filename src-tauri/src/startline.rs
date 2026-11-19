@@ -78,7 +78,14 @@ fn signed_in(line: &str) -> (Option<u64>, String, (Option<String>, Option<String
     let account = sub.strip_prefix("USER:EVE:").and_then(|n| n.parse::<u64>().ok());
     let tier = plain(payload.get("tier"), 20).or_else(|| payload.get("tier").filter(|v| !v.is_null()).map(|v| v.to_string().chars().filter(|c| c.is_alphanumeric()).take(20).collect()));
     let extra = (plain(payload.get("name"), 64), tier);
-    (account, format!("ssotoken: JWT, claims [{}], sub kind {:?}", names.join(", "), kind), extra)
+    // What the tier and subscription claims look like (the tier word, and the subscriptions'
+    // count and kind only), to learn how EVE marks Alpha.
+    let subs = match payload.get("active_subscriptions") {
+        Some(serde_json::Value::Array(a)) => format!("{} item(s)", a.len()),
+        Some(v) => format!("a {}", if v.is_object() { "map" } else if v.is_string() { "text" } else { "value" }),
+        None => "missing".into(),
+    };
+    (account, format!("ssotoken: JWT, claims [{}], sub kind {:?}, tier {:?}, active_subscriptions {subs}", names.join(", "), kind, extra.1.clone().unwrap_or_default()), extra)
 }
 
 /// Like `account_of_window`, but never waits (None until its start-up line has been read).
