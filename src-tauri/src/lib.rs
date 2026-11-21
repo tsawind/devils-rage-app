@@ -392,6 +392,7 @@ pub fn run() {
             commands::read_log,
             commands::open_log,
             commands::open_repair,
+            commands::open_client_tools,
             commands::open_devtools,
             commands::open_admin,
             commands::reset_app,

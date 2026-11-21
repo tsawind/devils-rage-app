@@ -143,6 +143,10 @@
       <div class="l">Devil's Rage Repair<small>If the app misbehaves or won't update: reinstall the newest build, go back to stable, or start clean (your settings are backed up first). Also in the Start menu, for when the app won't open at all.</small></div>
       <button class="b" id="openRepair">Open Repair</button>
     </div>
+    <div class="row">
+      <div class="l">Devil's Rage Client Tools<small>Previews, client bars, window spots and hotkeys only: no mapper or SeAT, nothing that needs the internet. For when this app won't start. Switching closes this app; opening the app again closes Client Tools. Also in the Start menu.</small></div>
+      <button class="b" id="openTools">Switch to Client Tools</button>
+    </div>
   </section>
 
   <section>
@@ -287,6 +291,9 @@
     try { toast(await invoke("import_eveo")); } catch (e) { toast(String(e)); }
   });
   $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
+  $("openTools").addEventListener("click", async () => {
+    try { await invoke("open_client_tools"); } catch (e) { toast(String(e)); }
+  });
   $("openRepair").addEventListener("click", async () => {
     try { toast(await invoke("open_repair")); } catch (e) { toast(String(e)); }
   });
