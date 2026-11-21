@@ -109,6 +109,10 @@ jobs:
       - name: Build and upload to release ${{ needs.version.outputs.tag }}
         uses: tauri-apps/tauri-action@v0
         env:
+          # Windows: keep line numbers in a separate .pdb (the .exe doesn't grow), so a crash
+          # spot from Windows can be named (uploaded to the release below).
+          CARGO_PROFILE_RELEASE_DEBUG: ${{ matrix.platform == 'windows-latest' && 'line-tables-only' || '0' }}
+          CARGO_PROFILE_RELEASE_STRIP: ${{ matrix.platform == 'windows-latest' && 'none' || 'symbols' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -120,6 +124,18 @@ jobs:
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+      - name: Debug symbols to the release (for reading crash spots)
+        if: matrix.platform == 'windows-latest'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pdb=$(ls src-tauri/target/release/*.pdb 2>/dev/null | grep -i devils_rage_app | head -1)
+          [ -n "$pdb" ] || { echo "no .pdb found"; ls src-tauri/target/release; exit 0; }
+          cp "$pdb" "devils-rage-app-${{ needs.version.outputs.version }}.pdb"
+          gh release upload "${{ needs.version.outputs.tag }}" "devils-rage-app-${{ needs.version.outputs.version }}.pdb" --clobber -R "$GITHUB_REPOSITORY"
 
   channel:
     # Stable waits for the draft to be published (publish.yml).

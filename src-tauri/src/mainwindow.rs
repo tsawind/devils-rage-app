@@ -154,11 +154,16 @@ pub fn follow_pages(app: AppHandle) {
         let mut seen = [String::new(), String::new()];
         loop {
             tokio::time::sleep(Duration::from_secs(4)).await;
-            for (i, label) in [crate::MAPPER_VIEW, crate::PAGES_VIEW].into_iter().enumerate() {
-                let Some(win) = app.get_webview(label) else {
-                    continue;
-                };
-                let Ok(url) = win.url() else { continue };
+            // The pages' addresses are read on the main thread (mainthread.rs).
+            let urls = tauri::async_runtime::spawn_blocking(|| {
+                crate::mainthread::run(|app| [crate::MAPPER_VIEW, crate::PAGES_VIEW].map(|label| app.get_webview(label).and_then(|w| w.url().ok())))
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+            for (i, url) in urls.into_iter().enumerate() {
+                let Some(url) = url else { continue };
                 if url.as_str() == seen[i] {
                     continue;
                 }

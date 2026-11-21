@@ -26,13 +26,20 @@ use tauri::{AppHandle, Manager, Url};
 
 /// Tells the page `me` something (a window event).
 fn tell(app: &AppHandle, me: &str, event: &str, detail: serde_json::Value) {
-    if let Some(view) = app.get_webview(me) {
-        let _ = view.eval(format!(
-            "window.dispatchEvent(new CustomEvent({}, {{ detail: {} }}));",
-            serde_json::Value::String(event.to_string()),
-            detail
-        ));
-    }
+    // Called from the listening thread several times a second: the page is looked up on the
+    // main thread (mainthread.rs).
+    let _ = app;
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent({}, {{ detail: {} }}));",
+        serde_json::Value::String(event.to_string()),
+        detail
+    );
+    let me = me.to_string();
+    crate::mainthread::run(move |app| {
+        if let Some(view) = app.get_webview(&me) {
+            let _ = view.eval(script);
+        }
+    });
 }
 
 /// Where the learned activation sound is kept (the same sound for every client).
