@@ -118,7 +118,7 @@ fn running(exe: &str) -> bool {
     const NO_WINDOW: u32 = 0x0800_0000;
     let me = std::process::id().to_string();
     std::process::Command::new("tasklist")
-        .args(["/FO", "CSV", "/NH", "/FI", &format!("IMAGENAME eq {exe}")])
+        .raw_arg(format!("/FO CSV /NH /FI \"IMAGENAME eq {exe}\""))
         .creation_flags(NO_WINDOW)
         .output()
         .map(|out| others_in_tasklist(&String::from_utf8_lossy(&out.stdout), exe, &me))
@@ -145,8 +145,10 @@ pub fn close_if_running() {
     #[cfg(windows)]
     std::thread::spawn(|| {
         use std::os::windows::process::CommandExt;
-        if running(EXE) {
-            let _ = std::process::Command::new("taskkill").args(["/IM", EXE, "/F"]).creation_flags(0x0800_0000).status();
+        if held(TOOLS_LOCK) || running(EXE) {
+            // cmd's own quoting: the program's name has spaces. (Client Tools also closes
+            // itself within 2 s of seeing the app: see `setup`.)
+            let _ = std::process::Command::new("taskkill").raw_arg(format!("/IM \"{EXE}\" /F")).creation_flags(0x0800_0000).status();
             log::info!("closed Devil's Rage Client Tools: the app does previews and bars now");
         }
     });
@@ -171,6 +173,16 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
             .show(move |_| app.exit(0));
         return Ok(());
     }
+    // 21 Nov: the app was opened while Client Tools ran and both drew bars that flipped over
+    // each other. Client Tools now watches for the app and closes itself when it appears.
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if held(APP_LOCK) {
+            log::info!("the app opened: Client Tools closes and leaves it the previews and bars");
+            crate::mainthread::run(|app| app.exit(0));
+            break;
+        }
+    });
     crate::incognito::load(app);
     crate::launch::load_account_logins(app);
     #[cfg(desktop)]
