@@ -27,6 +27,7 @@ mod pcaccounts;
 mod launch;
 mod clientaudio;
 mod commands;
+mod clienttools;
 mod devrec;
 mod mainthread;
 mod eveapps;
@@ -321,8 +322,15 @@ pub fn bar_action(app: &AppHandle, action: &str) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Devil's Rage Client Tools: previews, client bars, spots and hotkeys only (clienttools.rs).
+pub fn run_client_tools() {
+    clienttools::set_on();
+    run()
+}
+
 pub fn run() {
     mainthread::log_panics();
+    let tools = clienttools::on();
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(planetscan::Engine::default())
@@ -334,7 +342,7 @@ pub fn run() {
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some(LOG_NAME.into()),
+                        file_name: Some(if tools { "client-tools".into() } else { LOG_NAME.into() }),
                     }),
                 ])
                 .build(),
@@ -442,6 +450,7 @@ pub fn run() {
             clientbar::clientbar_state,
             clientbar::clientbar_login_account,
             incognito::incognito_state,
+            incognito::character_mark,
             incognito::incognito_hide,
             clientbar::clientbar_set,
             clientbar::clientbar_corner,
@@ -525,9 +534,14 @@ pub fn run() {
             launch::open_launcher,
             launch::launcher_ready,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
             mainthread::init(&handle);
+            if tools {
+                clienttools::setup(&handle)?;
+                return Ok(());
+            }
+            clienttools::close_if_running();
             let s = settings::load(&handle);
             let version = app.package_info().version.to_string();
             log::info!("Devil's Rage {version} starting");
@@ -654,8 +668,17 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running the Devil's Rage app");
+        .build(tauri::generate_context!())
+        .expect("error while starting the Devil's Rage app")
+        .run(move |_app, event| {
+            // Client Tools has no main window: closing the last preview mustn't end it (Quit in
+            // its tray icon does).
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+                if tools {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 /// Fake address pages use to ask the app for things (see pip.js).

@@ -34,6 +34,8 @@ struct Known {
     id_names: HashMap<u64, String>,
     names: HashSet<String>,
     hidden: HashSet<String>,
+    /// 20 Nov: name → SeAT access level (ally / public; Devils aren't kept).
+    levels: HashMap<String, String>,
     saved: Saved,
 }
 
@@ -56,6 +58,9 @@ pub fn load(app: &AppHandle) {
         known.ids.insert(character.id);
         known.id_names.insert(character.id, key(&character.name));
         known.names.insert(key(&character.name));
+        if let Some(level) = character.level.as_deref().filter(|l| matches!(*l, "ally" | "public")) {
+            known.levels.insert(key(&character.name), level.to_string());
+        }
     }
     for (id, name) in &saved.mapper {
         known.ids.insert(*id);
@@ -119,6 +124,27 @@ pub fn is_public_id(id: u64) -> bool {
     }
     // Hidden by hand: by name, so look the id up.
     !known.id_names.get(&id).is_some_and(|n| known.hidden.contains(n))
+}
+
+/// 20 Nov: the mark a character's preview and client bar wear: "spy" (red ✕), "ally" (blue),
+/// "public" (purple), or none (Devils, and characters SeAT doesn't know).
+pub fn mark(name: &str) -> Option<&'static str> {
+    let guard = KNOWN.lock().unwrap();
+    let known = guard.as_ref()?;
+    let name = key(name);
+    if known.saved.spies.iter().any(|s| key(s) == name) {
+        return Some("spy");
+    }
+    match known.levels.get(&name).map(String::as_str) {
+        Some("ally") => Some("ally"),
+        Some("public") => Some("public"),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+pub fn character_mark(name: String) -> Option<&'static str> {
+    mark(&name)
 }
 
 /// Whether a character is incognito (shown in the app's own pages).

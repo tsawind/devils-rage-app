@@ -127,6 +127,9 @@ pub fn merge_imported(app: &AppHandle, imported: Vec<Group>) -> Result<usize, St
 pub struct SeatCharacter {
     pub id: u64,
     pub name: String,
+    /// 20 Nov: how much it shares in SeAT (devil, ally, public), for the marks on previews and bars.
+    #[serde(default)]
+    pub level: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

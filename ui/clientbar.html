@@ -46,6 +46,13 @@
   body.frame .title { display: block; flex: 1; align-self: stretch; line-height: calc(var(--top) - 2px); color: #c9c9d0; font-size: 12px;
                       cursor: grab; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   body.frame.locked .title { cursor: default; }
+  /* 20 Nov: how much this character shares, like Your accounts: Spy red ✕, Ally blue, Public purple. */
+  .mark { display: none; flex: none; align-self: center; width: 13px; height: 13px; margin: 0 4px 0 6px; border-radius: 50%;
+          font: 700 10px/13px sans-serif; text-align: center; color: #fff; }
+  body.mark-spy .mark { display: block; background: #d93636; border-radius: 3px; }
+  body.mark-spy .mark::before { content: "✕"; }
+  body.mark-ally .mark { display: block; background: #3d8bfd; }
+  body.mark-public .mark { display: block; background: #a370f7; }
   body.frame .b.fold, body.frame .b.drag, body.frame .gap { display: none; }
   .title.nudge { color: #ffcf5a; }
 
@@ -76,6 +83,7 @@
 <body class="right">
 <div class="ring"></div>
 <div class="bar">
+  <span class="mark" id="mark"></span>
   <span class="title" id="title" title="Drag here to move the client"></span>
   <span class="grip" id="grip" title="Drag to put the bar anywhere on its client (Left / Middle / Right in ⚙ puts it back)">⋮⋮</span>
   <button class="b fold" id="fold" title="Shrink the bar to just ⚙ and ✕">
@@ -219,6 +227,14 @@
   let loginLabel = "";
   const titleText = () => "EVE - " + NAME + (loginLabel ? " · " + loginLabel : "");
   $("title").textContent = titleText();
+  // 20 Nov: in Client Tools (no mapper), no camera or scanner pop-out buttons.
+  if (window.__CLIENT_TOOLS__) for (const id of ["cam", "pop"]) $(id).style.display = "none";
+  // 20 Nov: Spy / Ally / Public mark (checked again now and then: it can change in Your accounts).
+  const loadMark = () => invoke("character_mark", { name: NAME }).then((m) => {
+    for (const k of ["spy", "ally", "public"]) document.body.classList.toggle("mark-" + k, m === k);
+    $("mark").title = m === "spy" ? "Spy: locked on this PC, never shared" : m === "ally" ? "Ally" : m === "public" ? "Public only" : "";
+  }).catch(() => {});
+  if (!NAME.startsWith("Login ")) { loadMark(); setInterval(loadMark, 30000); }
   if (NAME.startsWith("Login ")) {
     (async () => {
       const profile = await invoke("clientbar_login_profile", { name: NAME }).catch(() => null);

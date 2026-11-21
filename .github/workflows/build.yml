@@ -106,6 +106,20 @@ jobs:
       - name: Install Tauri CLI
         run: npm install
 
+      - name: Devil's Rage Client Tools (the second program, bundled next to the app on Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: 'line-tables-only'
+          CARGO_PROFILE_RELEASE_STRIP: 'none'
+        run: |
+          # The installer lists this file among its resources, so the build checks it exists
+          # before it's made: a stand-in first, then the real program over it.
+          mkdir -p src-tauri/target/release
+          [ -s src-tauri/target/release/devils-rage-client-tools.exe ] || touch src-tauri/target/release/devils-rage-client-tools.exe
+          cargo build --release --manifest-path src-tauri/Cargo.toml --bin devils-rage-client-tools --features tauri/custom-protocol
+          test -s src-tauri/target/release/devils-rage-client-tools.exe
+
       - name: Build and upload to release ${{ needs.version.outputs.tag }}
         uses: tauri-apps/tauri-action@v0
         env:

@@ -26,6 +26,14 @@
   body.groupoff:not(.edit) #frame { border: 3px solid var(--off, #ff8c1a); }
   body.groupoff.active:not(.edit) #frame { box-shadow: inset 0 0 0 3px #adff2f; }
   body.login #name { color: #f0c040; }
+  /* 20 Nov: how much this character shares, like Your accounts: Spy red ✕, Ally blue, Public purple. */
+  #name .mark { display: none; margin-right: 5px; width: 13px; height: 13px; border-radius: 3px; vertical-align: -2px;
+                font: 700 10px/13px sans-serif; text-align: center; color: #fff; }
+  body.mark-spy #name .mark { display: inline-block; background: #d93636; }
+  body.mark-spy #name .mark::before { content: "✕"; }
+  body.mark-ally #name .mark { display: inline-block; background: #3d8bfd; border-radius: 50%; }
+  body.mark-public #name .mark { display: inline-block; background: #a370f7; border-radius: 50%; }
+  body.mark-spy #pic { filter: saturate(.55); }
   #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3;
          text-align: center; padding: 16px; color: #c98a5a; pointer-events: none; }
   /* Edit mode toolbar */
@@ -80,7 +88,15 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const qs = new URLSearchParams(location.search);
   const name = (window.__PREVIEW_NAME__ != null ? String(window.__PREVIEW_NAME__) : "") || qs.get("name") || "";
-  document.getElementById("name").textContent = name;
+  document.getElementById("name").innerHTML = '<span class="mark"></span>';
+  document.getElementById("name").append(name);
+  // 20 Nov: Spy / Ally / Public mark (checked again now and then: it can change in Your accounts).
+  const loadMark = () => invoke("character_mark", { name }).then((m) => {
+    for (const k of ["spy", "ally", "public"]) document.body.classList.toggle("mark-" + k, m === k);
+    document.querySelector("#name .mark").title = m === "spy" ? "Spy: locked on this PC, never shared" : m === "ally" ? "Ally" : m === "public" ? "Public only" : "";
+  }).catch(() => {});
+  loadMark();
+  setInterval(loadMark, 30000);
   document.title = name + " · preview";
   document.body.classList.toggle("login", /^Login \d+$/.test(name));
 

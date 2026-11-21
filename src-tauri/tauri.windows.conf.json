@@ -1,7 +1,8 @@
 {
   "bundle": {
     "resources": {
-      "../repair/target/release/devils-rage-repair.exe": "Devils Rage Repair.exe"
+      "../repair/target/release/devils-rage-repair.exe": "Devils Rage Repair.exe",
+      "target/release/devils-rage-client-tools.exe": "Devils Rage Client Tools.exe"
     },
     "windows": {
       "nsis": {

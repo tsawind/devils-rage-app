@@ -494,7 +494,7 @@ mod win {
 }
 
 fn build_bar(app: &AppHandle, name: &str) -> Option<tauri::WebviewWindow> {
-    let init = format!("window.__CLIENT_NAME__ = {};", serde_json::Value::String(name.to_string()));
+    let init = format!("window.__CLIENT_NAME__ = {}; window.__CLIENT_TOOLS__ = {};", serde_json::Value::String(name.to_string()), crate::clienttools::on());
     WebviewWindowBuilder::new(app, label_for(name), WebviewUrl::App("clientbar.html".into()))
         .initialization_script(init)
         .title(format!("{name} · bar"))
