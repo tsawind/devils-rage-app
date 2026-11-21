@@ -32,6 +32,7 @@
   <div id="bar">
     <select id="source" title="What to capture"></select>
     <button id="refresh" title="A new still of the source">⟳</button>
+    <label title="Keep the picture moving (a new picture every second)" style="display: inline-flex; align-items: center; gap: 3px"><input type="checkbox" id="live"> Live</label>
     <button id="snap" title="Save the boxes switched on (none: all of it) at full size, with every detail. Press as often as you like.">Snapshot</button>
     <button id="go" title="Record the boxes switched on (none: all of it)">● Record</button>
     <button id="opts" title="Video settings, clear boxes">⋯</button>
@@ -61,6 +62,7 @@
   try { saved = JSON.parse(localStorage.getItem("dev-video") || "{}") || {}; } catch (e) { saved = {}; }
   function keep() {
     saved.source = cur || saved.source;
+    saved.live = $("live") ? $("live").checked : saved.live;
     saved.fps = $("fps").value; saved.quality = $("quality").value; saved.size = $("size").value; saved.more = document.body.classList.contains("more");
     saved.boxes = saved.boxes || {}; if (saved.source) saved.boxes[saved.source] = boxes;
     try { localStorage.setItem("dev-video", JSON.stringify(saved)); } catch (e) {}
@@ -91,6 +93,26 @@
       if (!$("said").className) say(`${r.w} × ${r.h}: drag on the still to draw a box.`);
     } catch (e) { say(`Couldn't take a still: ${e}`, "bad"); }
   }
+  // 21 Nov: Live: a new picture every second (boxes untouched; paused while drawing one).
+  let liveBusy = false;
+  async function refreshPicture() {
+    const t = target();
+    if (!t || liveBusy || drag) return;
+    liveBusy = true;
+    try {
+      const r = await invoke("dev_video_still", { target: t });
+      const img = new Image();
+      img.onload = () => {
+        if (drag) return;
+        src = { w: r.w, h: r.h };
+        still = img;
+        if (canvas.width !== img.width || canvas.height !== img.height) { canvas.width = img.width; canvas.height = img.height; fit(); }
+        draw();
+      };
+      img.src = "data:image/jpeg;base64," + r.jpeg;
+    } catch (e) { /* the next second tries again */ } finally { liveBusy = false; }
+  }
+  setInterval(() => { if ($("live").checked && !document.hidden) refreshPicture(); }, 1000);
   // The still always fits the window, however small it's made.
   function fit() {
     if (!still) return;
@@ -153,6 +175,8 @@
     keep(); listBoxes(); say(""); loadStill();
   });
   for (const id of ["fps", "quality", "size"]) $(id).addEventListener("change", keep);
+  $("live").checked = !!saved.live;
+  $("live").addEventListener("change", () => { saved.live = $("live").checked; keep(); });
   $("refresh").addEventListener("click", loadStill);
   $("opts").addEventListener("click", () => { document.body.classList.toggle("more"); keep(); fit(); });
   // 21 Nov: Videos and Pictures where the app lives (or a folder picked here).

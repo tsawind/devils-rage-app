@@ -243,16 +243,23 @@ fn copy_then_remove(from: &std::path::Path, to: &std::path::Path) -> bool {
 
 /// The main window's handle (its whole inside: the bar and the page under it).
 fn main_handle(app: &AppHandle) -> Option<isize> {
+    // 21 Nov: kept from setup (mainthread.rs: window handles mustn't be cloned on the
+    // recording threads, which ask for this many times a second).
+    let _ = app;
+    let handle = MAIN_HWND.load(Ordering::Relaxed);
+    (handle != 0).then_some(handle)
+}
+
+static MAIN_HWND: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// The main window's handle, noted once at setup (on the main thread).
+pub fn note_main_window(window: &tauri::Window) {
     #[cfg(windows)]
-    {
-        let window = app.get_window(crate::MAIN_WINDOW)?;
-        window.hwnd().ok().map(|h| h.0 as isize)
+    if let Ok(h) = window.hwnd() {
+        MAIN_HWND.store(h.0 as isize, Ordering::Relaxed);
     }
     #[cfg(not(windows))]
-    {
-        let _ = app;
-        None
-    }
+    let _ = window;
 }
 
 /// The app window as a JPEG (None when minimised or it can't be read).
@@ -267,7 +274,9 @@ fn app_jpeg(app: &AppHandle, quality: u8) -> Option<Vec<u8>> {
 
 /// Where the main window is (its address), for the notes.
 fn page_url(app: &AppHandle) -> String {
-    crate::shown_view(app).and_then(|v| v.url().ok()).map(|u| u.to_string()).unwrap_or_default()
+    // Looked up on the main thread (mainthread.rs); the recording threads call this every second.
+    let _ = app;
+    crate::mainthread::run(|app| crate::shown_view(app).and_then(|v| v.url().ok()).map(|u| u.to_string()).unwrap_or_default()).unwrap_or_default()
 }
 
 /// The planet scan's status as JSON (null when it isn't running).

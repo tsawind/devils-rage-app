@@ -639,6 +639,7 @@ pub fn run() {
                 });
             }
 
+            devrec::note_main_window(&window);
             mainwindow::restore(&handle, &window);
             mainwindow::remember(&handle, &window);
             layout(&window);
