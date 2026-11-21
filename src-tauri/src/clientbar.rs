@@ -510,6 +510,24 @@ fn build_bar(app: &AppHandle, name: &str) -> Option<tauri::WebviewWindow> {
         .build()
         .map_err(|err| log::warn!("couldn't open the client bar for {name}: {err}"))
         .ok()
+        .inspect(tool_window)
+}
+
+/// 21 Nov: our bars and previews are helper windows, not applications: marked as tool windows
+/// they stay out of Discord's (and OBS's, and Alt+Tab's) list of windows to share, where they
+/// showed up as black "applications" next to the EVE clients.
+pub fn tool_window(window: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    if let Some(hwnd) = our_hwnd(window) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+        // SAFETY: changes the extended style bits of our own window.
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd as _, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd as _, GWL_EXSTYLE, (style | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize));
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = window;
 }
 
 /// Each bar's frame mode, for the page (clientbar_info): name -> (frame, top in CSS px).

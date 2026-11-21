@@ -332,6 +332,7 @@ fn build_preview(app: &AppHandle, name: &str) {
             return;
         }
     };
+    crate::clientbar::tool_window(&window);
     if let (Some(w), Some(h)) = (prefs.w, prefs.h) {
         let _ = window.set_size(PhysicalSize::new(
             w.max(MIN_SIZE.0 as u32),
