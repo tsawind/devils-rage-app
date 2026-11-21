@@ -229,6 +229,16 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
     profile
 }
 
+/// The profile folder a client really uses: its `/settingsprofile`, or "Default" when its start-up
+/// line has none (EVE then uses settings_Default). `None` only when the line can't be read.
+pub fn settings_folder_of_window(handle: isize) -> Option<String> {
+    if let Some(profile) = profile_of_window(handle) {
+        return Some(profile);
+    }
+    let pid = pid_of(handle)?;
+    read_line(pid).map(|line| profile_in(&line).unwrap_or_else(|| "Default".to_string()))
+}
+
 /// Processes whose start-up line is being read in the background right now.
 static READING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 

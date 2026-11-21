@@ -1197,35 +1197,80 @@ pub fn clientbar_floating(app: AppHandle, name: String, on: bool) {
 /// The Devil's window mode (windowfix.rs): close the client, switch its profile to Fixed Window at
 /// `width`×`height` (or back to Window mode), and put it in the same spot when it opens again.
 #[tauri::command]
-pub fn clientbar_window_mode(app: AppHandle, name: String, to_fixed: bool, width: i64, height: i64, floating: bool, profile: Option<String>) -> Result<String, String> {
+pub fn clientbar_window_mode(app: AppHandle, name: String, to_fixed: bool, width: i64, height: i64, floating: bool, profile: Option<String>, with_others: Option<bool>) -> Result<String, String> {
     if !(640..=7680).contains(&width) || !(480..=4320).contains(&height) {
         return Err("That size is outside 640×480 – 7680×4320.".into());
     }
     let handle = handle_of(&name).ok_or("that client isn't open")?;
-    let frame = win::frame(handle).ok_or("restore the client first (it's minimised)")?;
-    let scale = app.get_webview_window(&label_for(&name)).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
-    let (top, side) = chrome(scale);
-    let captioned = win::captioned(handle);
-    let framed_now = !captioned && !settings(&app).floating.contains(&name);
-    let to = if to_fixed {
-        // The window's spot (title bar included) becomes our title bar + the client inside it.
-        let (x, y) = if floating { (frame.x, frame.y) } else { (frame.x + side, frame.y + top) };
-        Spot { x, y, w: width as i32, h: height as i32 }
-    } else {
-        // Windows' title bar goes where ours was. w/h 0: a visible-frame spot, sized by EVE.
-        let (x, y) = if framed_now { (frame.x - side, frame.y - top) } else { (frame.x, frame.y) };
-        Spot { x, y, w: 0, h: 0 }
-    };
-    change(&app, |s| {
-        if floating {
-            s.floating.insert(name.clone());
+    // 21 Nov: the profile this client really uses (no /settingsprofile = settings_Default). Every
+    // open client in the same profile writes it again when it closes (last one closed wins), so
+    // they all have to close before the change, or it's undone.
+    let hint = profile.filter(|p| crate::profiles::safe_name(p));
+    let known = crate::startline::settings_folder_of_window(handle).filter(|p| crate::profiles::safe_name(p));
+    let folder = known.clone().or(hint.clone());
+    let others = folder.as_deref().map(|f| sharing_clients(&name, f)).unwrap_or_default();
+    if !others.is_empty() && with_others != Some(true) {
+        let folder = folder.unwrap_or_default();
+        return Err(format!(
+            "settings_{folder} is also used by {} (open now). Each client writes that profile again when it closes, so the change would be undone. Close them too (the button below), or give this account its own profile first (Your accounts).",
+            others.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    let mut clients = vec![(name.clone(), handle)];
+    clients.extend(others);
+    let mut targets = Vec::new();
+    for (client, h) in clients {
+        let Some(frame) = win::frame(h) else {
+            return Err(format!("restore {client} first (it's minimised)"));
+        };
+        let scale = app.get_webview_window(&label_for(&client)).and_then(|w| w.scale_factor().ok()).unwrap_or(1.0);
+        let (top, side) = chrome(scale);
+        let framed_now = !win::captioned(h) && !settings(&app).floating.contains(&client);
+        let to = if to_fixed {
+            // The window's spot (title bar included) becomes our title bar + the client inside it.
+            let (x, y) = if floating { (frame.x, frame.y) } else { (frame.x + side, frame.y + top) };
+            Spot { x, y, w: width as i32, h: height as i32 }
         } else {
-            s.floating.remove(&name);
+            // Windows' title bar goes where ours was. w/h 0: a visible-frame spot, sized by EVE.
+            let (x, y) = if framed_now { (frame.x - side, frame.y - top) } else { (frame.x, frame.y) };
+            Spot { x, y, w: 0, h: 0 }
+        };
+        targets.push((client, h, to));
+    }
+    change(&app, |s| {
+        for (client, _, _) in &targets {
+            if floating {
+                s.floating.insert(client.clone());
+            } else {
+                s.floating.remove(client);
+            }
         }
     });
-    let profile = profile.filter(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
-    crate::windowfix::run(app, name.clone(), handle, to_fixed, width, height, to, profile)?;
-    Ok(format!("Closing {name}… (if EVE asks, pick Quit). The app changes its profile once it's closed and tells you when to launch it again."))
+    let count = targets.len();
+    crate::windowfix::run(app, targets, to_fixed, width, height, known, hint)?;
+    Ok(if count > 1 {
+        format!("Closing {count} clients… (if EVE asks, pick Quit). The app changes their profile once they're all closed and tells you when to launch them again.")
+    } else {
+        format!("Closing {name}… (if EVE asks, pick Quit). The app changes its profile once it's closed and tells you when to launch it again.")
+    })
+}
+
+/// The other open clients (login screens too) that use this settings profile folder.
+fn sharing_clients(name: &str, folder: &str) -> Vec<(String, isize)> {
+    crate::clipboard::open_clients()
+        .into_iter()
+        .filter(|(n, h)| n != name && crate::startline::settings_folder_of_window(*h).is_some_and(|p| p.eq_ignore_ascii_case(folder)))
+        .collect()
+}
+
+/// 21 Nov: which profile folder this client uses and who else has it open right now, so the
+/// window-mode menu can say so before anything closes.
+#[tauri::command]
+pub fn clientbar_profile_sharers(name: String) -> serde_json::Value {
+    let Some(handle) = handle_of(&name) else { return serde_json::json!({}) };
+    let folder = crate::startline::settings_folder_of_window(handle).filter(|p| crate::profiles::safe_name(p));
+    let others: Vec<String> = folder.as_deref().map(|f| sharing_clients(&name, f)).unwrap_or_default().into_iter().map(|(n, _)| n).collect();
+    serde_json::json!({ "profile": folder, "others": others })
 }
 
 #[tauri::command]

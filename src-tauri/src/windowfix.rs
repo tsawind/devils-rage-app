@@ -166,32 +166,53 @@ fn tell(app: &AppHandle, title: &str, text: String, kind: MessageDialogKind) {
     app.dialog().message(text).title(title).kind(kind).show(|_| {});
 }
 
-/// Close the client, wait for EVE to write its profile, then switch that profile's display mode.
-/// `to` = where the window should be when it opens again; `profile_hint` = the account's own
-/// profile, used only if no profile file changed when the client closed.
-pub fn run(app: AppHandle, name: String, handle: isize, to_fixed: bool, width: i64, height: i64, to: Spot, profile_hint: Option<String>) -> Result<(), String> {
+/// Close the clients, wait for EVE to write their profile, then switch that profile's display mode.
+/// `clients` = (name, window, where it should be when it opens again); more than one only when
+/// they share the profile (each rewrites it as it closes). `known` = the profile folder read from
+/// the client's start-up line; `profile_hint` = the account's own profile, used only if neither
+/// that nor a changed file says which profile it is.
+pub fn run(app: AppHandle, clients: Vec<(String, isize, Spot)>, to_fixed: bool, width: i64, height: i64, known: Option<String>, profile_hint: Option<String>) -> Result<(), String> {
     let root = crate::profiles::root()?;
     let before = yamls(&root);
-    if !crate::clientbar::close_window(handle) {
-        return Err("couldn't ask the client to close".into());
+    let Some((name, _, _)) = clients.first().cloned() else { return Err("no client".into()) };
+    for (client, handle, _) in &clients {
+        if !crate::clientbar::close_window(*handle) {
+            return Err(format!("couldn't ask {client} to close"));
+        }
     }
     std::thread::Builder::new()
         .name("window-fix".into())
         .spawn(move || {
+            let names: Vec<String> = clients.iter().map(|(n, _, _)| n.clone()).collect();
+            let who = names.join(", ");
             let title = format!("{name} · window mode");
-            // 1. The client closes (EVE may ask to confirm first: up to 90 s).
+            // 1. The clients close (EVE may ask to confirm first: up to 90 s).
             let started = Instant::now();
-            while crate::clipboard::open_clients().iter().any(|(_, h)| *h == handle) {
+            loop {
+                let open = crate::clipboard::open_clients();
+                let still: Vec<&String> = clients.iter().filter(|(_, h, _)| open.iter().any(|(_, o)| o == h)).map(|(n, _, _)| n).collect();
+                if still.is_empty() {
+                    break;
+                }
                 if started.elapsed() > Duration::from_secs(90) {
-                    tell(&app, &title, format!("{name} didn't close, so nothing was changed. If EVE asked to confirm, try again and pick Quit."), MessageDialogKind::Warning);
+                    let still = still.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", ");
+                    tell(&app, &title, format!("{still} didn't close, so nothing was changed. If EVE asked to confirm, try again and pick Quit."), MessageDialogKind::Warning);
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(250));
             }
             let closed = Instant::now();
-            // 2. EVE writes its profile as it closes: the file that changed is this client's.
-            let mut file: Option<PathBuf> = None;
-            while closed.elapsed() < Duration::from_secs(20) {
+            // 2. Which profile: the start-up line says; else EVE writes its profile as it closes,
+            // so the one file that changed is this client's; else the account's own profile.
+            let mut file: Option<PathBuf> = known.as_ref().map(|p| root.join(format!("settings_{p}")).join("core_public__.yaml"));
+            if let Some(f) = &file {
+                // Known: still wait (up to 15 s) for EVE to write it, so ours comes after.
+                let was = before.get(f).copied();
+                while closed.elapsed() < Duration::from_secs(15) && std::fs::metadata(f).and_then(|m| m.modified()).ok() == was {
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+            }
+            while file.is_none() && closed.elapsed() < Duration::from_secs(20) {
                 let now = yamls(&root);
                 let changed: Vec<&PathBuf> = now.iter().filter(|(p, t)| before.get(*p).is_none_or(|b| b != *t)).map(|(p, _)| p).collect();
                 if changed.len() == 1 {
@@ -203,14 +224,14 @@ pub fn run(app: AppHandle, name: String, handle: isize, to_fixed: bool, width: i
             let file = match file.or_else(|| profile_hint.as_ref().map(|p| root.join(format!("settings_{p}")).join("core_public__.yaml"))) {
                 Some(f) if f.exists() => f,
                 _ => {
-                    tell(&app, &title, format!("{name} closed, but I couldn't tell which profile it uses, so nothing was changed."), MessageDialogKind::Warning);
+                    tell(&app, &title, format!("{who} closed, but I couldn't tell which profile it uses (or its file isn't there yet), so nothing was changed."), MessageDialogKind::Warning);
                     return;
                 }
             };
-            // 3. Quiet for 2 s (and at least 2 s after closing) before touching it.
+            // 3. Quiet for 3 s (and at least 3 s after the last one closed) before touching it.
             let mut last = std::fs::metadata(&file).and_then(|m| m.modified()).ok();
             let mut quiet_since = Instant::now();
-            while closed.elapsed() < Duration::from_secs(2) || quiet_since.elapsed() < Duration::from_secs(2) {
+            while closed.elapsed() < Duration::from_secs(3) || quiet_since.elapsed() < Duration::from_secs(3) {
                 std::thread::sleep(Duration::from_millis(250));
                 let now = std::fs::metadata(&file).and_then(|m| m.modified()).ok();
                 if now != last {
@@ -221,8 +242,17 @@ pub fn run(app: AppHandle, name: String, handle: isize, to_fixed: bool, width: i
                     break;
                 }
             }
-            if crate::clipboard::open_clients().iter().any(|(n, _)| *n == name) {
-                tell(&app, &title, format!("{name} is open again, so nothing was changed."), MessageDialogKind::Warning);
+            let profile = file.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let open = crate::clipboard::open_clients();
+            if let Some((again, _)) = open.iter().find(|(n, _)| names.contains(n)) {
+                tell(&app, &title, format!("{again} is open again, so nothing was changed."), MessageDialogKind::Warning);
+                return;
+            }
+            // Someone else opened in the same profile meanwhile: it would write it back as it closes.
+            let short = profile.trim_start_matches("settings_");
+            let sharing: Vec<String> = open.iter().filter(|(_, h)| crate::startline::settings_folder_of_window(*h).is_some_and(|p| p.eq_ignore_ascii_case(short))).map(|(n, _)| n.clone()).collect();
+            if !sharing.is_empty() {
+                tell(&app, &title, format!("{} opened in {profile} meanwhile, so nothing was changed (it would undo it when it closes). Close it and try again.", sharing.join(", ")), MessageDialogKind::Warning);
                 return;
             }
             // 4. Back up, then write the mode and size.
@@ -242,25 +272,27 @@ pub fn run(app: AppHandle, name: String, handle: isize, to_fixed: bool, width: i
                 tell(&app, &title, format!("Couldn't write the profile file ({err}); nothing was changed."), MessageDialogKind::Error);
                 return;
             }
-            PENDING.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.clone(), (to_fixed, to));
-            if to_fixed {
-                crate::clientwindows::remember_one(&app, &name, to);
-                crate::clientwindows::note_mode(&app, &name, true);
+            for (client, _, to) in &clients {
+                PENDING.lock().unwrap().get_or_insert_with(HashMap::new).insert(client.clone(), (to_fixed, *to));
+                if to_fixed {
+                    crate::clientwindows::remember_one(&app, client, *to);
+                    crate::clientwindows::note_mode(&app, client, true);
+                }
             }
-            let profile = file.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            log::info!("window mode: {profile} -> {} for {} client(s)", if to_fixed { "fixed" } else { "windowed" }, clients.len());
             let mode = if to_fixed { "Fixed Window" } else { "Window mode" };
-            tell(
-                &app,
-                &title,
-                format!("{profile} is now {mode} at {width}×{height} (backup beside it).\n\nLaunch {name} again: it opens in the same spot."),
-                MessageDialogKind::Info,
-            );
+            let shared = if profile.eq_ignore_ascii_case("settings_Default") {
+                "\n\nsettings_Default is EVE's shared profile: every account without its own profile opens this way now."
+            } else {
+                ""
+            };
+            let again = if clients.len() > 1 { format!("Launch {who} again: each opens in its same spot.") } else { format!("Launch {name} again: it opens in the same spot.") };
+            tell(&app, &title, format!("{profile} is now {mode} at {width}×{height} (backup beside it).\n\n{again}{shared}"), MessageDialogKind::Info);
         })
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// A filename-safe local-ish time stamp (seconds since 1970; no extra crate).
 fn chrono_like_now() -> u64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }

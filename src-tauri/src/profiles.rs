@@ -90,8 +90,24 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 // ---- Where things are -------------------------------------------------------------------------
 
 fn cache_root() -> Option<PathBuf> {
-    let root = dirs::data_local_dir()?.join(r"CCP\EVE\c_eve_sharedcache_tq_tranquility");
-    root.is_dir().then_some(root)
+    let eve = dirs::data_local_dir()?.join(r"CCP\EVE");
+    let root = eve.join("c_eve_sharedcache_tq_tranquility");
+    if root.is_dir() {
+        return Some(root);
+    }
+    // 21 Nov: EVE installed somewhere else (D:\Games\EVE → d_games_eve_sharedcache_tq_tranquility):
+    // the Tranquility folder whose profiles were used last.
+    let used = |dir: &Path| -> Option<SystemTime> {
+        std::fs::read_dir(dir).ok()?.flatten().filter(|d| profile_of(&d.file_name().to_string_lossy()).is_some()).filter_map(|d| std::fs::metadata(d.path().join("core_public__.yaml")).and_then(|m| m.modified()).ok()).max()
+    };
+    std::fs::read_dir(&eve)
+        .ok()?
+        .flatten()
+        .map(|d| d.path())
+        .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().ends_with("_tq_tranquility")))
+        .filter_map(|p| used(&p).map(|t| (t, p)))
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, p)| p)
 }
 
 pub(crate) fn root() -> Result<PathBuf, String> {

@@ -488,6 +488,7 @@ pub fn run() {
             clientbar::clientbar_buttons,
             clientbar::clientbar_floating,
             clientbar::clientbar_window_mode,
+            clientbar::clientbar_profile_sharers,
             clientbar::clientbar_move_bar,
             clientbar::clientbar_popout,
             clientbar::clientbar_resize_live,
