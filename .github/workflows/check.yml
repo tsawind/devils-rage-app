@@ -38,10 +38,6 @@ jobs:
           cargo test --manifest-path repair/Cargo.toml
           cargo build --release --manifest-path repair/Cargo.toml
 
-      - name: Stand-in for Client Tools (the installer's resources must exist to compile)
-        shell: bash
-        run: mkdir -p src-tauri/target/release && touch src-tauri/target/release/devils-rage-client-tools.exe
-
       - name: Compile
         run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 

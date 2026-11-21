@@ -13,7 +13,9 @@ use tauri::tray::TrayIconBuilder;
 use tauri::AppHandle;
 
 /// The program's file name next to the app (bundled by the Windows installer).
-pub const EXE: &str = "Devils Rage Client Tools.exe";
+pub const EXE: &str = "devils-rage-client-tools.exe";
+/// The renamed copy dev.227–237 also installed (still closed when found).
+pub const OLD_EXE: &str = "Devils Rage Client Tools.exe";
 /// The app's own program name (installed as devils-rage-app.exe).
 pub const APP_EXE: &str = "devils-rage-app.exe";
 
@@ -145,10 +147,12 @@ pub fn close_if_running() {
     #[cfg(windows)]
     std::thread::spawn(|| {
         use std::os::windows::process::CommandExt;
-        if held(TOOLS_LOCK) || running(EXE) {
+        if held(TOOLS_LOCK) || running(EXE) || running(OLD_EXE) {
             // cmd's own quoting: the program's name has spaces. (Client Tools also closes
             // itself within 2 s of seeing the app: see `setup`.)
-            let _ = std::process::Command::new("taskkill").raw_arg(format!("/IM \"{EXE}\" /F")).creation_flags(0x0800_0000).status();
+            for exe in [EXE, OLD_EXE] {
+                let _ = std::process::Command::new("taskkill").raw_arg(format!("/IM \"{exe}\" /F")).creation_flags(0x0800_0000).status();
+            }
             log::info!("closed Devil's Rage Client Tools: the app does previews and bars now");
         }
     });
@@ -257,6 +261,7 @@ mod tests {
         assert!(others_in_tasklist(out, "devils-rage-app.exe", "999"));
         assert!(!others_in_tasklist(out, "devils-rage-app.exe", "4412"));
         assert!(!others_in_tasklist("INFO: No tasks are running which match the specified criteria.", "devils-rage-app.exe", "1"));
-        assert!(others_in_tasklist("\"Devils Rage Client Tools.exe\",\"77\",\"Console\"", EXE, "1"));
+        assert!(others_in_tasklist("\"Devils Rage Client Tools.exe\",\"77\",\"Console\"", OLD_EXE, "1"));
+        assert!(others_in_tasklist("\"devils-rage-client-tools.exe\",\"78\",\"Console\"", EXE, "1"));
     }
 }
