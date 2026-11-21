@@ -255,6 +255,35 @@
     tr.after(row);
   }
 
+  let commonOv = null, commonOvCount = 0;
+  // EVE's names for the parts of the overview, as you'd say them.
+  const OV_PARTS = { overviewProfilePresets: "Saved presets", tabsettings_new: "Tabs", tabsettings: "Tabs (old style)", tabsByWindowInstanceID: "Tabs per overview window",
+    overviewColumns: "Columns shown", overviewColumnOrder: "Column order", shipLabels: "Ship labels", activeOverviewPreset: "Active preset",
+    stateColors: "State colours", backgroundOrder2: "Background order", backgroundStates2: "Backgrounds shown", flagOrder2: "Flag order", flagStates2: "Flags shown",
+    stateBlinks: "Blinking states", useSmallText: "Small text", useSmallColorTags: "Small colour tags", hideCorpTicker: "Corp ticker", targetCrosshair: "Target crosshair" };
+  // The parts of the overview (and the saved presets) that differ from the one most accounts have.
+  function toggleOvDiff(tr, a) {
+    const next = tr.nextElementSibling;
+    if (next && next.classList.contains("keydiff")) { next.remove(); return; }
+    const ref = commonOv || {}, row = el("tr", "keydiff"), td = el("td");
+    td.colSpan = 9;
+    td.append(el("div", "muted", `Overview parts that differ from the one ${commonOvCount} accounts share${commonOv ? " (e.g. account " + commonOv.id + " in settings_" + commonOv.folder + ")" : ""}:`));
+    const mine = a.overview_parts || {}, theirs = ref.overview_parts || {};
+    const parts = [...new Set([...Object.keys(mine), ...Object.keys(theirs)])].filter(k => k !== "overviewProfilePresets" && mine[k] !== theirs[k]);
+    const list = el("ul");
+    parts.forEach(k => list.append(el("li", null, `${OV_PARTS[k] || k}${!mine[k] ? " (not set here)" : !theirs[k] ? " (only here)" : ""}`)));
+    const myP = a.overview_presets || {}, refP = ref.overview_presets || {};
+    const pnames = [...new Set([...Object.keys(myP), ...Object.keys(refP)])].sort();
+    const onlyHere = pnames.filter(n => myP[n] && !refP[n]), missing = pnames.filter(n => !myP[n] && refP[n]), changed = pnames.filter(n => myP[n] && refP[n] && myP[n] !== refP[n]);
+    if (changed.length) list.append(el("li", null, `Presets set up differently: ${changed.join(", ")}`));
+    if (missing.length) list.append(el("li", null, `Presets missing here: ${missing.join(", ")}`));
+    if (onlyHere.length) list.append(el("li", null, `Presets only here: ${onlyHere.join(", ")}`));
+    if (!list.children.length) list.append(el("li", "muted", "Only EVE's own bookkeeping differs."));
+    td.append(list);
+    row.append(td);
+    tr.after(row);
+  }
+
   function renderAccounts() {
     const all = look.folders.flatMap(f => f.accounts.map(a => ({ ...a, folder: f.name })));
     const keyL = lettering(all.map(a => a.keys_fp));
@@ -267,6 +296,10 @@
     const topFp = Object.entries(keyCount).sort((x, y) => y[1] - x[1])[0]?.[0];
     commonKeys = all.find(a => a.keys_fp === topFp) || null;
     commonKeysCount = keyCount[topFp] || 0;
+    const ovCount = {}; all.forEach(a => { if (a.overview_fp) ovCount[a.overview_fp] = (ovCount[a.overview_fp] || 0) + 1; });
+    const topOv = Object.entries(ovCount).sort((x, y) => y[1] - x[1])[0]?.[0];
+    commonOv = all.find(a => a.overview_fp === topOv) || null;
+    commonOvCount = ovCount[topOv] || 0;
     const t = $("accounts"); t.innerHTML = "";
     const head = el("tr");
     ["Profile", "Whose", "Account", "Keys", "Overview", "Effects", "Graphics tier", "Saved", "Copies elsewhere"].forEach(h => head.append(el("th", null, h)));
@@ -282,6 +315,12 @@
         keys.append(why);
       }
       const ov = el("td"); ov.append(ovL(a.overview_fp), el("span", "muted", a.overview_preset ? " " + a.overview_preset : ""));
+      if (a.overview_fp && commonOv && a.overview_fp !== commonOv.overview_fp) {
+        const why = el("a", "muted", " what differs");
+        why.href = "#"; why.style.marginLeft = "4px";
+        why.addEventListener("click", (e) => { e.preventDefault(); toggleOvDiff(tr, a); });
+        ov.append(why);
+      }
       const ef = el("td");
       if (a.error) ef.append(el("span", "bad", "couldn't read: " + a.error));
       else {

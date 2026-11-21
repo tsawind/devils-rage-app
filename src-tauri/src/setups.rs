@@ -131,6 +131,10 @@ struct AccountLook {
     key_list: BTreeMap<String, String>,
     overview_fp: String,
     overview_preset: String,
+    /// 21 Nov: each part of the overview (tabs, columns, ship labels…) and each saved preset by
+    /// name, as fingerprints, so the page can say which parts differ.
+    overview_parts: BTreeMap<String, String>,
+    overview_presets: BTreeMap<String, String>,
     effects: BTreeMap<String, String>,
 }
 
@@ -178,6 +182,8 @@ fn account_look(dir: &Path, file: &str, id: u64, modified: u64) -> AccountLook {
         key_list: BTreeMap::new(),
         overview_fp: String::new(),
         overview_preset: String::new(),
+        overview_parts: BTreeMap::new(),
+        overview_presets: BTreeMap::new(),
         effects: BTreeMap::new(),
     };
     match read_blue(&dir.join(file)) {
@@ -191,6 +197,17 @@ fn account_look(dir: &Path, file: &str, id: u64, modified: u64) -> AccountLook {
             if let Some(overview) = section(&root, "overview") {
                 look.overview_fp = overview.fingerprint();
                 look.overview_preset = overview.get("activeOverviewPreset").map(|v| unstamped(v).text()).unwrap_or_default();
+                for (key, value) in overview.entries() {
+                    let key = key.text();
+                    // Kept by EVE for itself (undo, history), not settings you'd copy.
+                    if matches!(key.as_str(), "restoreData" | "presetHistoryKeys" | "overviewProfilePresets_notSaved") {
+                        continue;
+                    }
+                    look.overview_parts.insert(key, unstamped(value).fingerprint());
+                }
+                if let Some(presets) = overview.get("overviewProfilePresets").map(unstamped) {
+                    look.overview_presets = presets.entries().iter().map(|(name, preset)| (name.text(), unstamped(preset).fingerprint())).collect();
+                }
             }
             if let Some(ui) = section(&root, "ui") {
                 for key in EFFECTS {
