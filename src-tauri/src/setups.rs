@@ -127,6 +127,8 @@ struct AccountLook {
     error: Option<String>,
     keys: usize,
     keys_fp: String,
+    /// 21 Nov: each shortcut as you'd read it ("Refresh D-Scan" → "Mouse 4"), for comparing.
+    key_list: BTreeMap<String, String>,
     overview_fp: String,
     overview_preset: String,
     effects: BTreeMap<String, String>,
@@ -170,6 +172,7 @@ fn account_look(dir: &Path, file: &str, id: u64, modified: u64) -> AccountLook {
         error: None,
         keys: 0,
         keys_fp: String::new(),
+        key_list: BTreeMap::new(),
         overview_fp: String::new(),
         overview_preset: String::new(),
         effects: BTreeMap::new(),
@@ -180,6 +183,7 @@ fn account_look(dir: &Path, file: &str, id: u64, modified: u64) -> AccountLook {
             if let Some(keys) = section(&root, "cmd").and_then(|c| c.get("customCmds")).map(unstamped) {
                 look.keys = keys.entries().len();
                 look.keys_fp = keys.fingerprint();
+                look.key_list = keys.entries().iter().map(|(k, v)| (command_name(&k.text()), combo(unstamped(v)))).collect();
             }
             if let Some(overview) = section(&root, "overview") {
                 look.overview_fp = overview.fingerprint();
@@ -195,6 +199,89 @@ fn account_look(dir: &Path, file: &str, id: u64, modified: u64) -> AccountLook {
         }
     }
     look
+}
+
+/// "CmdRefreshDirectionalScan" → "Refresh Directional Scan".
+fn command_name(cmd: &str) -> String {
+    let bare = cmd.strip_prefix("Cmd").unwrap_or(cmd).replace('_', " ");
+    let mut out = String::new();
+    let chars: Vec<char> = bare.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        let starts_word = i > 0 && c.is_uppercase() && (chars[i - 1].is_lowercase() || chars.get(i + 1).is_some_and(|n| n.is_lowercase()) && chars[i - 1] != ' ');
+        if starts_word && !out.ends_with(' ') {
+            out.push(' ');
+        }
+        out.push(*c);
+    }
+    out
+}
+
+/// A shortcut (Windows key codes) as you'd read it: "Ctrl+F", "Mouse 4", "not set".
+fn combo(value: &Blue) -> String {
+    match value {
+        Blue::Tuple(keys) | Blue::List(keys) if !keys.is_empty() => {
+            keys.iter().map(|k| if let Blue::Int(code) = k { key_name(*code) } else { k.text() }).collect::<Vec<_>>().join("+")
+        }
+        Blue::None | Blue::Tuple(_) | Blue::List(_) => "not set".into(),
+        other => other.text(),
+    }
+}
+
+/// A Windows key code's name.
+fn key_name(code: i64) -> String {
+    let named = match code {
+        1 => "Left click",
+        2 => "Right click",
+        4 => "Middle click",
+        5 => "Mouse 4",
+        6 => "Mouse 5",
+        8 => "Backspace",
+        9 => "Tab",
+        13 => "Enter",
+        16 => "Shift",
+        17 => "Ctrl",
+        18 => "Alt",
+        19 => "Pause",
+        20 => "Caps Lock",
+        27 => "Esc",
+        32 => "Space",
+        33 => "Page Up",
+        34 => "Page Down",
+        35 => "End",
+        36 => "Home",
+        37 => "Left",
+        38 => "Up",
+        39 => "Right",
+        40 => "Down",
+        45 => "Insert",
+        46 => "Delete",
+        106 => "Num *",
+        107 => "Num +",
+        109 => "Num -",
+        110 => "Num .",
+        111 => "Num /",
+        186 => ";",
+        187 => "=",
+        188 => ",",
+        189 => "-",
+        190 => ".",
+        191 => "/",
+        192 => "`",
+        219 => "[",
+        220 => "\\",
+        221 => "]",
+        222 => "'",
+        _ => "",
+    };
+    if !named.is_empty() {
+        return named.to_string();
+    }
+    match code {
+        48..=57 | 65..=90 => char::from(code as u8).to_string(),
+        96..=105 => format!("Num {}", code - 96),
+        112..=135 => format!("F{}", code - 111),
+        _ => format!("key {code}"),
+    }
 }
 
 /// The open windows of a character file and the client sizes they were placed at.
@@ -337,6 +424,20 @@ pub fn setups_compare(files: Vec<String>) -> Result<Vec<serde_json::Value>, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shortcuts_read_like_eves_own_settings() {
+        assert_eq!(command_name("CmdRefreshDirectionalScan"), "Refresh Directional Scan");
+        assert_eq!(command_name("CmdFleetBroadcast_HealArmor"), "Fleet Broadcast Heal Armor");
+        assert_eq!(command_name("CmdSendBroadcast_WarpToItemID"), "Send Broadcast Warp To Item ID");
+        assert_eq!(command_name("CmdTagItem_ABCDEFGHI"), "Tag Item ABCDEFGHI");
+        assert_eq!(combo(&Blue::Tuple(vec![Blue::Int(5)])), "Mouse 4");
+        assert_eq!(combo(&Blue::Tuple(vec![Blue::Int(17), Blue::Int(70)])), "Ctrl+F");
+        assert_eq!(combo(&Blue::Tuple(vec![Blue::Int(109)])), "Num -");
+        assert_eq!(combo(&Blue::None), "not set");
+        assert_eq!(key_name(113), "F2");
+        assert_eq!(key_name(220), "\\");
+    }
 
     const YAML: &str = "audio:\n  masterVolume: [1, 0.5]\ndevice:\n  FixedWindow: [1, 0]\n  FixedWindowSettings:\n  - 134394192932409075\n  - {adapter: 0, height: 1056, presentInterval: 0, width: 1920}\n  UIScaleWindowed: [1, 0.9]\n  WindowMode: [1, 1]\n  WindowedResolution: [1, null]\n  WindowedSettings:\n  - 134394164690872917\n  - {adapter: 0, height: 1024, left: -7, presentInterval: 0, showState: 0, top: 1056,\n    width: 1918}\n  antiAliasing: [1, 0]\ngeneric: {}\n";
 

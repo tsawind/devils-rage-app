@@ -44,6 +44,9 @@
   .okc { color: var(--ok); }
   svg.map { width: 100%; max-width: 760px; display: block; margin: 6px 0 10px; background: #0a0a0d; border: 1px solid var(--line); border-radius: 8px; }
   .pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .keydiff td { background: #101014; padding: 6px 10px; }
+  .keytable { border-collapse: collapse; margin-top: 4px; font-size: 12px; }
+  .keytable th, .keytable td { padding: 2px 10px 2px 0; text-align: left; }
   .pick label { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
   .pick label.on { border-color: var(--red-hi); background: #1c0d0e; }
   .pick input { display: none; }
@@ -232,6 +235,26 @@
     });
   }
 
+  let commonKeys = null, commonKeysCount = 0;
+  // The shortcuts that differ between this account and the set most accounts have, in a row under it.
+  function toggleKeyDiff(tr, a) {
+    const next = tr.nextElementSibling;
+    if (next && next.classList.contains("keydiff")) { next.remove(); return; }
+    const ref = commonKeys?.key_list || {}, mine = a.key_list || {};
+    const names = [...new Set([...Object.keys(ref), ...Object.keys(mine)])].sort();
+    const rows = names.filter(n => (ref[n] || "not set") !== (mine[n] || "not set"));
+    const row = el("tr", "keydiff"), td = el("td");
+    td.colSpan = 9;
+    td.append(el("div", "muted", `Shortcuts that differ from the set ${commonKeysCount} accounts share${commonKeys ? " (e.g. account " + commonKeys.id + " in settings_" + commonKeys.folder + ")" : ""}:`));
+    const list = el("table", "keytable");
+    const h = el("tr"); ["Shortcut", "This account", "Most accounts"].forEach(x => h.append(el("th", null, x))); list.append(h);
+    rows.forEach(n => { const r = el("tr"); r.append(el("td", null, n), el("td", null, mine[n] || "not set"), el("td", "muted", ref[n] || "not set")); list.append(r); });
+    if (!rows.length) list.append(el("tr")).append(el("td", "muted", "Only the order differs."));
+    td.append(list);
+    row.append(td);
+    tr.after(row);
+  }
+
   function renderAccounts() {
     const all = look.folders.flatMap(f => f.accounts.map(a => ({ ...a, folder: f.name })));
     const keyL = lettering(all.map(a => a.keys_fp));
@@ -239,6 +262,11 @@
     const fx = (a) => EFFECTS.map(([k]) => a.effects[k] ?? "?").join("");
     const fxL = lettering(all.map(a => Object.keys(a.effects).length ? fx(a) : ""));
     const copies = {}; all.forEach(a => { (copies[a.id] = copies[a.id] || []).push(a); });
+    // The keys most accounts share (the reference "what differs" compares against).
+    const keyCount = {}; all.forEach(a => { if (a.keys_fp) keyCount[a.keys_fp] = (keyCount[a.keys_fp] || 0) + 1; });
+    const topFp = Object.entries(keyCount).sort((x, y) => y[1] - x[1])[0]?.[0];
+    commonKeys = all.find(a => a.keys_fp === topFp) || null;
+    commonKeysCount = keyCount[topFp] || 0;
     const t = $("accounts"); t.innerHTML = "";
     const head = el("tr");
     ["Profile", "Whose", "Account", "Keys", "Overview", "Effects", "Graphics tier", "Saved", "Copies elsewhere"].forEach(h => head.append(el("th", null, h)));
@@ -246,6 +274,13 @@
     all.forEach(a => {
       const tr = el("tr");
       const keys = el("td"); keys.append(keyL(a.keys_fp), el("span", "muted", a.keys_fp ? ` ${a.keys} custom` : ""));
+      // 21 Nov: click to see which shortcuts differ from the set most accounts have.
+      if (a.keys_fp && commonKeys && a.keys_fp !== commonKeys.keys_fp) {
+        const why = el("a", "muted", " what differs");
+        why.href = "#"; why.style.marginLeft = "4px";
+        why.addEventListener("click", (e) => { e.preventDefault(); toggleKeyDiff(tr, a); });
+        keys.append(why);
+      }
       const ov = el("td"); ov.append(ovL(a.overview_fp), el("span", "muted", a.overview_preset ? " " + a.overview_preset : ""));
       const ef = el("td");
       if (a.error) ef.append(el("span", "bad", "couldn't read: " + a.error));
