@@ -28,6 +28,89 @@ pub fn on() -> bool {
     ON.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// 21 Nov: one copy of each program at a time. Two copies of the app (or the app and Client
+/// Tools) each draw their own client bars and keep stacking them just above the client, so the
+/// bars flip back and forth. Each program holds a named lock while it runs.
+pub const APP_LOCK: &str = "DevilsRageApp";
+pub const TOOLS_LOCK: &str = "DevilsRageClientTools";
+
+/// Take this program's lock for as long as it runs. False: another copy already holds it.
+#[cfg(windows)]
+pub fn claim(lock: &str) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    let name: Vec<u16> = format!("Local\\{lock}").encode_utf16().chain([0]).collect();
+    // SAFETY: a named mutex; the handle is kept (never closed) while this program runs.
+    unsafe {
+        let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
+        if handle.is_null() {
+            return true;
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            CloseHandle(handle);
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(not(windows))]
+pub fn claim(_lock: &str) -> bool {
+    true
+}
+
+/// Whether another program holds this lock right now.
+#[cfg(windows)]
+pub fn held(lock: &str) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
+    let name: Vec<u16> = format!("Local\\{lock}").encode_utf16().chain([0]).collect();
+    // SAFETY: opens (and closes again) a named mutex, only to see that it exists.
+    unsafe {
+        let handle = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr());
+        if handle.is_null() {
+            return false;
+        }
+        CloseHandle(handle);
+    }
+    true
+}
+
+#[cfg(not(windows))]
+pub fn held(_lock: &str) -> bool {
+    false
+}
+
+/// A second copy of the app was started: bring the running one's window forward instead.
+#[cfg(windows)]
+pub fn show_running_app() {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, GetWindowThreadProcessId, SetForegroundWindow, ShowWindow, SW_RESTORE};
+    unsafe extern "system" fn each(hwnd: HWND, _: LPARAM) -> i32 {
+        let mut buf = [0u16; 128];
+        // SAFETY: reads a window's title into our buffer.
+        let n = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        let title = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+        let mut pid = 0u32;
+        // SAFETY: the window's process id.
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if title.starts_with("Devil's Rage — ") && pid != std::process::id() {
+            // SAFETY: restore and focus the running app's main window.
+            unsafe {
+                ShowWindow(hwnd, SW_RESTORE);
+                SetForegroundWindow(hwnd);
+            }
+            return 0;
+        }
+        1
+    }
+    // SAFETY: walks the top-level windows with the callback above.
+    unsafe { EnumWindows(Some(each), 0) };
+}
+
+#[cfg(not(windows))]
+pub fn show_running_app() {}
+
 /// Whether a program with this file name is running (other than this process).
 #[cfg(windows)]
 fn running(exe: &str) -> bool {
@@ -72,7 +155,12 @@ pub fn close_if_running() {
 /// Start Client Tools: refuse while the app is open, else previews, bars, spots and hotkeys.
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     log::info!("Devil's Rage Client Tools {} starting", app.package_info().version);
-    if running(APP_EXE) {
+    if !claim(TOOLS_LOCK) {
+        log::info!("Client Tools is already running: this copy closes");
+        app.exit(0);
+        return Ok(());
+    }
+    if held(APP_LOCK) || running(APP_EXE) {
         log::info!("the app is open: Client Tools leaves it the previews and bars");
         use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
         let app = app.clone();

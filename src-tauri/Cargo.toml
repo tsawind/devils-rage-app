@@ -37,7 +37,7 @@ jpeg-encoder = "0.6"
 # The title of the window in front ("EVE - <character>"), to know whose scan was copied.
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.59"
-features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_Graphics_Gdi", "Win32_Storage_Xps"]
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_System_Threading", "Win32_Security"]
 
 # The planet scan: Windows' own window capture (full size, as fast as EVE draws), via Direct3D.
 [target.'cfg(windows)'.dependencies.windows]

@@ -334,6 +334,19 @@ pub fn run_client_tools() {
 pub fn run() {
     mainthread::log_panics();
     let tools = clienttools::on();
+    // 21 Nov: one copy of the app at a time (two copies drew two sets of client bars that
+    // fought over the same spot). A second start brings the running app forward instead.
+    // A restart (the app's Reset, an update) starts the new copy just before the old one ends:
+    // wait up to 6 s for it to go.
+    if !tools && !(0..24).any(|try_no| {
+        if try_no > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        clienttools::claim(clienttools::APP_LOCK)
+    }) {
+        clienttools::show_running_app();
+        return;
+    }
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(planetscan::Engine::default())
