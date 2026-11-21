@@ -78,6 +78,36 @@
   .menu button.go { width: 100%; background: #1c0d0e; border: 1px solid var(--red-hi); color: var(--text); border-radius: 6px; padding: 3px 6px; cursor: pointer; font: inherit; }
   .menu button.go.sure { background: var(--red-hi); }
   hr { border: 0; border-top: 1px solid #25252c; margin: 6px 0; }
+  /* 21 Nov: ⚙ simple at first glance; the rest folded away. */
+  .menu .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .menu .head .m { margin: 0; white-space: nowrap; }
+  .menu .sect { font-weight: 600; margin: 6px 0 4px; }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .seg button { display: grid; justify-items: center; gap: 1px; padding: 5px 2px 4px; background: #121216; border: 1px solid var(--line); border-radius: 7px;
+                color: var(--muted); cursor: pointer; font: inherit; }
+  .seg button:hover { color: var(--text); border-color: #55555e; }
+  .seg button.on { color: var(--text); border-color: var(--red-hi); background: #1c0d0e; }
+  .seg button.busy { opacity: .5; }
+  .seg svg { width: 40px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+  .seg svg .hot { stroke: var(--red-hi); fill: var(--red-hi); }
+  .seg b { font-size: 12px; font-weight: 600; }
+  .seg small { font-size: 10px; color: var(--muted); }
+  .menu .note { margin: 5px 0 2px; }
+  .menu button.small { background: #121216; border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 1px 8px; cursor: pointer; font: inherit; }
+  .menu details { border-top: 1px solid #25252c; padding-top: 4px; margin-top: 4px; }
+  .menu summary { cursor: pointer; color: #c9c9d0; padding: 2px 0; list-style: none; }
+  .menu summary::before { content: "▸ "; color: var(--muted); }
+  .menu details[open] > summary::before { content: "▾ "; }
+  .menu summary:hover { color: #fff; }
+  .menu button.go2 { width: 100%; background: #121216; border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 3px 6px; cursor: pointer; font: inherit; }
+  .pop { display: none; position: absolute; inset: 6px; z-index: 5; background: #121217; border: 1px solid var(--red-hi); border-radius: 8px; padding: 10px 12px; overflow: auto; }
+  .pop.on { display: block; }
+  .pop h5 { margin: 0 0 6px; font-size: 13px; }
+  .popB { color: #c9c9d0; font-size: 12px; line-height: 1.45; }
+  .popB p { margin: 0 0 6px; }
+  .popB .key { color: #ffcf5a; }
+  .pop .row button.main { border-color: var(--red-hi); background: #1c0d0e; }
+  .pop label { display: flex; gap: 5px; align-items: center; color: var(--muted); font-size: 11px; margin-top: 4px; cursor: pointer; }
 </style>
 </head>
 <body class="right">
@@ -119,43 +149,52 @@
 </div>
 
 <div class="menu" id="gearMenu">
-  <h4 id="who"></h4>
-  <div class="m" id="where"></div>
+  <div class="pop" id="pop"><h5 id="popT"></h5><div class="popB" id="popB"></div><div class="row" id="popBtns"></div></div>
+  <div class="head"><h4 id="who"></h4><span class="m" id="where"></span></div>
   <div class="m" id="profile"></div>
+  <div class="sect">Frame <span class="m" style="margin:0">· switches now, no restart</span></div>
+  <div class="seg" id="seg">
+    <button data-s="windows" title="Windows' own title bar and edges (EVE's Window mode)">
+      <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="2"/><path d="M2 8h36"/><path d="M27 5h2M31 5h2M35 5h1"/></svg><b>Windows</b><small>resizable</small></button>
+    <button data-s="devil" title="Our title bar and a thin edge, no Windows frame">
+      <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="1"/><path class="hot" d="M2 3.5h36"/><path class="hot" d="M2 5.5h36"/></svg><b>Devil's</b><small>locked size</small></button>
+    <button data-s="floating" title="No frame at all, just the small bar over the top edge">
+      <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="0" stroke-dasharray="2 2"/><rect class="hot" x="24" y="3" width="12" height="4" rx="2"/></svg><b>Floating</b><small>no frame</small></button>
+  </div>
+  <div class="m note" id="styleNote"></div>
+  <div class="size"><span class="m" style="margin:0">Size</span><input type="number" id="mw" min="640" max="7680"> × <input type="number" id="mh" min="480" max="4320">
+    <button class="small" id="sizeGo" title="Resize the picture now (top-left stays)">Apply</button></div>
   <div class="row"><button id="lockIt">🔓 Unlocked: can be moved</button></div>
-  <hr>
-  <div id="modeBox">
-    <div class="m" id="modeNote"></div>
-    <div class="size"><span class="m" style="margin:0">Size</span><input type="number" id="mw" min="640" max="7680"> × <input type="number" id="mh" min="480" max="4320"></div>
-    <label class="m" id="mFloatRow"><input type="checkbox" id="mFloat"> Floating: small bar only, no title bar of ours</label>
+  <div class="row" id="gearMore"><button id="gCam">📹 Camera…</button><button id="gMin">— Minimise</button></div>
+  <div class="say" id="gearSay"></div>
+  <details id="dBar"><summary>Bar: buttons and side</summary>
+    <div class="m">Buttons on the bar (⚙ is always there)</div>
+    <div class="row" id="btns">
+      <button data-b="lock">🔒 Lock</button><button data-b="move">✥ Move</button><button data-b="camera">📹 Camera</button>
+      <button data-b="popout">⧉ Pop out</button><button data-b="minimize">— Minimise</button><button data-b="close">✕ Close</button>
+    </div>
+    <div class="m">Bar sits</div>
+    <div class="row" id="corners">
+      <button data-c="left">Left</button><button data-c="center">Middle</button><button data-c="right">Right</button>
+    </div>
+    <button class="it" id="hide">Take the bar off this client</button>
+  </details>
+  <details id="dEve"><summary>EVE's own display mode (its Esc menu)</summary>
+    <div class="m" id="eveNote"></div>
+    <button class="go2" id="eveSize"></button>
+    <div class="say" id="eveSay"></div>
+    <hr>
+    <div class="m">Or right now: close the client and switch EVE itself (you launch it again).</div>
     <div class="warnline" id="modeWarn"></div>
     <button class="go" id="modeGo"></button>
-    <button class="go" id="liveGo" style="margin-top:4px; background:#121216; border-color: var(--line)">Resize now, no restart (experiment)</button>
     <div class="say" id="modeSay"></div>
-  </div>
-  <div class="row" id="floatRow"><button id="floatT"></button></div>
-  <hr>
-  <div class="row" id="gearMore">
-    <button id="gCam">📹 Camera…</button><button id="gMin">— Minimise</button>
-  </div>
-  <hr>
-  <div class="m">Buttons on the bar (⚙ is always there)</div>
-  <div class="row" id="btns">
-    <button data-b="lock">🔒 Lock</button><button data-b="move">✥ Move</button><button data-b="camera">📹 Camera</button>
-    <button data-b="popout">⧉ Pop out</button><button data-b="minimize">— Minimise</button><button data-b="close">✕ Close</button>
-  </div>
-  <div class="m">Bar sits</div>
-  <div class="row" id="corners">
-    <button data-c="left">Left</button><button data-c="center">Middle</button><button data-c="right">Right</button>
-  </div>
-  <hr>
-  <button class="it" data-page="setups.html">Setups (where clients open, keys, overview)</button>
-  <button class="it" data-page="profiles.html">Client settings (profiles, copies, backups)</button>
-  <button class="it" data-page="tuning.html">Client tuning (graphics, sound tiers)</button>
-  <button class="it" data-page="launch.html">Launch groups</button>
-  <hr>
-  <button class="it" id="hide">Take the bar off this client</button>
-  <div class="say" id="gearSay"></div>
+  </details>
+  <details id="dPages"><summary>Pages: setups, profiles, tuning, launch groups</summary>
+    <button class="it" data-page="setups.html">Setups (where clients open, keys, overview)</button>
+    <button class="it" data-page="profiles.html">Client settings (profiles, copies, backups)</button>
+    <button class="it" data-page="tuning.html">Client tuning (graphics, sound tiers)</button>
+    <button class="it" data-page="launch.html">Launch groups</button>
+  </details>
 </div>
 
 <script>
@@ -353,11 +392,13 @@
     const acct = (seat.accounts || []).find(a => (a.characters || []).some(c => c.name === NAME));
     const groups = (seat.groups || []).map(x => x.group).filter(g => (g.members || []).some(m => m.name === NAME)).map(g => g.name);
     profileHint = acct?.profile || profileHint;
-    fillMode();
-    $("profile").textContent = loginLabel ? `Login screen · ${loginLabel}${profileHint ? " · settings_" + profileHint : ""}` : (acct ? `Account ${acct.nickname}${acct.profile ? " · settings_" + acct.profile : ""}` : "Account not in SeAT yet") +
+    fillFrame();
+    const started = info?.profile ? ` · started with settings_${info.profile}` : "";
+    $("profile").textContent = (loginLabel ? `Login screen · ${loginLabel}` : (acct ? `Account ${acct.nickname}` : "Account not in SeAT yet")) + started +
       (groups.length ? ` · launch group${groups.length > 1 ? "s" : ""}: ${groups.join(", ")}` : "");
     applyState(await invoke("clientbar_state").catch(() => null));
     say("gearSay", "");
+    hidePop();
     openMenu("gearMenu");
   });
   document.querySelectorAll("#corners button").forEach(b => b.addEventListener("click", async () => {
@@ -381,63 +422,166 @@
     closeMenus(); applyState(await invoke("clientbar_state").catch(() => null)); back();
   });
 
-  // The Devil's window mode: Window mode ↔ Fixed Window at the same size and spot (closes the client once).
-  function fillMode() {
-    const windowed = info?.windowMode !== false;
+  // 21 Nov: the frame, switched live: Windows / Devil's / Floating. Nothing closes.
+  const STYLE_TEXT = {
+    windows: "Windows' own title bar and edges: drag the edges to resize; Windows can snap or maximise it.",
+    devil: "Our title bar and a thin edge instead of Windows' frame: the size is locked, Windows can't resize or half-snap it by accident.",
+    floating: "No frame at all, only this small bar over the top edge: for packing clients edge to edge.",
+  };
+  const segOf = (style) => (style || "windows").replace("eve-", "");
+  const eveFixed = () => (info?.style || "").startsWith("eve-");
+  const sizeNow = () => ({ width: Math.round(+$("mw").value), height: Math.round(+$("mh").value) });
+  const fitMenu = () => { if (menu) invoke("clientbar_menu", { height: $(menu).offsetHeight + 44 }).catch(() => {}); };
+  document.querySelectorAll(".menu details").forEach(d => d.addEventListener("toggle", fitMenu));
+  const seen = (key) => { try { return localStorage.getItem("dr-explained-" + key) === "1"; } catch { return false; } };
+  const setSeen = (key) => { try { localStorage.setItem("dr-explained-" + key, "1"); } catch {} };
+
+  // The pop-up inside the menu: a title, a few lines, buttons ([text, action, main?]).
+  function showPop(title, html, buttons, dontAskKey) {
+    $("popT").textContent = title;
+    $("popB").innerHTML = html + (dontAskKey ? '<label><input type="checkbox" id="popDont"> Don\'t explain this again</label>' : "");
+    const row = $("popBtns");
+    row.innerHTML = "";
+    for (const [text, act, main] of buttons) {
+      const b = document.createElement("button");
+      b.textContent = text;
+      if (main) b.className = "main";
+      b.addEventListener("click", () => { if (dontAskKey && $("popDont")?.checked) setSeen(dontAskKey); hidePop(); act && act(); });
+      row.appendChild(b);
+    }
+    $("pop").classList.add("on");
+    const need = $("pop").scrollHeight + 12;
+    if ($("gearMenu").offsetHeight < need) $("gearMenu").style.minHeight = need + "px";
+    fitMenu();
+  }
+  function hidePop() { $("pop").classList.remove("on"); $("gearMenu").style.minHeight = ""; fitMenu(); }
+
+  function fillFrame() {
+    const style = info?.style || "windows";
+    const seg = segOf(style);
+    document.querySelectorAll("#seg button").forEach(b => { b.classList.toggle("on", b.dataset.s === seg); b.classList.remove("busy"); });
     const size = info?.size || { w: 1918, h: 1024 };
     $("mw").value = size.w; $("mh").value = size.h;
+    let note = STYLE_TEXT[seg] || "";
+    if (style.startsWith("eve-")) note = "EVE's own Fixed Window (picked in EVE's Display Mode menu). " + (seg === "devil" ? "Our title bar on it." : "Just the small bar on it.");
+    else if (seg !== "windows") note += " EVE stays in Window mode underneath.";
+    if (seg !== "windows" && info?.remembered) note += ` ${NAME} opens this way every time.`;
+    if (info?.maximised) note = "Maximised: picking Devil's or Floating un-maximises it first. " + note;
+    $("styleNote").textContent = note;
+    fillEve();
+  }
+
+  async function switchStyle(to, extra) {
+    const btn = document.querySelector(`#seg button[data-s="${to}"]`);
+    btn?.classList.add("busy");
+    try {
+      say("gearSay", await invoke("clientbar_style", { name: NAME, style: to, ...(extra || {}) }), "ok");
+    } catch (e) {
+      const text = String(e);
+      if (text.startsWith("eve-fixed:")) explainEveFixed();
+      else say("gearSay", text, "bad");
+    }
+    setTimeout(async () => { info = await invoke("clientbar_info", { name: NAME }).catch(() => info); fillFrame(); fitMenu(); }, 900);
+  }
+
+  function explainEveFixed() {
+    showPop("This one is in EVE's own Fixed Window", `
+      <p>EVE itself was switched to Fixed Window (its Esc menu), so the app can't hand it Windows' frame without EVE fighting it.</p>
+      <p>To get Windows' frame back, in EVE: <span class="key">Esc → Settings → Display &amp; Graphics → Display Mode → Window mode</span>. EVE then uses the size it last had in Window mode.</p>
+      <p>After that, use these three buttons instead of EVE's menu: they switch instantly and keep the size.</p>`,
+      [["Got it", null, true]]);
+  }
+
+  function explainSwitch(to, go) {
+    const bodies = {
+      devil: `<p>Windows' title bar and edges come off this window, <b>right now</b>; our title bar takes their place. Same spot, same size (${$("mw").value}×${$("mh").value}).</p>
+        <p>EVE isn't restarted and stays in Window mode underneath: the switch is the app's, not EVE's. Windows can't resize, maximise or half-snap it any more; move it with our title bar.</p>
+        <p>${info?.remembers ? `${NAME} opens this way every time from now on (2–3 s after it appears).` : "Login screens with a changing number aren't remembered."} Windows' button puts the frame back any time.</p>`,
+      floating: `<p>Windows' frame comes off and there's no title bar of ours either: just this small bar over the top edge. Same spot and size.</p>
+        <p>For packing clients edge to edge (a 1920×1080 picture fills a quarter of a 4K screen exactly). Move it with ✥ on the bar.</p>
+        <p>${info?.remembers ? `${NAME} opens this way every time from now on.` : ""}</p>`,
+      windows: `<p>Windows' title bar and edges come back, right now. The picture keeps its size; Windows' frame goes where our title bar was.</p>
+        <p>You can resize it by its edges again, and Windows can snap or maximise it. ${info?.remembered ? `${NAME} stops opening without a frame.` : ""}</p>`,
+    };
+    if (seen("style-" + to)) { go(); return; }
+    const names = { windows: "Windows' frame", devil: "Devil's frame", floating: "Floating" };
+    showPop(`Switch ${NAME} to ${names[to]}?`, bodies[to], [["Switch now", go, true], ["Cancel", null]], "style-" + to);
+  }
+
+  document.querySelectorAll("#seg button").forEach(b => b.addEventListener("click", () => {
+    const to = b.dataset.s, now = segOf(info?.style);
+    if (to === now) { say("gearSay", "It's already that.", ""); return; }
+    if (to === "windows" && eveFixed()) { explainEveFixed(); return; }
+    // EVE's own Fixed Window: Devil's ↔ Floating is just the bar.
+    if (eveFixed()) { switchStyle(to); return; }
+    explainSwitch(to, () => switchStyle(to));
+  }));
+  $("sizeGo").addEventListener("click", () => {
+    const { width, height } = sizeNow();
+    if (!(width >= 640 && height >= 480)) { say("gearSay", "Pick a size of at least 640×480.", "bad"); return; }
+    const go = () => switchStyle(segOf(info?.style), { width, height });
+    if (width < 1024 || height < 768) {
+      showPop("That's small", `<p>${width}×${height} is under 1024×768: EVE's own windows get cramped and some won't fit.</p>`, [["Resize anyway", go, true], ["Cancel", null]]);
+    } else go();
+  });
+
+  // EVE put Windows' frame back by itself (its own Display Mode menu, usually).
+  window.notice = async (what) => {
+    if (what !== "eve-frame") return;
+    info = await invoke("clientbar_info", { name: NAME }).catch(() => info);
+    if (menu !== "gearMenu") { $("who").textContent = NAME; fillFrame(); openMenu("gearMenu"); }
+    showPop("EVE put Windows' frame back", `
+      <p>EVE gave this window its title bar again, usually because its own Display Mode menu was used. The app leaves it like that and won't fight EVE over it.</p>
+      <p>Want our frame again? Click Devil's or Floating: it switches now, no restart.</p>`,
+      [["Devil's frame again", () => switchStyle("devil"), true], ["Leave it", null]]);
+  };
+
+  // EVE's own display mode: what its Esc menu does, and its Fixed Window size (written when the
+  // profile's clients have closed, or now by closing them).
+  function fillEve() {
+    const p = info?.profile;
+    const { width, height } = sizeNow();
+    $("eveNote").textContent = p
+      ? `EVE's Display Mode menu (Esc → Settings) doesn't use our size: it uses the sizes saved in settings_${p}, read when the client starts. The buttons above don't need it.${p.toLowerCase() === "default" ? " settings_Default is shared by every account without its own profile." : ""}`
+      : "EVE's Display Mode menu (Esc → Settings) uses the sizes saved in the client's profile, read when it starts. The buttons above don't need it.";
+    $("eveSize").textContent = `Make EVE's own Fixed Window ${width}×${height} (nothing closes)`;
+    say("eveSay", "");
     modeArmed = false; $("modeGo").classList.remove("sure");
-    $("mFloatRow").style.display = windowed ? "" : "none";
-    $("mFloat").checked = false;
-    $("floatRow").style.display = windowed ? "none" : "";
-    $("floatT").textContent = info?.floating ? "Title bar: floating small bar (click for our title bar)" : "Title bar: ours (click for the floating small bar)";
-    $("modeNote").textContent = windowed
-      ? "Try the Devil's window mode: EVE's Fixed Window at this same size and spot, with our title bar, so Windows can never resize or half-snap it. Only needed once per profile: afterwards EVE's own Display Mode switch keeps the size."
-      : `Fixed Window ${size.w}×${size.h}. Back to Window mode at:`;
-    $("modeGo").textContent = windowed ? "Switch to the Devil's window mode" : "Back to Window mode";
-    $("liveGo").style.display = windowed ? "none" : "";
-    $("modeWarn").textContent = "The client closes first (if EVE asks, pick Quit); the app changes its profile, then you launch it again.";
+    const toFixed = !eveFixed();
+    $("modeGo").textContent = toFixed ? `Close it and switch EVE to Fixed Window ${width}×${height}` : "Close it and switch EVE back to Window mode";
     say("modeSay", "");
-    // 21 Nov: other open clients in the same profile (settings_Default, often) rewrite it as they
-    // close, so they have to close too.
     sharers = null;
+    $("modeWarn").textContent = "";
     invoke("clientbar_profile_sharers", { name: NAME }).then((s) => {
       if (!s?.profile) return;
       sharers = s;
       const others = s.others || [];
-      const shared = s.profile.toLowerCase() === "default"
-        ? " settings_Default is EVE's shared profile: every account without its own profile changes with it (Your accounts can give each account its own)."
-        : "";
       $("modeWarn").textContent = others.length
-        ? `settings_${s.profile} is also open in ${others.join(", ")}. All ${others.length + 1} clients close (if EVE asks, pick Quit), then the profile changes for all of them.${shared}`
-        : `${NAME} uses settings_${s.profile}. It closes first (if EVE asks, pick Quit); the app changes the profile, then you launch it again.${shared}`;
+        ? `settings_${s.profile} is also open in ${others.join(", ")}: all ${others.length + 1} close, since each rewrites the profile as it closes.`
+        : "";
     }).catch(() => {});
   }
-  $("liveGo").addEventListener("click", async () => {
-    const width = Math.round(+$("mw").value), height = Math.round(+$("mh").value);
-    try { say("modeSay", await invoke("clientbar_resize_live", { name: NAME, width, height }), "ok"); } catch (e) { say("modeSay", String(e), "bad"); }
-  });
-  $("floatT").addEventListener("click", async () => {
-    await invoke("clientbar_floating", { name: NAME, on: !info?.floating }).catch(() => {});
-    if (info) info.floating = !info.floating;
-    fillMode();
+  for (const id of ["mw", "mh"]) $(id).addEventListener("input", fillEve);
+  $("eveSize").addEventListener("click", async () => {
+    const { width, height } = sizeNow();
+    try { say("eveSay", await invoke("clientbar_eve_fixed_size", { name: NAME, width, height }), "ok"); } catch (e) { say("eveSay", String(e), "bad"); }
+    fitMenu();
   });
   $("modeGo").addEventListener("click", async () => {
-    const width = Math.round(+$("mw").value), height = Math.round(+$("mh").value);
+    const { width, height } = sizeNow();
     if (!(width >= 640 && height >= 480)) { say("modeSay", "Pick a size of at least 640×480.", "bad"); return; }
     if (!modeArmed) {
       modeArmed = true;
       $("modeGo").classList.add("sure");
-      $("modeGo").textContent = (width < 1024 || height < 768)
-        ? `${width}×${height} is under 1024×768: EVE's windows get cramped. Click again to close ${NAME} anyway`
-        : (sharers?.others?.length ? `Click again to close all ${sharers.others.length + 1} clients in settings_${sharers.profile} and switch` : `Click again to close ${NAME} and switch`);
+      $("modeGo").textContent = sharers?.others?.length ? `Click again: close all ${sharers.others.length + 1} clients in settings_${sharers.profile}` : `Click again: close ${NAME}`;
       return;
     }
     modeArmed = false;
-    const toFixed = info?.windowMode !== false;
+    const toFixed = !eveFixed();
     try {
-      say("modeSay", await invoke("clientbar_window_mode", { name: NAME, toFixed, width, height, floating: toFixed && $("mFloat").checked, profile: profileHint, withOthers: !!sharers?.others?.length }), "ok");
-    } catch (e) { say("modeSay", String(e), "bad"); fillMode(); }
+      say("modeSay", await invoke("clientbar_window_mode", { name: NAME, toFixed, width, height, floating: segOf(info?.style) === "floating", profile: info?.profile || profileHint, withOthers: !!sharers?.others?.length }), "ok");
+    } catch (e) { say("modeSay", String(e), "bad"); fillEve(); }
+    fitMenu();
   });
 
   // Which buttons show, shrunk or whole, and which side the bar sits (changed here or on Home).

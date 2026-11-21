@@ -293,6 +293,71 @@ pub fn run(app: AppHandle, clients: Vec<(String, isize, Spot)>, to_fixed: bool, 
     Ok(())
 }
 
+/// 21 Nov: EVE's own Fixed Window sizes waiting to be written: profile -> (width, height).
+static QUEUED: Mutex<Option<HashMap<String, (i64, i64)>>> = Mutex::new(None);
+static WATCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Write `width`×`height` as EVE's own Fixed Window size into settings_<profile> once no open
+/// client uses that profile (each one rewrites it as it closes). Nothing is closed.
+pub fn queue_fixed_size(profile: String, width: i64, height: i64) -> Result<(), String> {
+    let root = crate::profiles::root()?;
+    if !root.join(format!("settings_{profile}")).join("core_public__.yaml").exists() {
+        return Err(format!("settings_{profile} has no core_public__.yaml yet (EVE writes it when a client using it closes the first time)."));
+    }
+    QUEUED.lock().unwrap().get_or_insert_with(HashMap::new).insert(profile, (width, height));
+    if !WATCHING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        std::thread::Builder::new().name("fixed-size-queue".into()).spawn(watch_queue).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn watch_queue() {
+    loop {
+        std::thread::sleep(Duration::from_secs(2));
+        let jobs: Vec<(String, (i64, i64))> = {
+            let mut guard = QUEUED.lock().unwrap();
+            let jobs: Vec<_> = guard.get_or_insert_with(HashMap::new).iter().map(|(k, v)| (k.clone(), *v)).collect();
+            if jobs.is_empty() {
+                WATCHING.store(false, std::sync::atomic::Ordering::SeqCst);
+                return;
+            }
+            jobs
+        };
+        let Ok(root) = crate::profiles::root() else { continue };
+        let in_use: Vec<String> = crate::clipboard::open_clients().into_iter().filter_map(|(_, h)| crate::startline::settings_folder_of_window(h)).collect();
+        for (profile, (width, height)) in jobs {
+            if in_use.iter().any(|p| p.eq_ignore_ascii_case(&profile)) {
+                continue;
+            }
+            let file = root.join(format!("settings_{profile}")).join("core_public__.yaml");
+            // Quiet for 3 s first (EVE may still be writing it).
+            let fresh = std::fs::metadata(&file).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_none_or(|age| age < Duration::from_secs(3));
+            if fresh {
+                continue;
+            }
+            if let Some(q) = QUEUED.lock().unwrap().as_mut() {
+                q.remove(&profile);
+            }
+            let result = std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| {
+                let backup = file.with_file_name(format!("core_public__.yaml.before-fixed-size-{}", chrono_like_now()));
+                std::fs::write(&backup, &text).map_err(|e| e.to_string())?;
+                let changed = set_block_size(&text, "FixedWindowSettings", width, height, crate::tuning::file_time_now());
+                std::fs::write(&file, changed).map_err(|e| e.to_string())
+            });
+            log::info!("EVE's Fixed Window size for settings_{profile}: {}", if result.is_ok() { "written" } else { "failed" });
+            let (title, text, kind) = match result {
+                Ok(()) => (
+                    "EVE's own Fixed Window",
+                    format!("settings_{profile}: EVE's own Fixed Window is now {width}×{height} (backup beside it).\n\nEVE's Display Mode menu uses it from the next time a client with this profile starts."),
+                    MessageDialogKind::Info,
+                ),
+                Err(err) => ("EVE's own Fixed Window", format!("Couldn't change settings_{profile} ({err}); nothing was changed."), MessageDialogKind::Error),
+            };
+            crate::mainthread::run(move |app| tell(app, title, text, kind));
+        }
+    }
+}
+
 fn chrono_like_now() -> u64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }

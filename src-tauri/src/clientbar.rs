@@ -47,6 +47,10 @@ pub struct BarSettings {
     /// Bars shrunk (›) to just ⚙ and ✕.
     #[serde(default)]
     pub mini: BTreeSet<String>,
+    /// 21 Nov: clients that open without Windows' frame (Devil's frame or floating), taken off
+    /// live by us when they open in EVE's Window mode.
+    #[serde(default)]
+    pub bare: BTreeSet<String>,
     /// "right" (default), "center" or "left" (past EVE's Neocom).
     #[serde(default = "default_corner")]
     pub corner: String,
@@ -80,7 +84,7 @@ pub fn bar_width(buttons: &[String]) -> f64 {
 
 impl Default for BarSettings {
     fn default() -> Self {
-        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), floating: BTreeSet::new(), offsets: Default::default(), mini: BTreeSet::new(), corner: default_corner(), buttons: default_buttons(), version: 1 }
+        Self { every: true, off: BTreeSet::new(), clients: BTreeSet::new(), floating: BTreeSet::new(), offsets: Default::default(), mini: BTreeSet::new(), bare: BTreeSet::new(), corner: default_corner(), buttons: default_buttons(), version: 1 }
     }
 }
 
@@ -452,6 +456,63 @@ mod win {
         // SAFETY: asks the window to close, as its ✕ (or Alt+F4) would; EVE may ask to confirm.
         unsafe { PostMessageW(handle as HWND, WM_CLOSE, 0, 0) != 0 }
     }
+
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        WS_CAPTION, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_STATICEDGE, WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    };
+    /// Windows' title bar, edges and their buttons (what the Devil's frame takes off).
+    pub const FRAME_BITS: u32 = WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+    pub const EX_FRAME_BITS: u32 = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE;
+
+    /// The window's style bits (style, extended style).
+    pub fn styles(handle: isize) -> (u32, u32) {
+        // SAFETY: reads the window's style bits.
+        unsafe { (GetWindowLongPtrW(handle as HWND, windows_sys::Win32::UI::WindowsAndMessaging::GWL_STYLE) as u32, GetWindowLongPtrW(handle as HWND, GWL_EXSTYLE) as u32) }
+    }
+
+    /// The game's picture (the client area) on screen.
+    pub fn client_on_screen(handle: isize) -> Option<Spot> {
+        use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
+        let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut p = POINT { x: 0, y: 0 };
+        // SAFETY: plain queries on a window handle; a stale handle just fails.
+        unsafe {
+            if IsIconic(handle as HWND) != 0 || GetClientRect(handle as HWND, &mut r) == 0 || ClientToScreen(handle as HWND, &mut p) == 0 {
+                return None;
+            }
+        }
+        Some(Spot { x: p.x, y: p.y, w: r.right - r.left, h: r.bottom - r.top }).filter(|s| s.w > 0 && s.h > 0)
+    }
+
+    pub fn zoomed(handle: isize) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed;
+        // SAFETY: reads the window's maximised state.
+        unsafe { IsZoomed(handle as HWND) != 0 }
+    }
+
+    /// Un-maximise without taking the focus.
+    pub fn unzoom(handle: isize) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE;
+        // SAFETY: the window's own restore, as its ☐ would.
+        unsafe { ShowWindow(handle as HWND, SW_SHOWNOACTIVATE) };
+    }
+
+    /// Give the window these style bits, then size and place it so the picture is exactly
+    /// `client` (Windows' frame, if any, goes round it). The way borderless-window tools do it;
+    /// nothing inside the game is touched.
+    pub fn restyle(handle: isize, style: u32, ex: u32, client: Spot) -> bool {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{AdjustWindowRectEx, SetWindowLongPtrW, SetWindowPos, GWL_STYLE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER};
+        let hwnd = handle as HWND;
+        let mut r = RECT { left: client.x, top: client.y, right: client.x + client.w, bottom: client.y + client.h };
+        // SAFETY: style changes and a move on a client window handle; a stale handle just fails.
+        unsafe {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, style as isize);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex as isize);
+            AdjustWindowRectEx(&mut r, style, 0, ex);
+            SetWindowPos(hwnd, std::ptr::null_mut(), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER) != 0
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -478,6 +539,21 @@ mod win {
     }
     pub fn stack_above(_ours: isize, _client: isize) {}
     pub fn resize(_h: isize, _to: Spot) {}
+    pub const FRAME_BITS: u32 = 0xCF0000;
+    pub const EX_FRAME_BITS: u32 = 0;
+    pub fn styles(_h: isize) -> (u32, u32) {
+        (0, 0)
+    }
+    pub fn client_on_screen(_h: isize) -> Option<Spot> {
+        None
+    }
+    pub fn zoomed(_h: isize) -> bool {
+        false
+    }
+    pub fn unzoom(_h: isize) {}
+    pub fn restyle(_h: isize, _style: u32, _ex: u32, _client: Spot) -> bool {
+        false
+    }
     pub fn client_size(_h: isize) -> Option<(i32, i32)> {
         None
     }
@@ -583,9 +659,17 @@ fn follow_switches(app: &AppHandle, seen: &mut HashMap<String, (bool, Spot)>) {
     }
     let clients: Vec<(String, isize)> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| crate::clientwindows::keeps_a_spot(n)).collect();
     seen.retain(|name, _| clients.iter().any(|(n, _)| n == name));
+    // Login screens too: their frame can be switched like any client's.
+    let all: Vec<(String, isize)> = crate::clipboard::open_clients();
+    keep_styles(app, &all);
     for (name, handle) in clients {
         let Some(frame) = win::frame(handle) else { continue };
         let captioned = win::captioned(handle);
+        // Our own frame switch (⚙ → Frame) isn't EVE switching mode: just note where it is.
+        if just_restyled(handle) {
+            seen.insert(name.clone(), (captioned, frame));
+            continue;
+        }
         // Launched again after the Devil's window mode switch: into its spot, once.
         if let Some((fixed, to)) = crate::windowfix::pending(&name) {
             if fixed != captioned {
@@ -1035,6 +1119,11 @@ pub fn clientbar_info(app: AppHandle, name: String) -> serde_json::Value {
         "windowMode": handle.map(win::captioned),
         "size": handle.and_then(win::client_size).map(|(w, h)| serde_json::json!({ "w": w, "h": h })),
         "floating": floating,
+        "style": handle.map(|h| style_of(&app, &name, h)),
+        "remembered": settings(&app).bare.contains(&name),
+        "remembers": crate::clientwindows::keeps_a_spot(&name),
+        "profile": handle.and_then(crate::startline::settings_folder_of_window),
+        "maximised": handle.is_some_and(win::zoomed),
         "titleBar": MODES.lock().unwrap().as_ref().and_then(|m| m.get(&name).copied()).map(|(on, top)| serde_json::json!({ "on": on, "top": top })),
     })
 }
@@ -1228,7 +1317,8 @@ pub fn clientbar_window_mode(app: AppHandle, name: String, to_fixed: bool, width
         let framed_now = !win::captioned(h) && !settings(&app).floating.contains(&client);
         let to = if to_fixed {
             // The window's spot (title bar included) becomes our title bar + the client inside it.
-            let (x, y) = if floating { (frame.x, frame.y) } else { (frame.x + side, frame.y + top) };
+            // Already without Windows' frame (ours, 21 Nov): the picture stays exactly where it is.
+            let (x, y) = if is_bare(h) || floating { (frame.x, frame.y) } else { (frame.x + side, frame.y + top) };
             Spot { x, y, w: width as i32, h: height as i32 }
         } else {
             // Windows' title bar goes where ours was. w/h 0: a visible-frame spot, sized by EVE.
@@ -1243,6 +1333,10 @@ pub fn clientbar_window_mode(app: AppHandle, name: String, to_fixed: bool, width
                 s.floating.insert(client.clone());
             } else {
                 s.floating.remove(client);
+            }
+            // Back to EVE's Window mode: with Windows' frame (not taken off again on sight).
+            if !to_fixed {
+                s.bare.remove(client);
             }
         }
     });
@@ -1444,5 +1538,286 @@ mod tests {
     fn names_make_safe_labels() {
         assert_eq!(label_for("Darkness Holder"), "clientbar-DarknessHolder");
         assert_eq!(label_for("Tsawind"), "clientbar-Tsawind");
+    }
+}
+
+// ---- 21 Nov: the frame, switched live (Tsa: "switch back and forth for any client, any time") ----
+//
+// Windows: EVE's Window mode as it is (Windows' title bar and edges, resizable).
+// Devil's frame: Windows' frame taken off the same window (no restart: EVE stays in Window mode,
+// it just has no frame), our title bar and a 1 px edge round it instead; can't be resized or
+// snapped by accident. Floating: no frame at all, only the small bar over its top edge.
+// EVE's own Fixed Window (picked in EVE's Display Mode menu) has no frame either: Devil's or
+// floating there is just which bar it gets; Windows' frame back is EVE's menu again.
+
+/// Clients whose Windows frame we took off: window -> the style bits taken off (style, extended).
+static BARE: Mutex<Option<HashMap<isize, (u32, u32)>>> = Mutex::new(None);
+/// Windows whose frame we just changed (the display-mode follower leaves them alone a moment).
+static RESTYLED: Mutex<Option<HashMap<isize, Instant>>> = Mutex::new(None);
+/// When each client window was first seen; which (window, name) were already made bare on sight.
+static FIRST_SEEN: Mutex<Option<HashMap<isize, Instant>>> = Mutex::new(None);
+static AUTO_DONE: Mutex<Option<HashSet<(isize, String)>>> = Mutex::new(None);
+
+fn is_bare(handle: isize) -> bool {
+    BARE.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&handle))
+}
+
+fn mark_restyled(handle: isize) {
+    let mut guard = RESTYLED.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.retain(|_, t| t.elapsed() < Duration::from_secs(10));
+    map.insert(handle, Instant::now());
+}
+
+fn just_restyled(handle: isize) -> bool {
+    RESTYLED.lock().unwrap().as_ref().and_then(|m| m.get(&handle)).is_some_and(|t| t.elapsed() < Duration::from_millis(2500))
+}
+
+/// "windows", "devil", "floating" (no Windows frame: ours or EVE's), or "eve-devil" /
+/// "eve-floating" (EVE's own Fixed Window, with our title bar / the small bar).
+fn style_of(app: &AppHandle, name: &str, handle: isize) -> String {
+    if win::captioned(handle) {
+        return "windows".into();
+    }
+    let floating = settings(app).floating.contains(name);
+    let kind = if floating { "floating" } else { "devil" };
+    if is_bare(handle) {
+        kind.into()
+    } else {
+        format!("eve-{kind}")
+    }
+}
+
+fn size_ok(w: i32, h: i32) -> Result<(), String> {
+    if (640..=7680).contains(&w) && (480..=4320).contains(&h) {
+        Ok(())
+    } else {
+        Err("That size is outside 640×480 – 7680×4320.".into())
+    }
+}
+
+/// Take Windows' frame off a Window-mode client, live. The whole box stays where it was: our
+/// title bar where Windows' was (floating: the picture goes to the box's top-left). `at` = an
+/// exact spot for the picture instead (a remembered one).
+fn make_bare(app: &AppHandle, handle: isize, floating: bool, size: Option<(i32, i32)>, at: Option<Spot>) -> Result<Spot, String> {
+    if win::zoomed(handle) {
+        win::unzoom(handle);
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    let frame = win::frame(handle).ok_or("Restore the client first (it's minimised).")?;
+    let client = win::client_on_screen(handle).ok_or("Restore the client first (it's minimised).")?;
+    let (w, h) = size.unwrap_or((client.w, client.h));
+    size_ok(w, h)?;
+    let scale = app.get_webview_window(crate::MAIN_WINDOW).and_then(|x| x.scale_factor().ok()).unwrap_or(1.0);
+    let (top, side) = chrome(scale);
+    let to = at.unwrap_or(if floating { Spot { x: frame.x, y: frame.y, w, h } } else { Spot { x: frame.x + side, y: frame.y + top, w, h } });
+    let (style, ex) = win::styles(handle);
+    mark_restyled(handle);
+    BARE.lock().unwrap().get_or_insert_with(HashMap::new).insert(handle, (style & win::FRAME_BITS, ex & win::EX_FRAME_BITS));
+    if !win::restyle(handle, style & !win::FRAME_BITS, ex & !win::EX_FRAME_BITS, to) {
+        if let Some(m) = BARE.lock().unwrap().as_mut() {
+            m.remove(&handle);
+        }
+        return Err("Windows didn't let the app change that window.".into());
+    }
+    Ok(to)
+}
+
+/// Put Windows' frame back on a client we took it off: its visible frame goes where our title bar
+/// and edge were (floating: where the picture's top-left was), the picture keeps its size.
+fn make_framed(app: &AppHandle, name: &str, handle: isize) -> Result<(), String> {
+    let client = win::client_on_screen(handle).ok_or("Restore the client first (it's minimised).")?;
+    let (bits, ex_bits) = BARE.lock().unwrap().as_mut().and_then(|m| m.remove(&handle)).unwrap_or((win::FRAME_BITS, 0));
+    let scale = app.get_webview_window(crate::MAIN_WINDOW).and_then(|x| x.scale_factor().ok()).unwrap_or(1.0);
+    let outer = if settings(app).floating.contains(name) { client } else { outer_of(client, scale) };
+    let (style, ex) = win::styles(handle);
+    mark_restyled(handle);
+    if !win::restyle(handle, style | bits, ex | ex_bits, client) {
+        return Err("Windows didn't let the app change that window.".into());
+    }
+    // Windows' visible frame is known once it's drawn: then line its top-left up with the box's.
+    std::thread::spawn(move || {
+        for wait in [80, 400] {
+            std::thread::sleep(Duration::from_millis(wait));
+            if let (Some(rect), Some(now)) = (win::window_rect(handle), win::frame(handle)) {
+                crate::clientwindows::place_window(handle, Spot { x: rect.x + (outer.x - now.x), y: rect.y + (outer.y - now.y), ..rect });
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Remember the client's new spot (in its new mode) once it has settled.
+fn remember_soon(name: String, handle: isize) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(700));
+        if let Some(spot) = win::window_rect(handle) {
+            crate::mainthread::run(move |app| crate::clientwindows::remember_one(app, &name, spot));
+        }
+    });
+}
+
+/// The picture to `width`×`height`, its top-left kept (any mode).
+fn set_client_size(handle: isize, width: i32, height: i32) -> Result<(), String> {
+    size_ok(width, height)?;
+    let client = win::client_on_screen(handle).ok_or("Restore the client first (it's minimised).")?;
+    let (style, ex) = win::styles(handle);
+    if !win::restyle(handle, style, ex, Spot { w: width, h: height, ..client }) {
+        return Err("Windows didn't let the app resize that window.".into());
+    }
+    Ok(())
+}
+
+/// ⚙ → Frame: "windows", "devil" or "floating", now, without closing the client. A size can
+/// come along (the picture's). Remembered per character / account login screen: it opens that
+/// way next time too. EVE's own Fixed Window → Windows: an error starting "eve-fixed:" (the bar
+/// explains EVE's menu).
+#[tauri::command]
+pub fn clientbar_style(app: AppHandle, name: String, style: String, width: Option<i32>, height: Option<i32>) -> Result<String, String> {
+    let handle = handle_of(&name).ok_or("That client isn't open.")?;
+    if win::frame(handle).is_none() {
+        return Err("Restore the client first (it's minimised).".into());
+    }
+    let size = width.zip(height);
+    if let Some((w, h)) = size {
+        size_ok(w, h)?;
+    }
+    let now = style_of(&app, &name, handle);
+    let remembers = crate::clientwindows::keeps_a_spot(&name);
+    let resized = |handle: isize| -> Result<bool, String> {
+        match size {
+            Some((w, h)) if win::client_size(handle) != Some((w, h)) => set_client_size(handle, w, h).map(|_| true),
+            _ => Ok(false),
+        }
+    };
+    let message = match style.as_str() {
+        "devil" | "floating" => {
+            let floating = style == "floating";
+            change(&app, |s| {
+                if floating {
+                    s.floating.insert(name.clone());
+                } else {
+                    s.floating.remove(&name);
+                }
+                if remembers {
+                    s.bare.insert(name.clone());
+                }
+            });
+            let what = if floating { "Floating: no frame, just the small bar" } else { "Devil's frame: our title bar, no Windows frame" };
+            if now == "windows" {
+                let to = make_bare(&app, handle, floating, size, None)?;
+                log::info!("{name}: Windows' frame off ({style}), {}×{}", to.w, to.h);
+                format!("{what}, {}×{}. No restart: EVE stays in Window mode underneath.{}", to.w, to.h, if remembers { format!(" {name} opens this way next time too.") } else { String::new() })
+            } else {
+                let changed = resized(handle)?;
+                if now.starts_with("eve-") {
+                    format!("{what}.{}", if changed { " Resized live: if EVE's picture looks stretched, EVE's own Fixed Window didn't take it (⚙ → EVE's own display mode)." } else { "" })
+                } else {
+                    format!("{what}.{}", if changed { " Resized." } else { "" })
+                }
+            }
+        }
+        "windows" => {
+            if now.starts_with("eve-") {
+                return Err("eve-fixed: this client is in EVE's own Fixed Window.".into());
+            }
+            change(&app, |s| {
+                s.bare.remove(&name);
+            });
+            if now == "windows" {
+                if resized(handle)? {
+                    "Resized.".into()
+                } else {
+                    "It already has Windows' frame.".into()
+                }
+            } else {
+                make_framed(&app, &name, handle)?;
+                if let Some((w, h)) = size {
+                    std::thread::sleep(Duration::from_millis(120));
+                    let _ = set_client_size(handle, w, h);
+                }
+                log::info!("{name}: Windows' frame back");
+                "Windows' frame is back: drag its edges to resize, Windows can snap it again.".into()
+            }
+        }
+        _ => return Err("Pick Windows, Devil's or Floating.".into()),
+    };
+    if remembers {
+        remember_soon(name, handle);
+    }
+    Ok(message)
+}
+
+/// 21 Nov: EVE's own Fixed Window size (what EVE's Display Mode menu uses), written into this
+/// client's profile once every client using it has closed. Nothing is closed now.
+#[tauri::command]
+pub fn clientbar_eve_fixed_size(name: String, width: i64, height: i64) -> Result<String, String> {
+    size_ok(width as i32, height as i32)?;
+    let handle = handle_of(&name).ok_or("That client isn't open.")?;
+    let profile = crate::startline::settings_folder_of_window(handle).filter(|p| crate::profiles::safe_name(p)).ok_or("Couldn't read which profile this client was started with.")?;
+    crate::windowfix::queue_fixed_size(profile.clone(), width, height)?;
+    let open = sharing_clients(&name, &profile).len() + 1;
+    Ok(format!(
+        "Saved for settings_{profile}. EVE rewrites that file as its clients close, so it's written once all {open} client{} using it {} closed; nothing closes now. A pop-up says when it's done.",
+        if open == 1 { "" } else { "s" },
+        if open == 1 { "has" } else { "have" }
+    ))
+}
+
+/// The display-mode follower's part (main thread, every look): Windows' frame put back by EVE
+/// itself (its own Display Mode menu): left alone, the bar says so; a remembered client that
+/// opens in Window mode loses Windows' frame once, 2.5 s after it appeared.
+fn keep_styles(app: &AppHandle, clients: &[(String, isize)]) {
+    let wanted = settings(app);
+    {
+        let mut guard = FIRST_SEEN.lock().unwrap();
+        let seen = guard.get_or_insert_with(HashMap::new);
+        seen.retain(|h, _| clients.iter().any(|(_, c)| c == h));
+        for (_, h) in clients {
+            seen.entry(*h).or_insert_with(Instant::now);
+        }
+    }
+    if let Some(m) = BARE.lock().unwrap().as_mut() {
+        m.retain(|h, _| clients.iter().any(|(_, c)| c == h));
+    }
+    for (name, handle) in clients {
+        let handle = *handle;
+        if !win::captioned(handle) || just_restyled(handle) || win::frame(handle).is_none() {
+            continue;
+        }
+        if is_bare(handle) {
+            if let Some(m) = BARE.lock().unwrap().as_mut() {
+                m.remove(&handle);
+            }
+            log::info!("{name}: EVE put Windows' frame back");
+            if let Some(bar) = app.get_webview_window(&label_for(name)) {
+                let _ = bar.eval("window.notice && window.notice('eve-frame')");
+            }
+            AUTO_DONE.lock().unwrap().get_or_insert_with(HashSet::new).insert((handle, name.clone()));
+            continue;
+        }
+        if !wanted.bare.contains(name) {
+            continue;
+        }
+        let old_enough = FIRST_SEEN.lock().unwrap().as_ref().and_then(|m| m.get(&handle)).is_some_and(|t| t.elapsed() > Duration::from_millis(2500));
+        if !old_enough {
+            continue;
+        }
+        let first = {
+            let mut guard = AUTO_DONE.lock().unwrap();
+            let done = guard.get_or_insert_with(HashSet::new);
+            if done.len() > 500 {
+                done.clear();
+            }
+            done.insert((handle, name.clone()))
+        };
+        if !first {
+            continue;
+        }
+        let at = crate::clientwindows::remembered_fixed(app, name);
+        match make_bare(app, handle, wanted.floating.contains(name), at.map(|s| (s.w, s.h)), at) {
+            Ok(to) => log::info!("{name}: opened in Window mode, Windows' frame off as remembered ({}×{})", to.w, to.h),
+            Err(err) => log::warn!("{name}: couldn't take Windows' frame off: {err}"),
+        }
     }
 }

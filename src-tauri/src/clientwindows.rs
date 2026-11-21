@@ -312,6 +312,12 @@ pub fn remembered(app: &AppHandle, name: &str) -> Option<Spot> {
     with(app, |layout| spot_now(layout, name))
 }
 
+/// 21 Nov: the remembered spot when it was remembered without Windows' frame (the picture's own
+/// rectangle), so a client losing its frame again can go straight into it.
+pub fn remembered_fixed(app: &AppHandle, name: &str) -> Option<Spot> {
+    with(app, |layout| if layout.fixed.get(name) == Some(&true) { spot_now(layout, name) } else { None })
+}
+
 fn spot_now(layout: &ClientLayout, name: &str) -> Option<Spot> {
     layout
         .in_stack
