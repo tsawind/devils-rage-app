@@ -259,7 +259,8 @@ pub fn open_client_tools(app: AppHandle) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         // cmd's own quoting (raw), not Rust's: the path has spaces.
         std::process::Command::new("cmd")
-            .raw_arg(format!("/c timeout /t 2 /nobreak >nul & start \"\" \"{}\"", tools.display()))
+            // ping as the 2 s wait: `timeout` refuses to run without a console window.
+            .raw_arg(format!("/c ping -n 3 127.0.0.1 >nul & start \"\" \"{}\"", tools.display()))
             .creation_flags(0x0800_0000)
             .spawn()
             .map_err(|e| e.to_string())?;
