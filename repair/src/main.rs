@@ -17,8 +17,8 @@ use std::process::Command;
 const MANIFESTS: &str = "https://raw.githubusercontent.com/tsawind/devils-rage-app/updates";
 /// The app's folders (Tauri's: Roaming for settings, Local for logs, recordings and the browser data).
 const APP_ID: &str = "com.tsawind.devilsrage";
-/// The app's program names (the installer's and the build's).
-const APP_EXES: [&str; 2] = ["Devils Rage.exe", "devils-rage-app.exe"];
+/// The app's program names (the installer's and the build's), and Client Tools (20 Nov).
+const APP_EXES: [&str; 3] = ["Devils Rage.exe", "devils-rage-app.exe", "Devils Rage Client Tools.exe"];
 
 fn main() {
     if let Some(code) = run_from_temp() {

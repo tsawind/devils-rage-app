@@ -8,6 +8,9 @@ use tauri_plugin_opener::OpenerExt;
 
 mod appconfig;
 mod blue;
+// 20 Nov: lossless .dat reading and writing, for seats and templates (not used by the app yet).
+#[allow(dead_code)]
+mod blueraw;
 mod arrange;
 mod audiodetect;
 mod bar;
