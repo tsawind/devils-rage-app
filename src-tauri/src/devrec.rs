@@ -32,68 +32,193 @@ fn now_secs() -> u64 {
 }
 
 fn folder(app: &AppHandle) -> Result<PathBuf, String> {
-    recordings(app)
+    kind_dir(app, Kind::Pictures)
 }
 
-/// Where videos, snapshots and scan recordings go (Tsa, 19 Nov: where the app lives, e.g.
-/// C:\Devils Rage\Recordings, so they're easy to find and an uninstall's "delete app data" box
-/// can't take them). If the app's folder can't be written (Program Files), Documents\Devil's
-/// Rage\Recordings; failing that, the old spot in the app's data folder.
-pub fn recordings(app: &AppHandle) -> Result<PathBuf, String> {
-    static CHOSEN: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-    let chosen = CHOSEN.get_or_init(|| {
-        let writable = |dir: PathBuf| -> Option<PathBuf> {
-            std::fs::create_dir_all(&dir).ok()?;
-            let probe = dir.join(".write-test");
-            std::fs::write(&probe, b"ok").ok()?;
-            let _ = std::fs::remove_file(&probe);
-            Some(dir)
-        };
-        let beside_app = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("Recordings")));
-        let documents = app.path().document_dir().ok().map(|d| d.join("Devil's Rage").join("Recordings"));
-        let found = [beside_app, documents].into_iter().flatten().find_map(writable);
-        if let Some(dir) = &found {
-            log::info!("recordings go to {}", dir.display());
+/// What a file is, for which folder it goes in (Tsa, 17 Nov: Videos and Pictures where the app
+/// lives, changeable in the capture window).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    Videos,
+    Pictures,
+    /// PI scan recordings.
+    Scans,
+}
+
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Videos => "Videos",
+            Kind::Pictures => "Pictures",
+            Kind::Scans => "Scans",
         }
-        found
-    });
-    if let Some(dir) = chosen {
-        return Ok(dir.clone());
     }
-    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("recordings");
+
+    /// Which folder an old recording belongs in, by its file name.
+    fn of_file(name: &str) -> Option<Kind> {
+        if name.starts_with("snap-") {
+            Some(Kind::Pictures)
+        } else if name.starts_with("vid-") || name.starts_with("app-") {
+            Some(Kind::Videos)
+        } else if name.starts_with("scan") {
+            Some(Kind::Scans)
+        } else {
+            None
+        }
+    }
+}
+
+/// A folder this app can write to (made if needed; checked once per folder).
+fn writable(dir: &std::path::Path) -> bool {
+    static CHECKED: std::sync::Mutex<Vec<(PathBuf, bool)>> = std::sync::Mutex::new(Vec::new());
+    if let Some((_, ok)) = CHECKED.lock().unwrap().iter().find(|(d, _)| d == dir) {
+        return *ok && dir.is_dir();
+    }
+    let ok = std::fs::create_dir_all(dir).is_ok() && {
+        let probe = dir.join(".write-test");
+        let wrote = std::fs::write(&probe, b"ok").is_ok();
+        let _ = std::fs::remove_file(&probe);
+        wrote
+    };
+    CHECKED.lock().unwrap().push((dir.to_path_buf(), ok));
+    ok
+}
+
+/// The default place: the app's own folder; Documents\Devil's Rage when that can't be written
+/// (Program Files); the app's data folder as a last resort.
+fn default_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let beside_app = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from));
+    let documents = app.path().document_dir().ok().map(|d| d.join("Devil's Rage"));
+    if let Some(dir) = [beside_app, documents].into_iter().flatten().find(|d| writable(d)) {
+        return Ok(dir);
+    }
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
-/// Move recordings from the old spot (the app's data folder) to the new one, once, in the
-/// background. Anything that can't move stays where it was.
+/// Where Videos, Pictures and Scans go: the folder picked in the capture window, else the
+/// default. A picked folder that's gone (a drive unplugged) falls back to the default until
+/// it's back; the second value says so.
+pub fn root(app: &AppHandle) -> Result<(PathBuf, Option<String>), String> {
+    if let Some(picked) = crate::settings::load(app).recordings_dir.filter(|d| !d.trim().is_empty()) {
+        let picked = PathBuf::from(picked);
+        if picked.is_dir() && writable(&picked) {
+            return Ok((picked, None));
+        }
+        return Ok((default_root(app)?, Some(format!("{} isn't there or can't be written to: using the default until it's back", picked.display()))));
+    }
+    Ok((default_root(app)?, None))
+}
+
+/// The folder for one kind of file (made if needed).
+pub fn kind_dir(app: &AppHandle, kind: Kind) -> Result<PathBuf, String> {
+    let dir = root(app)?.0.join(kind.name());
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// PI scan recordings (piscan.rs, planetscan).
+pub fn recordings(app: &AppHandle) -> Result<PathBuf, String> {
+    kind_dir(app, Kind::Scans)
+}
+
+/// Move recordings from the old spots (the app's data folder until 19 Nov, then a Recordings
+/// folder next to the app) into Videos, Pictures and Scans, once, in the background. Anything
+/// that can't move stays where it was.
 pub fn move_old_recordings(app: &AppHandle) {
     let app = app.clone();
     let _ = std::thread::Builder::new().name("move-recordings".into()).spawn(move || {
-        let Ok(old) = app.path().app_local_data_dir().map(|d| d.join("recordings")) else { return };
-        let Ok(new) = recordings(&app) else { return };
-        if new == old || !old.is_dir() {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(&old) else { return };
-        let (mut moved, mut left) = (0, 0);
-        for entry in entries.flatten() {
-            let to = new.join(entry.file_name());
-            if to.exists() {
-                left += 1;
-                continue;
+        let olds: Vec<PathBuf> = [
+            app.path().app_local_data_dir().ok().map(|d| d.join("recordings")),
+            std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("Recordings"))),
+            app.path().document_dir().ok().map(|d| d.join("Devil's Rage").join("Recordings")),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|d| d.is_dir())
+        .collect();
+        for old in olds {
+            let Ok(entries) = std::fs::read_dir(&old) else { continue };
+            let (mut moved, mut left) = (0, 0);
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Some(kind) = Kind::of_file(&name) else {
+                    left += 1;
+                    continue;
+                };
+                let Ok(dir) = kind_dir(&app, kind) else {
+                    left += 1;
+                    continue;
+                };
+                let to = dir.join(&name);
+                if to.exists() {
+                    left += 1;
+                    continue;
+                }
+                if std::fs::rename(entry.path(), &to).is_ok() || copy_then_remove(&entry.path(), &to) {
+                    moved += 1;
+                } else {
+                    left += 1;
+                }
             }
-            if std::fs::rename(entry.path(), &to).is_ok() || copy_then_remove(&entry.path(), &to) {
-                moved += 1;
-            } else {
-                left += 1;
+            if left == 0 {
+                let _ = std::fs::remove_dir(&old);
+            }
+            if moved > 0 || left > 0 {
+                log::info!("moved {moved} old recordings out of {} into Videos / Pictures / Scans ({left} left there)", old.display());
             }
         }
-        if left == 0 {
-            let _ = std::fs::remove_dir(&old);
-        }
-        log::info!("moved {moved} old recordings to {} ({left} left behind)", new.display());
     });
+}
+
+/// The capture window's folder line: where files go, whether that's the default, and why not
+/// the picked one.
+#[tauri::command]
+pub fn dev_recordings_folder(app: AppHandle) -> Result<serde_json::Value, String> {
+    let (root, problem) = root(&app)?;
+    let picked = crate::settings::load(&app).recordings_dir.filter(|d| !d.trim().is_empty());
+    Ok(serde_json::json!({ "root": root.display().to_string(), "picked": picked, "problem": problem, "default": default_root(&app)?.display().to_string() }))
+}
+
+/// Pick another folder for Videos, Pictures and Scans (a folder picker), or go back to the
+/// default (`reset`). New files go there; files already saved stay where they are.
+#[tauri::command]
+pub async fn dev_recordings_choose(app: AppHandle, reset: bool) -> Result<serde_json::Value, String> {
+    let picked = if reset {
+        None
+    } else {
+        use tauri_plugin_dialog::DialogExt;
+        let app2 = app.clone();
+        let chosen = tauri::async_runtime::spawn_blocking(move || app2.dialog().file().set_title("Where Videos, Pictures and Scans go").blocking_pick_folder())
+            .await
+            .map_err(|e| e.to_string())?;
+        let Some(chosen) = chosen else { return dev_recordings_folder(app) };
+        let path = chosen.into_path().map_err(|e| e.to_string())?;
+        if !writable(&path) {
+            return Err(format!("{} can't be written to.", path.display()));
+        }
+        Some(path.display().to_string())
+    };
+    let mut s = crate::settings::load(&app);
+    s.recordings_dir = picked;
+    crate::settings::save(&app, &s)?;
+    log::info!("recordings go to {}", root(&app)?.0.display());
+    dev_recordings_folder(app)
+}
+
+/// Open the Videos or Pictures folder (Scans with "scans").
+#[tauri::command]
+pub fn dev_open_kind(app: AppHandle, kind: String) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let kind = match kind.as_str() {
+        "videos" => Kind::Videos,
+        "scans" => Kind::Scans,
+        _ => Kind::Pictures,
+    };
+    let dir = kind_dir(&app, kind)?;
+    app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())?;
+    Ok(dir.display().to_string())
 }
 
 /// Another drive: copy it over, then remove the original (a folder is copied file by file).
@@ -166,7 +291,7 @@ pub fn recording_secs() -> Option<u64> {
 
 /// Start or stop recording everything. Returns the folder it records into.
 pub fn set_recording(app: &AppHandle, on: bool) -> Result<String, String> {
-    let dir = folder(app)?;
+    let dir = kind_dir(app, Kind::Videos)?;
     let engine = app.state::<crate::planetscan::Engine>();
     if !on {
         RECORDING.store(false, Ordering::SeqCst);
@@ -487,7 +612,7 @@ fn pieces(app: &AppHandle, target: &Target, boxes: &[[u32; 4]], half: bool) -> R
 #[tauri::command]
 pub fn dev_open_recordings(app: AppHandle) -> Result<String, String> {
     use tauri_plugin_opener::OpenerExt;
-    let dir = folder(&app)?;
+    let dir = root(&app)?.0;
     app.opener().open_path(dir.to_string_lossy(), None::<&str>).map_err(|e| e.to_string())?;
     Ok(dir.display().to_string())
 }
@@ -547,7 +672,7 @@ pub async fn dev_video_still(app: AppHandle, target: Target) -> Result<serde_jso
 /// Start a video recording (stops one already running first). Returns the folder.
 #[tauri::command]
 pub fn dev_video_start(app: AppHandle, spec: VideoSpec) -> Result<String, String> {
-    let dir = folder(&app)?;
+    let dir = kind_dir(&app, Kind::Videos)?;
     VIDEO_ON.store(false, Ordering::SeqCst);
     std::thread::sleep(Duration::from_millis(150));
     let stamp = now_secs();
@@ -710,4 +835,20 @@ pub async fn dev_snapshot_boxes(app: AppHandle, target: Target, boxes: Vec<[u32;
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod folder_tests {
+    use super::Kind;
+
+    #[test]
+    fn old_recordings_go_to_the_right_folder() {
+        assert_eq!(Kind::of_file("snap-1794941167.jpg"), Some(Kind::Pictures));
+        assert_eq!(Kind::of_file("snap-1794941322184.json"), Some(Kind::Pictures));
+        assert_eq!(Kind::of_file("vid-1794931448-001.bin"), Some(Kind::Videos));
+        assert_eq!(Kind::of_file("app-1794926774-001.bin"), Some(Kind::Videos));
+        assert_eq!(Kind::of_file("scan2-1794883473-001.bin"), Some(Kind::Scans));
+        assert_eq!(Kind::of_file("scan-1793734456"), Some(Kind::Scans));
+        assert_eq!(Kind::of_file("notes.txt"), None);
+    }
 }

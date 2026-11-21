@@ -40,7 +40,11 @@
       <select id="quality" title="Quality (file size)"><option value="55">Low</option><option value="75" selected>Medium</option><option value="90">High (sharp text)</option></select>
       <select id="size" title="Full or half size"><option value="full" selected>Full size</option><option value="half">Half size</option></select>
       <button id="clear" title="Remove every box">Clear boxes</button>
-      <button id="folder" title="Open the folder the snapshots and videos go to">Open folder</button>
+      <button id="videos" title="Open the folder the videos go to">Videos</button>
+      <button id="pictures" title="Open the folder the snapshots go to">Pictures</button>
+      <button id="where" title="Pick another folder for Videos, Pictures and Scans (another drive, say)">Change folder…</button>
+      <button id="back" title="Back to the app's own folder" hidden>Back to default</button>
+      <span id="whereText" style="font-size: 11px; opacity: .75"></span>
     </span>
   </div>
   <div id="boxes"></div>
@@ -151,7 +155,17 @@
   for (const id of ["fps", "quality", "size"]) $(id).addEventListener("change", keep);
   $("refresh").addEventListener("click", loadStill);
   $("opts").addEventListener("click", () => { document.body.classList.toggle("more"); keep(); fit(); });
-  $("folder").addEventListener("click", () => invoke("dev_open_recordings").then((d) => say(`Saved in ${d}`)).catch((e) => say(String(e), "bad")));
+  // 21 Nov: Videos and Pictures where the app lives (or a folder picked here).
+  const showWhere = (w) => {
+    $("whereText").textContent = `Saving in ${w.root}${w.picked ? "" : " (default)"}`;
+    $("back").hidden = !w.picked;
+    if (w.problem) say(w.problem, "bad");
+  };
+  invoke("dev_recordings_folder").then(showWhere).catch(() => {});
+  $("videos").addEventListener("click", () => invoke("dev_open_kind", { kind: "videos" }).then((d) => say(`Videos are in ${d}`)).catch((e) => say(String(e), "bad")));
+  $("pictures").addEventListener("click", () => invoke("dev_open_kind", { kind: "pictures" }).then((d) => say(`Pictures are in ${d}`)).catch((e) => say(String(e), "bad")));
+  $("where").addEventListener("click", () => invoke("dev_recordings_choose", { reset: false }).then(showWhere).catch((e) => say(String(e), "bad")));
+  $("back").addEventListener("click", () => invoke("dev_recordings_choose", { reset: true }).then(showWhere).catch((e) => say(String(e), "bad")));
   $("clear").addEventListener("click", () => { boxes = []; keep(); listBoxes(); draw(); });
   $("snap").addEventListener("click", async () => {
     $("snap").disabled = true;

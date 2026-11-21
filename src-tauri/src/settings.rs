@@ -77,6 +77,10 @@ pub struct Settings {
     /// for a launch group. Missing = we look in the usual install spots.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub launcher_path: Option<String>,
+    /// 21 Nov: where Videos, Pictures and Scans go, when picked in the capture window. Missing =
+    /// the app's own folder (e.g. C:\Devils Rage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recordings_dir: Option<String>,
     /// Show the developer section in Settings.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub developer: bool,
