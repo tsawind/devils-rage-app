@@ -321,15 +321,33 @@
     const by = charIndex();
     const list = Object.values(by).sort((a, b) => b.modified - a.modified);
     const layL = lettering(list.map(c => c.layout_fp));
+    // 21 Nov: how alike two layouts are: windows open in both at about the same spot (within 2 %
+    // of the client), out of the windows open in either.
+    const alike = (a, b) => {
+      const A = new Map(a.windows || []), B = new Map(b.windows || []);
+      const names = new Set([...A.keys(), ...B.keys()]);
+      if (!names.size) return 0;
+      let same = 0;
+      names.forEach(n => { const p = A.get(n), q = B.get(n); if (p && q && p.every((v, i) => Math.abs(v - q[i]) <= 0.02)) same++; });
+      return same / names.size;
+    };
+    const mostLike = (c) => {
+      let best = null, score = 0;
+      list.forEach(o => { if (o.id !== c.id && (o.windows || []).length) { const s = alike(c, o); if (s > score) { score = s; best = o; } } });
+      return best ? { who: who(best.id), score } : null;
+    };
     const t = $("chars"); t.innerHTML = "";
-    const head = el("tr"); ["Character", "Newest in", "Windows placed", "Placed at client size", "Layout", "Saved", "Files"].forEach(h => head.append(el("th", null, h))); t.append(head);
+    const head = el("tr"); ["Character", "Newest in", "Windows placed", "Placed at client size", "Layout", "Most like", "Saved", "Files"].forEach(h => head.append(el("th", null, h))); t.append(head);
     list.forEach(c => {
       const tr = el("tr");
       const sizes = el("td");
       if (c.error) sizes.append(el("span", "bad", "couldn't read: " + c.error));
       else c.sizes.slice(0, 3).forEach(([w, h, n]) => sizes.append(el("span", "chip", `${w}×${h} · ${n}`)));
       const lay = el("td"); lay.append(layL(c.layout_fp));
-      tr.append(el("td", null, who(c.id)), el("td", null, "settings_" + c.folder), el("td", "num", String(c.open_windows)), sizes, lay,
+      const like = (c.windows || []).length ? mostLike(c) : null;
+      const likeTd = el("td", like && like.score >= 0.8 ? null : "muted", like ? `${like.who} · ${Math.round(like.score * 100)} %` : "–");
+      likeTd.title = "The character whose open windows sit in the same spots most (windows open in both, within 2 % of the client), out of the windows open in either";
+      tr.append(el("td", null, who(c.id)), el("td", null, "settings_" + c.folder), el("td", "num", String(c.open_windows)), sizes, lay, likeTd,
         el("td", "muted", when(c.modified)), el("td", "muted", c.copies > 1 ? `${c.copies} profiles` : ""));
       t.append(tr);
     });

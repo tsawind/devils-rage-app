@@ -145,6 +145,9 @@ struct CharacterLook {
     /// [client width, client height, open windows arranged at that size], biggest first.
     sizes: Vec<(i64, i64, usize)>,
     layout_fp: String,
+    /// 21 Nov: each open window's spot as a share of its client size (left, top, width, height),
+    /// so layouts can be compared ("most like Darkness Holder, 82 %").
+    windows: Vec<(String, [f64; 4])>,
 }
 
 #[derive(Debug, Serialize)]
@@ -199,6 +202,22 @@ fn account_look(dir: &Path, file: &str, id: u64, modified: u64) -> AccountLook {
         }
     }
     look
+}
+
+/// A window's (left, top, width, height) as shares of the client size it was placed at.
+fn share_of_client(place: &Blue) -> Option<[f64; 4]> {
+    let (Blue::Tuple(parts) | Blue::List(parts)) = place else { return None };
+    let num = |i: usize| match parts.get(i) {
+        Some(Blue::Int(v)) => Some(*v as f64),
+        Some(Blue::Float(v)) => Some(*v),
+        _ => None,
+    };
+    let (cw, ch) = (num(4)?, num(5)?);
+    if cw <= 0.0 || ch <= 0.0 {
+        return None;
+    }
+    let r = |v: f64| (v * 1000.0).round() / 1000.0;
+    Some([r(num(0)? / cw), r(num(1)? / ch), r(num(2)? / cw), r(num(3)? / ch)])
 }
 
 /// "CmdRefreshDirectionalScan" → "Refresh Directional Scan".
@@ -314,13 +333,14 @@ fn layout(root: &Blue) -> (Vec<(String, &Blue)>, BTreeMap<(i64, i64), usize>) {
 }
 
 fn character_look(dir: &Path, file: &str, id: u64, modified: u64) -> CharacterLook {
-    let mut look = CharacterLook { id, file: file.to_string(), modified, error: None, open_windows: 0, sizes: Vec::new(), layout_fp: String::new() };
+    let mut look = CharacterLook { id, file: file.to_string(), modified, error: None, open_windows: 0, sizes: Vec::new(), layout_fp: String::new(), windows: Vec::new() };
     match read_blue(&dir.join(file)) {
         Err(e) => look.error = Some(e),
         Ok(root) => {
             let (open, sizes) = layout(&root);
             look.open_windows = open.len();
             look.layout_fp = Blue::List(open.iter().map(|(n, p)| Blue::Tuple(vec![Blue::Str(n.clone()), (*p).clone()])).collect()).fingerprint();
+            look.windows = open.iter().filter_map(|(name, place)| Some((name.clone(), share_of_client(place)?))).collect();
             look.sizes = sizes.into_iter().map(|((w, h), n)| (w, h, n)).collect();
             look.sizes.sort_by(|a, b| b.2.cmp(&a.2));
         }
@@ -424,6 +444,13 @@ pub fn setups_compare(files: Vec<String>) -> Result<Vec<serde_json::Value>, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_spots_become_shares_of_their_client() {
+        let place = Blue::Tuple(vec![Blue::Int(960), Blue::Int(0), Blue::Int(480), Blue::Int(540), Blue::Int(1920), Blue::Int(1080)]);
+        assert_eq!(share_of_client(&place), Some([0.5, 0.0, 0.25, 0.5]));
+        assert_eq!(share_of_client(&Blue::Tuple(vec![Blue::Int(1)])), None);
+    }
 
     #[test]
     fn shortcuts_read_like_eves_own_settings() {
