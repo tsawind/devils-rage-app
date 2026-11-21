@@ -287,13 +287,26 @@ mod activity {
         if !WATCHED.lock().unwrap().insert(me.to_string()) {
             return;
         }
-        let (app, me) = (app.clone(), me.to_string());
+        let me = me.to_string();
+        let _ = app;
         std::thread::spawn(move || {
-            while let Some(view) = app.get_webview(&me) {
+            loop {
                 let character = crate::clipboard::foreground_eve_character().filter(|n| crate::incognito::is_public_name(n));
                 let idle = idle_ms().min(86_400_000);
                 let detail = serde_json::json!({ "character": character, "idleMs": idle });
-                let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:active', {{ detail: {detail} }}));"));
+                let script = format!("window.dispatchEvent(new CustomEvent('devils-rage-app:active', {{ detail: {detail} }}));");
+                // The page is looked up on the main thread (mainthread.rs).
+                let page = me.clone();
+                let alive = crate::mainthread::run(move |app| match app.get_webview(&page) {
+                    Some(view) => {
+                        let _ = view.eval(script);
+                        true
+                    }
+                    None => false,
+                });
+                if alive == Some(false) {
+                    break;
+                }
                 std::thread::sleep(Duration::from_millis(250));
             }
             WATCHED.lock().unwrap().remove(&me);

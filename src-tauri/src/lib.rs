@@ -28,6 +28,7 @@ mod launch;
 mod clientaudio;
 mod commands;
 mod devrec;
+mod mainthread;
 mod eveapps;
 mod location;
 mod mainwindow;
@@ -321,6 +322,7 @@ pub fn bar_action(app: &AppHandle, action: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    mainthread::log_panics();
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(planetscan::Engine::default())
@@ -525,6 +527,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            mainthread::init(&handle);
             let s = settings::load(&handle);
             let version = app.package_info().version.to_string();
             log::info!("Devil's Rage {version} starting");

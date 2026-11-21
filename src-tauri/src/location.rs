@@ -219,6 +219,13 @@ fn deliver(app: &AppHandle, changes: &[(i64, String)]) {
 /// Runs `js` in one mapper page open in the app: a map page first (the main window's, then
 /// any other), else any mapper page. Never in a scanner pop-out (it's drawn by its parent).
 pub fn send_to_mapper(app: &AppHandle, js: &str) {
+    // The pages are looked up on the main thread (mainthread.rs).
+    let _ = app;
+    let js = js.to_string();
+    crate::mainthread::run(move |app| send_now(app, &js));
+}
+
+fn send_now(app: &AppHandle, js: &str) {
     let mapper_host = crate::host_of(crate::MAPPER_URL);
     let mut windows: Vec<_> = app
         .webviews()

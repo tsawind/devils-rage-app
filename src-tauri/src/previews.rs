@@ -548,88 +548,100 @@ pub fn set_previews_auto(app: AppHandle, on: bool) {
 /// Patch 70: watch the client in front and the clients open. The client in front is pushed to
 /// every preview the moment it changes (the green border no longer waits for a picture), and
 /// new EVE clients get their previews without anyone pressing a button.
-pub fn start_watch(app: AppHandle) {
+pub fn start_watch(_app: AppHandle) {
     std::thread::spawn(move || {
-        let mut front: Option<String> = None;
-        let mut front_handle: isize = 0;
-        let mut known: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        let mut last_open: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        let mut tick: u32 = 0;
+        // Each look runs on the main thread (mainthread.rs: Tauri's window handles must not be
+        // cloned on this thread).
+        let state: std::sync::Arc<Mutex<WatchState>> = Default::default();
         loop {
             std::thread::sleep(std::time::Duration::from_millis(80));
-            let handle = crate::clipboard::foreground_handle();
-            if handle != front_handle {
-                front_handle = handle;
-                let now = crate::clipboard::foreground_client();
-                if now.is_some() && now != front {
-                    front = now.clone();
-                    *LAST_FRONT.lock().unwrap() = now.clone();
-                    push_active(&app, front.as_deref());
-                }
-            }
-            tick += 1;
-            hover_square(&app);
-            if tick % 12 == 0 && !crate::arrange::arranging() {
-                crate::clientwindows::hold(&app);
-            }
-            if tick % 5 != 0 {
-                continue;
-            }
-            // Every 0.4 s: a client that has closed takes its preview with it (gone two checks in
-            // a row, so a title change while logging in doesn't count). Not in edit mode; the
-            // preview comes back by itself when that client starts again.
-            let open: std::collections::BTreeSet<String> = crate::clipboard::open_clients()
-                .into_iter()
-                .map(|(name, _)| name)
-                .collect();
-            if !with_layout(&app, |layout| layout.edit) {
-                let gone: Vec<WebviewWindow> = app
-                    .webview_windows()
-                    .into_iter()
-                    .filter(|(label, _)| label.starts_with(PREFIX))
-                    .map(|(_, window)| window)
-                    .filter(|window| {
-                        name_of_window(window)
-                            .is_some_and(|name| !open.contains(&name) && !last_open.contains(&name))
-                    })
-                    .collect();
-                if !gone.is_empty() {
-                    // Windows are closed on the main thread: closing one from this watcher
-                    // thread left its frame on screen with a dead page inside.
-                    destroy_all(&app, gone);
-                }
-            }
-            last_open = open.clone();
-            // Every 2 s: new clients get their previews.
-            if tick % 25 == 0 {
-                let new_names: Vec<String> = open.iter().filter(|name| !known.contains(*name)).cloned().collect();
-                let fresh = new_names.iter().any(|n| !crate::clipboard::is_login_label(n));
-                known = open;
-                if fresh {
-                    let app = app.clone();
-                    // A new client (or one that just logged in) goes to its remembered spot.
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_secs(2));
-                        crate::clientwindows::on_new_clients(&app, &new_names);
-                    });
-                }
-                if fresh
-                    && !AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed)
-                    && with_layout(&app, |layout| layout.auto_open)
-                {
-                    let app = app.clone();
-                    // Give a new client a moment to draw something before its preview opens.
-                    let open_now = app.webview_windows().keys().filter(|l| l.starts_with(PREFIX)).count();
-                    if open_now < AUTO_MAX {
-                        tauri::async_runtime::spawn(async move {
-                            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                            let _ = open_previews(app);
-                        });
-                    }
-                }
-            }
+            let state = state.clone();
+            crate::mainthread::run(move |app| watch_tick(app, &mut state.lock().unwrap()));
         }
     });
+}
+
+#[derive(Default)]
+struct WatchState {
+    front: Option<String>,
+    front_handle: isize,
+    known: std::collections::BTreeSet<String>,
+    last_open: std::collections::BTreeSet<String>,
+    tick: u32,
+}
+
+fn watch_tick(app: &AppHandle, st: &mut WatchState) {
+    let handle = crate::clipboard::foreground_handle();
+    if handle != st.front_handle {
+        st.front_handle = handle;
+        let now = crate::clipboard::foreground_client();
+        if now.is_some() && now != st.front {
+            st.front = now.clone();
+            *LAST_FRONT.lock().unwrap() = now.clone();
+            push_active(app, st.front.as_deref());
+        }
+    }
+    st.tick += 1;
+    hover_square(app);
+    if st.tick % 12 == 0 && !crate::arrange::arranging() {
+        crate::clientwindows::hold(app);
+    }
+    if st.tick % 5 != 0 {
+        return;
+    }
+    // Every 0.4 s: a client that has closed takes its preview with it (gone two checks in
+    // a row, so a title change while logging in doesn't count). Not in edit mode; the
+    // preview comes back by itself when that client starts again.
+    let open: std::collections::BTreeSet<String> = crate::clipboard::open_clients()
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    if !with_layout(app, |layout| layout.edit) {
+        let gone: Vec<WebviewWindow> = app
+            .webview_windows()
+            .into_iter()
+            .filter(|(label, _)| label.starts_with(PREFIX))
+            .map(|(_, window)| window)
+            .filter(|window| {
+                name_of_window(window)
+                    .is_some_and(|name| !open.contains(&name) && !st.last_open.contains(&name))
+            })
+            .collect();
+        if !gone.is_empty() {
+            // Windows are closed on the main thread: closing one from this watcher
+            // thread left its frame on screen with a dead page inside.
+            destroy_all(app, gone);
+        }
+    }
+    st.last_open = open.clone();
+    // Every 2 s: new clients get their previews.
+    if st.tick % 25 == 0 {
+        let new_names: Vec<String> = open.iter().filter(|name| !st.known.contains(*name)).cloned().collect();
+        let fresh = new_names.iter().any(|n| !crate::clipboard::is_login_label(n));
+        st.known = open;
+        if fresh {
+            let app = app.clone();
+            // A new client (or one that just logged in) goes to its remembered spot.
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                crate::clientwindows::on_new_clients(&app, &new_names);
+            });
+        }
+        if fresh
+            && !AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed)
+            && with_layout(app, |layout| layout.auto_open)
+        {
+            let app = app.clone();
+            // Give a new client a moment to draw something before its preview opens.
+            let open_now = app.webview_windows().keys().filter(|l| l.starts_with(PREFIX)).count();
+            if open_now < AUTO_MAX {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    let _ = open_previews(app);
+                });
+            }
+        }
+    }
 }
 
 /// The EVE client that was in front last (stays when you switch to another program).

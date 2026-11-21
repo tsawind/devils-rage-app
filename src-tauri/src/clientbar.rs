@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
@@ -612,118 +612,140 @@ pub fn start(app: AppHandle) {
     std::thread::Builder::new()
         .name("client-bars".into())
         .spawn(move || {
-            // label -> (shown, place, region key)
-            let mut shown: HashMap<String, (bool, Place, (bool, i32, i32, i32))> = HashMap::new();
-            let mut modes: HashMap<String, (bool, Spot)> = HashMap::new();
-            let mut logins: HashMap<isize, LoginWatch> = HashMap::new();
+            // label -> (shown, place, region key); client modes; login screens being watched.
+            let state: Arc<Mutex<BarsState>> = Arc::new(Mutex::new(BarsState::default()));
             let mut noted = std::time::Instant::now();
             loop {
                 std::thread::sleep(Duration::from_millis(150));
-                follow_switches(&app, &mut modes);
-                remember_moved_logins(&app, &mut logins);
                 // Which EVE account each logged-in client is on (pcaccounts.rs), every few seconds.
                 if noted.elapsed() >= Duration::from_secs(3) {
                     noted = std::time::Instant::now();
                     crate::pcaccounts::note_running(&app);
                 }
-                let wanted = settings(&app);
-                // Window-mode clients get the small bar left of Windows' own –, ☐, ✕; Fixed Window
-                // clients get our title bar (or the small bar when floating).
-                let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| wanted.wants(n)).collect();
-                // Bars whose client closed or was taken off the list.
-                for (label, window) in app.webview_windows() {
-                    if !label.starts_with(PREFIX) {
-                        continue;
-                    }
-                    let keep = open.keys().any(|n| label_for(n) == label);
-                    if !keep {
-                        shown.remove(&label);
-                        let _ = window.destroy();
-                    }
-                }
-                for (name, handle) in &open {
-                    let label = label_for(name);
-                    let window = match app.get_webview_window(&label) {
-                        Some(w) => w,
-                        None => match build_bar(&app, name) {
-                            Some(w) => w,
-                            None => continue,
-                        },
-                    };
-                    let scale = window.scale_factor().unwrap_or(1.0);
-                    let tall = TALL.lock().unwrap().as_ref().and_then(|m| m.get(&label).copied());
-                    let Some(frame) = win::frame(*handle) else {
-                        if shown.get(&label).is_none_or(|s| s.0) && tall.is_none() {
-                            let _ = window.hide();
-                            if let Some(entry) = shown.get_mut(&label) {
-                                entry.0 = false;
-                            }
-                        }
-                        continue;
-                    };
-                    let width = match tall {
-                        Some(_) => BAR_W,
-                        None if wanted.mini.contains(name) => BAR_MINI_W,
-                        None => bar_width(&wanted.buttons).max(BAR_MINI_W),
-                    };
-                    let mut place = place_for(frame, win::captioned(*handle), wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
-                    // A Fixed Window client (login screens too) that opened flush against the top
-                    // has no room for our title bar: the first time, nudge it into its snapped spot.
-                    if !place.frame && !win::captioned(*handle) && !wanted.floating.contains(name) && first_sight(*handle) {
-                        if let Some(work) = win::work_area(frame) {
-                            if let Some(to) = nudge_for_title_bar(frame, work, scale) {
-                                crate::clientwindows::place_window(*handle, to);
-                                continue;
-                            }
-                        }
-                    }
-                    if !place.frame {
-                        if let Some((dx, dy)) = wanted.offsets.get(name) {
-                            place.x = frame.x + dx;
-                            place.y = frame.y + dy;
-                        }
-                    }
-                    if BAR_MOVING.lock().unwrap().as_deref() == Some(label.as_str()) {
-                        continue;
-                    }
-                    // Shown whenever the client is; kept just above its client in Windows' stacking
-                    // order (not on top of everything), so whatever covers the client covers it too.
-                    let see = true;
-                    if let Some(ours) = our_hwnd(&window) {
-                        if tall.is_none() {
-                            win::stack_above(ours, *handle);
-                        }
-                    }
-                    let before = shown.get(&label).copied();
-                    if before.is_none_or(|b| b.1.x != place.x || b.1.y != place.y) {
-                        let _ = window.set_position(PhysicalPosition::new(place.x, place.y));
-                    }
-                    if before.is_none_or(|b| b.1.w != place.w || b.1.h != place.h) {
-                        let _ = window.set_size(tauri::PhysicalSize::new(place.w.max(1) as u32, place.h.max(1) as u32));
-                    }
-                    // Frame mode: only the title bar and edge are ours (plus an open menu's box).
-                    let menu_h = tall.map_or(0, |t| ((t - BAR_H + 8.0) * scale).round() as i32);
-                    let region = (place.frame, place.w, place.h, menu_h);
-                    if before.is_none_or(|b| b.2 != region) {
-                        if let Some(ours) = our_hwnd(&window) {
-                            let menu_w = (BAR_W * scale).round() as i32;
-                            let menu = (place.frame && menu_h > 0).then_some((place.w - menu_w, place.top, menu_w, menu_h));
-                            win::shape(ours, place.w, place.h, place.frame.then_some((place.top, 1)), menu);
-                        }
-                    }
-                    if before.is_none_or(|b| b.1.frame != place.frame || b.1.top != place.top) {
-                        let top_css = place.top as f64 / scale;
-                        MODES.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.clone(), (place.frame, top_css));
-                        let _ = window.eval(format!("window.setMode && window.setMode({}, {top_css})", place.frame));
-                    }
-                    if before.is_none_or(|b| b.0 != see) {
-                        let _ = if see { window.show() } else { window.hide() };
-                    }
-                    shown.insert(label, (see, place, region));
+                // The windows themselves are handled on the main thread (mainthread.rs: Tauri's
+                // window handles must not be cloned on this thread).
+                let state = state.clone();
+                let missing = crate::mainthread::run(move |app| {
+                    let mut guard = state.lock().unwrap();
+                    let BarsState { shown, modes, logins } = &mut *guard;
+                    follow_switches(app, modes);
+                    remember_moved_logins(app, logins);
+                    bars_tick(app, shown)
+                });
+                // New bars are made here, not on the main thread (building a window from the main
+                // thread's own work can lock up on Windows); the next look places them.
+                for name in missing.unwrap_or_default() {
+                    build_bar(&app, &name);
                 }
             }
         })
         .ok();
+}
+
+#[derive(Default)]
+struct BarsState {
+    shown: HashMap<String, (bool, Place, (bool, i32, i32, i32))>,
+    modes: HashMap<String, (bool, Spot)>,
+    logins: HashMap<isize, LoginWatch>,
+}
+
+/// One look at every client: bars moved, shown or closed (on the main thread). The clients that
+/// still need a bar come back.
+fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i32, i32, i32))>) -> Vec<String> {
+    let mut missing = Vec::new();
+    let wanted = settings(app);
+    // Window-mode clients get the small bar left of Windows' own –, ☐, ✕; Fixed Window
+    // clients get our title bar (or the small bar when floating).
+    let open: HashMap<String, isize> = crate::clipboard::open_clients().into_iter().filter(|(n, _)| wanted.wants(n)).collect();
+    // Bars whose client closed or was taken off the list.
+    for (label, window) in app.webview_windows() {
+        if !label.starts_with(PREFIX) {
+            continue;
+        }
+        let keep = open.keys().any(|n| label_for(n) == label);
+        if !keep {
+            shown.remove(&label);
+            let _ = window.destroy();
+        }
+    }
+    for (name, handle) in &open {
+        let label = label_for(name);
+        let Some(window) = app.get_webview_window(&label) else {
+            missing.push(name.clone());
+            continue;
+        };
+        let scale = window.scale_factor().unwrap_or(1.0);
+        let tall = TALL.lock().unwrap().as_ref().and_then(|m| m.get(&label).copied());
+        let Some(frame) = win::frame(*handle) else {
+            if shown.get(&label).is_none_or(|s| s.0) && tall.is_none() {
+                let _ = window.hide();
+                if let Some(entry) = shown.get_mut(&label) {
+                    entry.0 = false;
+                }
+            }
+            continue;
+        };
+        let width = match tall {
+            Some(_) => BAR_W,
+            None if wanted.mini.contains(name) => BAR_MINI_W,
+            None => bar_width(&wanted.buttons).max(BAR_MINI_W),
+        };
+        let mut place = place_for(frame, win::captioned(*handle), wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+        // A Fixed Window client (login screens too) that opened flush against the top
+        // has no room for our title bar: the first time, nudge it into its snapped spot.
+        if !place.frame && !win::captioned(*handle) && !wanted.floating.contains(name) && first_sight(*handle) {
+            if let Some(work) = win::work_area(frame) {
+                if let Some(to) = nudge_for_title_bar(frame, work, scale) {
+                    crate::clientwindows::place_window(*handle, to);
+                    continue;
+                }
+            }
+        }
+        if !place.frame {
+            if let Some((dx, dy)) = wanted.offsets.get(name) {
+                place.x = frame.x + dx;
+                place.y = frame.y + dy;
+            }
+        }
+        if BAR_MOVING.lock().unwrap().as_deref() == Some(label.as_str()) {
+            continue;
+        }
+        // Shown whenever the client is; kept just above its client in Windows' stacking
+        // order (not on top of everything), so whatever covers the client covers it too.
+        let see = true;
+        if let Some(ours) = our_hwnd(&window) {
+            if tall.is_none() {
+                win::stack_above(ours, *handle);
+            }
+        }
+        let before = shown.get(&label).copied();
+        if before.is_none_or(|b| b.1.x != place.x || b.1.y != place.y) {
+            let _ = window.set_position(PhysicalPosition::new(place.x, place.y));
+        }
+        if before.is_none_or(|b| b.1.w != place.w || b.1.h != place.h) {
+            let _ = window.set_size(tauri::PhysicalSize::new(place.w.max(1) as u32, place.h.max(1) as u32));
+        }
+        // Frame mode: only the title bar and edge are ours (plus an open menu's box).
+        let menu_h = tall.map_or(0, |t| ((t - BAR_H + 8.0) * scale).round() as i32);
+        let region = (place.frame, place.w, place.h, menu_h);
+        if before.is_none_or(|b| b.2 != region) {
+            if let Some(ours) = our_hwnd(&window) {
+                let menu_w = (BAR_W * scale).round() as i32;
+                let menu = (place.frame && menu_h > 0).then_some((place.w - menu_w, place.top, menu_w, menu_h));
+                win::shape(ours, place.w, place.h, place.frame.then_some((place.top, 1)), menu);
+            }
+        }
+        if before.is_none_or(|b| b.1.frame != place.frame || b.1.top != place.top) {
+            let top_css = place.top as f64 / scale;
+            MODES.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.clone(), (place.frame, top_css));
+            let _ = window.eval(format!("window.setMode && window.setMode({}, {top_css})", place.frame));
+        }
+        if before.is_none_or(|b| b.0 != see) {
+            let _ = if see { window.show() } else { window.hide() };
+        }
+        shown.insert(label, (see, place, region));
+    }
+    missing
 }
 
 /// For the Home page and the bar's ⚙: who has a bar, where it sits, and the open clients.
