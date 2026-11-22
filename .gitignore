@@ -4,3 +4,6 @@ src-tauri/gen/schemas/
 .DS_Store
 *.log
 repair/target/
+dist-peepshow/
+src-tauri/peepshow-bundle.json
+peepshow/gen/schemas/

@@ -32,7 +32,9 @@ mod clientaudio;
 mod commands;
 mod clienttools;
 mod devrec;
+mod mailbox;
 mod mainthread;
+mod shared;
 mod eveapps;
 mod location;
 mod mainwindow;
@@ -329,12 +331,14 @@ pub fn bar_action(app: &AppHandle, action: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Devil's Rage Client Tools: previews, client bars, spots and hotkeys only (clienttools.rs).
-pub fn run_client_tools() {
+/// Devil's Peepshow (peepshow/src/main.rs, with its own config: its own identifier and folders).
+pub fn run_peepshow(context: tauri::Context<tauri::Wry>) {
     clienttools::set_on();
-    run()
+    run(context)
 }
 
-pub fn run() {
+/// The Devils app (src/main.rs), or Peepshow when `run_peepshow` set it.
+pub fn run(context: tauri::Context<tauri::Wry>) {
     mainthread::log_panics();
     let tools = clienttools::on();
     // 21 Nov: one copy of the app at a time (two copies drew two sets of client bars that
@@ -361,7 +365,7 @@ pub fn run() {
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some(if tools { "client-tools".into() } else { LOG_NAME.into() }),
+                        file_name: Some(if tools { "peepshow".into() } else { LOG_NAME.into() }),
                     }),
                 ])
                 .build(),
@@ -385,7 +389,8 @@ pub fn run() {
             )
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-                None,
+                // Peepshow started with Windows stays in the tray (no window).
+                if tools { Some(vec!["--hidden"]) } else { None },
             ));
     }
 
@@ -419,7 +424,10 @@ pub fn run() {
             commands::read_log,
             commands::open_log,
             commands::open_repair,
-            commands::open_client_tools,
+            clienttools::peepshow_status,
+            clienttools::open_peepshow,
+            clienttools::open_devils_app,
+            clienttools::peepshow_app_installed,
             commands::open_devtools,
             commands::open_admin,
             commands::reset_app,
@@ -578,7 +586,9 @@ pub fn run() {
                 clienttools::setup(&handle)?;
                 return Ok(());
             }
-            clienttools::close_if_running();
+            clienttools::close_old_client_tools();
+            shared::note_own_exe(false);
+            mailbox::start(mailbox::To::App, clienttools::app_message);
             let s = settings::load(&handle);
             let version = app.package_info().version.to_string();
             log::info!("Devil's Rage {version} starting");
@@ -681,10 +691,14 @@ pub fn run() {
             devrec::move_old_recordings(&handle);
             launch::load_account_logins(&handle);
             clipboard::start(handle.clone());
-            #[cfg(desktop)]
-            launch::register_cycle_hotkeys(&handle);
-            previews::start_watch(handle.clone());
-            clientbar::start(handle.clone());
+            // 22 Nov: Devil's Peepshow shows the previews, bars, spots and hotkeys when it's
+            // installed; without it (Linux, a dev run) the app does them itself as before.
+            if !clienttools::start_peepshow() {
+                #[cfg(desktop)]
+                launch::register_cycle_hotkeys(&handle);
+                previews::start_watch(handle.clone());
+                clientbar::start(handle.clone());
+            }
             if let Err(err) = tray::build(&handle) {
                 log::warn!("tray icon: {err}");
             }
@@ -706,7 +720,7 @@ pub fn run() {
 
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while starting the Devil's Rage app")
         .run(move |_app, event| {
             // Client Tools has no main window: closing the last preview mustn't end it (Quit in

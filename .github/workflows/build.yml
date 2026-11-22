@@ -106,6 +106,36 @@ jobs:
       - name: Install Tauri CLI
         run: npm install
 
+      # 22 Nov: Devil's Peepshow (previews, client bars, spots, hotkeys) is its own program with
+      # its own installer. Built first, into the app's target folder (the shared code compiles
+      # once, same profile settings as the app's build below); the app's Windows installer
+      # carries it and runs it quietly.
+      - name: Devil's Peepshow ${{ needs.version.outputs.version }}
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+          CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+          CARGO_PROFILE_RELEASE_STRIP: none
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          node -e "const f='peepshow/tauri.conf.json',fs=require('fs'),c=JSON.parse(fs.readFileSync(f));c.version='${{ needs.version.outputs.version }}';fs.writeFileSync(f,JSON.stringify(c,null,2))"
+          (cd peepshow && npx tauri build)
+          mkdir -p dist-peepshow
+          setup=$(ls "$CARGO_TARGET_DIR"/release/bundle/nsis/Devils\ Peepshow_*-setup.exe | head -1)
+          [ -n "$setup" ] || { echo "no Peepshow installer"; ls -R "$CARGO_TARGET_DIR/release/bundle"; exit 1; }
+          cp "$setup" dist-peepshow/devils-peepshow-setup.exe
+          cp "$setup.sig" dist-peepshow/devils-peepshow-setup.exe.sig
+          # Out of the bundle folder, so the app's upload below only finds the app's files.
+          rm -f "$CARGO_TARGET_DIR"/release/bundle/nsis/Devils\ Peepshow_*
+          cat > src-tauri/peepshow-bundle.json <<'JSON'
+          {"bundle": {"resources": {
+            "../repair/target/release/devils-rage-repair.exe": "Devils Rage Repair.exe",
+            "../dist-peepshow/devils-peepshow-setup.exe": "Devils Peepshow setup.exe"
+          }}}
+          JSON
+
       - name: Build and upload to release ${{ needs.version.outputs.tag }}
         uses: tauri-apps/tauri-action@v0
         env:
@@ -123,7 +153,21 @@ jobs:
           releaseDraft: ${{ needs.version.outputs.draft == 'true' }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           includeUpdaterJson: true
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ matrix.platform == 'windows-latest' && '--config src-tauri/peepshow-bundle.json' || '' }}
+
+      - name: Devil's Peepshow to the release (installer and its update file)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ needs.version.outputs.version }}"; tag="${{ needs.version.outputs.tag }}"
+          name="devils-peepshow_${v}_x64-setup.exe"
+          cp dist-peepshow/devils-peepshow-setup.exe "$name"
+          gh release upload "$tag" "$name" --clobber -R "$GITHUB_REPOSITORY"
+          SIG="$(cat dist-peepshow/devils-peepshow-setup.exe.sig)" URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$name" V="$v" \
+            python -c "import json,os,datetime; p={'signature':os.environ['SIG'],'url':os.environ['URL']}; print(json.dumps({'version':os.environ['V'],'notes':'Devil\'s Peepshow','pub_date':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),'platforms':{'windows-x86_64':p,'windows-x86_64-nsis':p}}, indent=2))" > peepshow-latest.json
+          gh release upload "$tag" peepshow-latest.json --clobber -R "$GITHUB_REPOSITORY"
 
       - name: Debug symbols to the release (for reading crash spots)
         if: matrix.platform == 'windows-latest'

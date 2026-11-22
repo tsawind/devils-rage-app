@@ -23,6 +23,8 @@
   body:not([data-hub]) .tools { display: none !important; }
   body:not([data-hub="peep"]) .pcards { display: none !important; }
   body:not([data-hub]) .pcards { display: none !important; }
+  /* 22 Nov: with Devil's Peepshow installed, its settings are in its own window. */
+  body.peepshow .pcard:not(#psCard), .pcard[hidden] { display: none; }
   body[data-hub="groups"] .tool:not([data-sec~="groups"]) { display: none; }
   body[data-hub="peep"] .tool:not([data-sec~="peep"]) { display: none; }
   body[data-hub="pi"] .tool:not([data-sec~="pi"]) { display: none; }
@@ -161,6 +163,16 @@
     </button>
   </div>
   <div class="pcards">
+    <div class="pcard" id="psCard" hidden>
+      <h3>Devil's Peepshow</h3>
+      <span>Previews, client bars, window spots, hotkeys and Setups are their own program now: Devil's Peepshow (tray icon, bottom right). It keeps working when this app, SeAT or the mapper doesn't, and shares nothing off your PC.</span>
+      <span id="psState"></span>
+      <div class="acts">
+        <button id="psOpen">Open Devil's Peepshow</button>
+        <button id="psPreviews">Preview settings…</button>
+        <button id="psSetups">Setups</button>
+      </div>
+    </div>
     <div class="pcard">
       <h3>Previews</h3>
       <label title="Open the previews by themselves when EVE clients start"><input type="checkbox" id="pAuto"> Open by themselves</label>
@@ -252,6 +264,20 @@
       soon.textContent = SOON[btn.dataset.tool] || "";
     });
   });
+
+  // 22 Nov: Devil's Peepshow (its own program) has the previews, bars, spots and hotkeys.
+  const psCard = document.getElementById("psCard"), psState = document.getElementById("psState");
+  const psShow = () => invoke("peepshow_status").then(st => {
+    if (!st || !st.installed) return;
+    document.body.classList.add("peepshow");
+    psCard.hidden = false;
+    psState.textContent = st.running ? "Running." : "Not running: Open starts it.";
+  }).catch(() => {});
+  psShow();
+  const psOpen = async (page) => { try { soon.textContent = await invoke("open_peepshow", { page }); } catch (e) { soon.textContent = String(e); } setTimeout(psShow, 1500); };
+  document.getElementById("psOpen").addEventListener("click", () => psOpen(null));
+  document.getElementById("psPreviews").addEventListener("click", () => psOpen("previews.html"));
+  document.getElementById("psSetups").addEventListener("click", () => psOpen("setups.html"));
 
   // Patch 63c: preview layout controls.
   const pEdit = document.getElementById("pEdit");

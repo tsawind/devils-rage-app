@@ -190,8 +190,7 @@ mod tests {
 static SEEN: std::sync::Mutex<Option<BTreeMap<String, u64>>> = std::sync::Mutex::new(None);
 
 fn seen_file(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    use tauri::Manager;
-    app.path().app_config_dir().ok().map(|dir| dir.join("pc-accounts.json"))
+    crate::shared::app_config(app, "pc-accounts.json")
 }
 
 fn with_seen<T>(app: &tauri::AppHandle, f: impl FnOnce(&mut BTreeMap<String, u64>) -> T) -> T {
@@ -258,8 +257,7 @@ struct InfoStore {
 static INFO_STORE: std::sync::Mutex<Option<InfoStore>> = std::sync::Mutex::new(None);
 
 fn info_file(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    use tauri::Manager;
-    app.path().app_config_dir().ok().map(|dir| dir.join("pc-account-info.json"))
+    crate::shared::app_config(app, "pc-account-info.json")
 }
 
 fn with_info<T>(app: &tauri::AppHandle, f: impl FnOnce(&mut InfoStore) -> T) -> T {

@@ -11,6 +11,8 @@ tag="$1"; shift
 work="$(mktemp -d)"
 
 gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$work/in"
+# 22 Nov: Devil's Peepshow's own update file (Windows builds from dev.250 on).
+gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern peepshow-latest.json --dir "$work/in" 2>/dev/null || true
 
 remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 if git ls-remote --exit-code --heads "$remote" updates >/dev/null 2>&1; then
@@ -25,6 +27,9 @@ fi
 
 for channel in "$@"; do
   cp "$work/in/latest.json" "$work/updates/$channel.json"
+  if [ -f "$work/in/peepshow-latest.json" ]; then
+    cp "$work/in/peepshow-latest.json" "$work/updates/peepshow-$channel.json"
+  fi
 done
 
 cd "$work/updates"

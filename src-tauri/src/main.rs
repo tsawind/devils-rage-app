@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    devils_rage_app_lib::run()
+    devils_rage_app_lib::run(tauri::generate_context!())
 }

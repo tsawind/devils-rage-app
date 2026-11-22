@@ -7,8 +7,7 @@ license = "MIT"
 repository = "https://github.com/tsawind/devils-rage-app"
 edition = "2021"
 rust-version = "1.85"
-# 20 Nov: src/bin/devils-rage-client-tools.rs is the second program; `cargo run` / tauri dev run the app.
-default-run = "devils-rage-app"
+# 22 Nov: Devil's Peepshow is its own crate (../peepshow) built on this library.
 
 [lib]
 # Tauri 2 layout: the app lives in a library so the same code can later

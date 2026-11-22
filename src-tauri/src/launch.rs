@@ -54,7 +54,7 @@ struct Groups {
 }
 
 fn store_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join("launch-groups.json"))
+    crate::shared::app_config(app, "launch-groups.json")
 }
 
 fn load(app: &AppHandle) -> Groups {
@@ -212,7 +212,8 @@ struct SeatPrefs {
 }
 
 fn config_file(app: &AppHandle, name: &str) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join(name))
+    // The app's folder whichever program asks (Peepshow reads the app's groups: shared.rs).
+    crate::shared::app_config(app, name)
 }
 
 fn write_json(path: PathBuf, value: &impl Serialize) -> Result<(), String> {
@@ -902,12 +903,21 @@ mod hotkeys {
 
 #[cfg(desktop)]
 pub fn register_cycle_hotkeys(app: &AppHandle) {
+    // 22 Nov: Devil's Peepshow holds the keys when it runs (it reloads them when the app's group
+    // files change); the app taking them too would steal the pedal from it.
+    if crate::clienttools::peepshow_owns() {
+        return;
+    }
     hotkeys::register(app);
 }
 
 /// Let go of the cycle hotkeys while the editor records a new key (else the pedal never reaches it).
 #[tauri::command]
 pub fn pause_cycle_hotkeys(app: AppHandle) {
+    if crate::clienttools::peepshow_owns() {
+        crate::mailbox::send(crate::mailbox::To::Peepshow, serde_json::json!({ "do": "pause_hotkeys" }));
+        return;
+    }
     #[cfg(desktop)]
     {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -920,6 +930,10 @@ pub fn pause_cycle_hotkeys(app: AppHandle) {
 /// Take the cycle hotkeys back after recording.
 #[tauri::command]
 pub fn resume_cycle_hotkeys(app: AppHandle) {
+    if crate::clienttools::peepshow_owns() {
+        crate::mailbox::send(crate::mailbox::To::Peepshow, serde_json::json!({ "do": "resume_hotkeys" }));
+        return;
+    }
     #[cfg(desktop)]
     register_cycle_hotkeys(&app);
     #[cfg(not(desktop))]

@@ -278,6 +278,11 @@ pub fn open_previews(app: AppHandle) -> Result<usize, String> {
     if clients.is_empty() {
         return Err("No EVE clients are open.".to_string());
     }
+    // 22 Nov: Devil's Peepshow shows the previews when it runs.
+    if crate::clienttools::peepshow_owns() {
+        crate::mailbox::send(crate::mailbox::To::Peepshow, serde_json::json!({ "do": "open_previews" }));
+        return Ok(clients.len());
+    }
     let edit = edit_mode(&app);
     let logins = with_layout(&app, |layout| layout.login_previews);
     let wanted: Vec<String> = clients
@@ -943,6 +948,9 @@ fn name_of_window(window: &WebviewWindow) -> Option<String> {
 /// groups (as launch groups with their pedal hotkeys). Returns a short summary.
 #[tauri::command]
 pub async fn import_eveo(app: AppHandle) -> Result<String, String> {
+    if crate::clienttools::peepshow_owns() {
+        return Err("Previews are Devil's Peepshow's now: import EVE-O Preview from its window (Devil's Peepshow card → Import EVE-O Preview…).".into());
+    }
     let app2 = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         use tauri_plugin_dialog::DialogExt;

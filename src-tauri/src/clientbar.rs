@@ -949,6 +949,10 @@ pub fn clientbar_mini(app: AppHandle, name: String, on: bool) {
 /// window), which turns on / off every camera and watch area set up for this client there.
 #[tauri::command]
 pub fn clientbar_camera(app: AppHandle, name: String, on: bool) -> Result<String, String> {
+    // Devil's Peepshow: cameras are the Devils app's (they leave the PC), so it's asked there.
+    if crate::clienttools::on() {
+        return ask_app(serde_json::json!({ "do": "camera", "name": name, "on": on }), "cameras");
+    }
     if !crate::incognito::is_public_name(&name) {
         return Err(format!("{name} is incognito (not on your SeAT accounts or mapper login), so it isn't shared with the mapper's cameras."));
     }
@@ -1119,6 +1123,9 @@ fn remember_moved_logins(app: &AppHandle, watch: &mut HashMap<isize, LoginWatch>
 /// The mapper's "Pop out (on top of EVE)" for this client's character.
 #[tauri::command]
 pub fn clientbar_popout(app: AppHandle, id: i64, name: String) -> Result<String, String> {
+    if crate::clienttools::on() {
+        return ask_app(serde_json::json!({ "do": "popout", "id": id, "name": name }), "the mapper's pop-out");
+    }
     if !crate::incognito::is_public_name(&name) || !crate::incognito::is_public_id(id.max(0) as u64) {
         return Err(format!("{name} is incognito (not on your SeAT accounts or mapper login), so the mapper doesn't get it."));
     }
@@ -1130,6 +1137,18 @@ pub fn clientbar_popout(app: AppHandle, id: i64, name: String) -> Result<String,
     let detail = serde_json::json!({ "id": id, "name": name });
     view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:popout', {{ detail: {detail} }}));")).map_err(|e| e.to_string())?;
     Ok(format!("Asked the mapper for {name}'s pop-out."))
+}
+
+/// Devil's Peepshow: hand a request to the Devils app (cameras, pop-outs and its pages are its).
+fn ask_app(message: serde_json::Value, what: &str) -> Result<String, String> {
+    use crate::mailbox::{running, send, To};
+    if !running(To::App) {
+        return Err(format!("Open the Devils Rage app for {what}: Peepshow doesn't share anything off this PC by itself."));
+    }
+    if !send(To::App, message) {
+        return Err("Couldn't reach the Devils Rage app.".into());
+    }
+    Ok("Asked the Devils Rage app.".into())
 }
 
 /// Experiment (Tsa, 17 Nov): resize a Fixed Window client to `width`×`height` without restarting,
@@ -1443,6 +1462,18 @@ pub fn clientbar_open_page(app: AppHandle, page: String) -> Result<(), String> {
     const PAGES: &[&str] = &["setups.html", "profiles.html", "tuning.html", "launch.html", "newgroup.html", "index.html"];
     if !PAGES.contains(&page.as_str()) {
         return Err("not one of the app's pages".into());
+    }
+    // 22 Nov: Setups is Peepshow's own page; the rest are the Devils app's.
+    if crate::clienttools::on() {
+        if page == "setups.html" {
+            std::thread::spawn(|| crate::clienttools::open_window(Some("setups.html".into())));
+            return Ok(());
+        }
+        return ask_app(serde_json::json!({ "do": "page", "page": page }), "that page").map(|_| ());
+    }
+    if page == "setups.html" && crate::clienttools::peepshow_owns() {
+        crate::mailbox::send(crate::mailbox::To::Peepshow, serde_json::json!({ "do": "show", "page": "setups.html" }));
+        return Ok(());
     }
     let base = app.get_webview(crate::PAGES_VIEW).and_then(|v| v.url().ok()).ok_or("the app's pages aren't loaded")?;
     let url = base.join(&page).map_err(|e| e.to_string())?;

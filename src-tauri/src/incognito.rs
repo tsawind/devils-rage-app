@@ -42,7 +42,7 @@ struct Known {
 static KNOWN: Mutex<Option<Known>> = Mutex::new(None);
 
 fn file(app: &AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join("incognito.json"))
+    crate::shared::app_config(app, "incognito.json")
 }
 
 fn key(name: &str) -> String {

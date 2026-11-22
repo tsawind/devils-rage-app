@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devil's Peepshow</title>
+<style>
+  :root { --bg:#0d0d10; --card:#16161a; --line:#2c2c33; --text:#e6e6ea; --muted:#8a8a92;
+          --red:#a8181f; --red-hi:#d6242c; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+         display: flex; flex-direction: column; user-select: none; }
+  main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+         padding: 24px; }
+  .logo { border: 4px solid var(--red); border-radius: 18px; padding: 4px 18px; color: var(--red-hi);
+          font-size: 44px; font-weight: 700; letter-spacing: 1px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 14px 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  /* Patch 122: the second row opens a section below it (Launch groups, Peepshow); Settings and Assets are pages. PI (first row) opens its section too. */
+  .hubs { margin-top: 16px; }
+  button.site.on { border-color: var(--red-hi, #d6242c); }
+  body:not([data-hub]) .tools { display: none !important; }
+  body:not([data-hub="peep"]) .pcards { display: none !important; }
+  body:not([data-hub]) .pcards { display: none !important; }
+  body[data-hub="groups"] .tool:not([data-sec~="groups"]) { display: none; }
+  body[data-hub="peep"] .tool:not([data-sec~="peep"]) { display: none; }
+  body[data-hub="pi"] .tool:not([data-sec~="pi"]) { display: none; }
+  .sites { display: grid; grid-template-columns: repeat(4, 210px); gap: 16px; }
+  @media (max-width: 960px) { .sites { grid-template-columns: repeat(2, 230px); } }
+  button.site { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+                color: var(--text); padding: 26px 16px; cursor: pointer; font: inherit;
+                display: flex; flex-direction: column; align-items: center; gap: 4px;
+                transition: border-color .12s, transform .12s; }
+  button.site:hover, button.site:focus-visible { border-color: var(--red-hi); outline: none;
+                transform: translateY(-1px); }
+  button.site svg { width: 34px; height: 34px; stroke: var(--red-hi); fill: none; stroke-width: 1.6;
+                    stroke-linecap: round; stroke-linejoin: round; }
+  button.site b { font-size: 19px; font-weight: 600; margin-top: 6px; }
+  button.site span { color: var(--muted); font-size: 13px; }
+  .grow { flex: 1; }
+  .hint { color: #55555c; }
+  .motd { max-width: 478px; margin: 0 0 22px; padding: 10px 14px; border: 1px solid #5a2a14; border-radius: 10px;
+          background: #1c120d; color: #f0c9a8; font-size: 14px; white-space: pre-wrap; text-align: center; }
+  /* EVE client tools (coming): launch groups, multibox previews, client settings */
+  .tools { margin-top: 26px; display: grid; grid-template-columns: repeat(3, 286px); gap: 12px; }
+  @media (max-width: 960px) { .tools { grid-template-columns: repeat(1, 300px); } }
+  .tools h2 { grid-column: 1 / -1; margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .8px;
+              color: var(--muted); text-transform: uppercase; }
+  button.tool { background: #121216; border: 1px dashed var(--line); border-radius: 10px; color: var(--text);
+                padding: 12px 14px; cursor: pointer; font: inherit; text-align: left; display: flex; gap: 12px;
+                align-items: center; }
+  button.tool:hover, button.tool:focus-visible { border-color: var(--red-hi); outline: none; }
+  button.tool svg { width: 26px; height: 26px; flex: none; stroke: var(--muted); fill: none; stroke-width: 1.6;
+                    stroke-linecap: round; stroke-linejoin: round; }
+  button.tool b { display: block; font-size: 15px; font-weight: 600; }
+  button.tool span { color: var(--muted); font-size: 12px; }
+  button.tool em { font-style: normal; font-size: 10px; letter-spacing: .5px; color: #c98a5a; border: 1px solid #5a2a14;
+                   border-radius: 6px; padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+  /* Patch 74: Peepshow's settings in three cards. */
+  .pcards { margin-top: 14px; display: grid; grid-template-columns: repeat(3, 286px); gap: 12px; align-items: start; }
+  @media (max-width: 960px) { .pcards { grid-template-columns: 300px; } }
+  .pcard { background: #121216; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px 12px;
+           display: flex; flex-direction: column; gap: 7px; font-size: 13px; color: var(--muted); }
+  .pcard h3 { margin: 0 0 2px; font-size: 12px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: var(--text); }
+  .pcard label, .pcard .line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .pcard input[type=checkbox] { accent-color: var(--red-hi); }
+  .pcard input[type=range] { width: 100px; }
+  .pcard input[type=number] { width: 58px; background: #0d0d10; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; padding: 1px 4px; }
+  .pcard select { background: #0d0d10; border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; padding: 2px 4px; }
+  .pcard button { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); cursor: pointer; text-decoration: underline; }
+  .pcard button:hover { color: var(--text); }
+  .pcard button.on { color: #f0c040; }
+  .pcard .acts { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 3px; padding-top: 7px; border-top: 1px solid #1f1f25; }
+  .pcard details summary { cursor: pointer; }
+  .pcard details[open] { display: flex; flex-direction: column; gap: 5px; }
+  .soon { margin-top: 10px; color: #c98a5a; font-size: 13px; min-height: 1.5em; }
+  .motd b { display: block; font-size: 11px; letter-spacing: .6px; color: #c98a5a; margin-bottom: 2px; font-weight: 600; }
+
+  /* 22 Nov: Devil's Peepshow's own window. */
+  main { justify-content: flex-start; padding-top: 28px; }
+  body:not([data-hub]) .pcards, body:not([data-hub="peep"]) .pcards { display: grid !important; }
+  .pcards { grid-template-columns: repeat(2, 300px); }
+  .quick { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 4px 0 6px; }
+  .quick button { background: var(--card); border: 1px solid var(--line); border-radius: 9px; color: var(--text); font: inherit;
+                  padding: 8px 14px; cursor: pointer; }
+  .quick button:hover { border-color: var(--red-hi); }
+  .ver { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+</style>
+</head>
+<body data-hub="peep">
+<main>
+  <div class="logo">DP</div>
+  <h1>Devil's Peepshow</h1>
+  <p class="ver" id="ver">Previews, client bars, window spots and hotkeys for your EVE clients. Everything stays on this PC.</p>
+  <div class="quick">
+    <button id="qOpen" title="A live preview for each EVE client: click one to bring it to the front">Open previews</button>
+    <button id="qSetups" title="Where each client opens, its keys and overview, compared">Setups</button>
+    <button id="qApp" title="The corp's Devils Rage app (mapper, SeAT, cameras)" hidden>Devils Rage app</button>
+  </div>
+  <div class="pcards">
+    <div class="pcard">
+      <h3>Previews</h3>
+      <label title="Open the previews by themselves when EVE clients start"><input type="checkbox" id="pAuto"> Open by themselves</label>
+      <label title="Previews for clients still at the login / character-select screen"><input type="checkbox" id="pLogins"> Login screens too</label>
+      <label title="Hide the preview of the client you're looking at; the rest stay"><input type="checkbox" id="pHide"> Hide the one in front</label>
+      <label title="A square on every preview: ticked = that client is in the pedal / hotkey cycle. Click the square to take it in or out."><input type="checkbox" id="pGroup"> Hotkey group squares</label>
+      <label title="See-through-ness of every preview at once (each client's own opacity still applies)">Opacity <input type="range" id="pOpacity" min="10" max="100" step="5" value="100"> <span id="pOpacityVal">100%</span></label>
+      <div class="line" title="Width × height in pixels for every preview">Size <input type="number" id="pW" min="80" max="4000" step="10"> × <input type="number" id="pH" min="45" max="4000" step="10">
+        <button id="pSame" title="Make every preview this size (open ones and the saved spots of the rest)">Set</button>
+        <button id="pSmaller" title="Every preview 10% smaller">−</button><button id="pBigger" title="Every preview 10% bigger">+</button></div>
+      <div class="acts">
+        <button id="pEdit" title="Arrange previews: drag, resize from the corner. Lock when done.">Edit preview layout</button>
+        <button id="pSettings" title="Every preview's settings in one place: shown, click-through, opacity, and its exact spot and size">Preview settings…</button>
+        <button id="pClose">Close previews</button>
+      </div>
+    </div>
+    <div class="pcard">
+      <h3>EVE windows</h3>
+      <label title="A client goes back to where it was when it starts or logs in"><input type="checkbox" id="cwAuto"> Put back by themselves</label>
+      <label title="A client moved off its spot goes straight back (Window mode). Use Arrange windows or the client bar to change spots."><input type="checkbox" id="cwLock"> Lock windows</label>
+      <div class="acts">
+        <button id="cwArrange" title="For Fixed Window clients: a handle over each client; drag to move its window, pull the corner to resize. Done remembers them.">Arrange windows</button>
+        <details><summary>More</summary>
+          <button id="cwRemember" title="Remember where every logged-in client's window is now">Remember where they are now</button>
+          <button id="cwPlace" title="Move every open client back to its remembered spot">Put them all back now</button>
+        </details>
+      </div>
+    </div>
+    <div class="pcard" id="cbRow">
+      <h3 title="A slim bar on each client: move it (snaps to corners, edges and middle lines), camera, pop-out, minimise, close, its profile in ⚙.">Client bars</h3>
+      <label title="A bar on every client, login screens too"><input type="checkbox" id="cbEvery"> On every client</label>
+      <div class="line" id="cbList"></div>
+      <select id="cbAdd"></select>
+    </div>
+  </div>
+    <div class="pcard">
+      <h3>Devil's Peepshow</h3>
+      <label title="Start Peepshow (in the tray, no window) when Windows starts"><input type="checkbox" id="psAuto"> Start with Windows</label>
+      <div class="acts">
+        <button id="psUpdates">Check for updates</button>
+        <button id="psEveo" title="Bring in EVE-O Preview's settings file: preview spots, sizes and hotkey groups">Import EVE-O Preview…</button>
+      </div>
+      <span>Close this window and Peepshow keeps running in the tray (bottom right). Quit it from there.</span>
+    </div>
+  </div>
+  <p class="soon" id="soon"></p>
+</main>
+
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const soon = document.getElementById("soon");
+  invoke("app_info").then(info => {
+    if (info && info.version) document.getElementById("ver").textContent = `Version ${info.version}. Previews, client bars, window spots and hotkeys for your EVE clients. Everything stays on this PC.`;
+  }).catch(() => {});
+  document.getElementById("qOpen").addEventListener("click", async () => {
+    try {
+      const n = await invoke("open_previews");
+      soon.textContent = `${n} preview${n === 1 ? "" : "s"} open. Click one to bring that client to the front.`;
+    } catch (e) { soon.textContent = String(e); }
+  });
+  document.getElementById("qSetups").addEventListener("click", () => { location.href = "setups.html"; });
+  const qApp = document.getElementById("qApp");
+  invoke("peepshow_app_installed").then(yes => { qApp.hidden = !yes; }).catch(() => {});
+  qApp.addEventListener("click", async () => { try { soon.textContent = await invoke("open_devils_app"); } catch (e) { soon.textContent = String(e); } });
+  const psAuto = document.getElementById("psAuto");
+  invoke("get_settings").then(s => { psAuto.checked = !!(s && s.autostart); }).catch(() => {});
+  psAuto.addEventListener("change", () => invoke("set_setting", { key: "autostart", value: psAuto.checked }).catch(e => { soon.textContent = String(e); }));
+  document.getElementById("psEveo").addEventListener("click", async () => { try { soon.textContent = await invoke("import_eveo"); } catch (e) { soon.textContent = String(e); } });
+  document.getElementById("psUpdates").addEventListener("click", () => { invoke("check_updates").catch(() => {}); soon.textContent = "Checking for updates…"; });
+
+  // Patch 63c: preview layout controls.
+  const pEdit = document.getElementById("pEdit");
+  const showEdit = (on) => { pEdit.classList.toggle("on", on); pEdit.textContent = on ? "Lock previews (done editing)" : "Edit preview layout"; };
+  const pOpacity = document.getElementById("pOpacity");
+  const pOpacityVal = document.getElementById("pOpacityVal");
+  invoke("preview_layout").then(l => {
+    showEdit(!!(l && l.edit));
+    const pct = Math.round(((l && l.opacity) || 1) * 100);
+    pOpacity.value = String(pct); pOpacityVal.textContent = pct + "%";
+  }).catch(() => {});
+  const pAuto = document.getElementById("pAuto");
+  invoke("preview_layout").then(l => { pAuto.checked = !l || l.auto_open !== false; }).catch(() => {});
+  pAuto.addEventListener("change", () => invoke("set_previews_auto", { on: pAuto.checked }).catch(() => {}));
+  const pHide = document.getElementById("pHide"), cwAuto = document.getElementById("cwAuto");
+  invoke("preview_layout").then(l => { pHide.checked = !!(l && l.hide_active); }).catch(() => {});
+  document.getElementById("pSettings").addEventListener("click", () => { location.href = "previews.html"; });
+  const pLogins = document.getElementById("pLogins");
+  invoke("preview_layout").then(l => { pLogins.checked = !!(l && l.login_previews); }).catch(() => {});
+  pLogins.addEventListener("change", () => invoke("set_previews_logins", { on: pLogins.checked }).catch(() => {}));
+  pHide.addEventListener("change", () => invoke("set_previews_hide_active", { on: pHide.checked }).catch(() => {}));
+  // Patch 114: hotkey-group squares, and one size for all previews.
+  const pGroup = document.getElementById("pGroup"), pW = document.getElementById("pW"), pH = document.getElementById("pH");
+  const showSizes = () => invoke("preview_layout").then(l => {
+    pGroup.checked = !l || l.group_marks !== false;
+    // The size most previews have now (the first saved one breaks a tie).
+    const count = new Map();
+    for (const c of Object.values((l && l.clients) || {})) if (c.w && c.h) { const k = c.w + "x" + c.h; count.set(k, (count.get(k) || 0) + 1); }
+    const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0];
+    const [w, h] = top ? top[0].split("x") : ["320", "200"];
+    if (document.activeElement !== pW) pW.value = w;
+    if (document.activeElement !== pH) pH.value = h;
+  }).catch(() => {});
+  showSizes();
+  pGroup.addEventListener("change", () => invoke("set_previews_group_marks", { on: pGroup.checked }).catch(() => {}));
+  document.getElementById("pSame").addEventListener("click", async () => {
+    const width = Math.round(Number(pW.value)), height = Math.round(Number(pH.value));
+    if (!(width >= 80 && height >= 45)) { soon.textContent = "Type a width (80 or more) and a height (45 or more)."; return; }
+    await invoke("set_previews_size", { width, height }).catch(() => {});
+    soon.textContent = `Every preview is now ${width} × ${height}.`;
+  });
+  for (const [id, factor] of [["pSmaller", 0.9], ["pBigger", 1.1]]) {
+    document.getElementById(id).addEventListener("click", async () => {
+      await invoke("scale_previews", { factor }).catch(() => {});
+      setTimeout(showSizes, 700);
+    });
+  }
+  const cwLock = document.getElementById("cwLock"), cwArrange = document.getElementById("cwArrange");
+  invoke("client_windows_state").then(st => { cwAuto.checked = !!(st && st.auto); cwLock.checked = !!(st && st.lock); }).catch(() => {});
+  cwLock.addEventListener("change", () => invoke("client_windows_lock", { on: cwLock.checked }).catch(() => {}));
+  // Patch 117: arrange the EVE windows themselves (Fixed Window mode has no title bar to drag).
+  cwArrange.addEventListener("click", async () => {
+    const on = !cwArrange.classList.contains("on");
+    try {
+      soon.textContent = await invoke("arrange_windows", { on });
+      cwArrange.classList.toggle("on", on);
+      cwArrange.textContent = on ? "Done arranging" : "Arrange windows";
+    } catch (e) { soon.textContent = String(e); }
+  });
+  cwAuto.addEventListener("change", () => invoke("client_windows_auto", { on: cwAuto.checked }).catch(() => {}));
+  // Patch 74: client bars (lock, drag, snapshot / video, profile, minimise, close) over chosen clients.
+  async function clientBars() {
+    const st = await invoke("clientbar_state").catch(() => null);
+    if (!st) return;
+    const list = document.getElementById("cbList"), add = document.getElementById("cbAdd");
+    document.getElementById("cbEvery").checked = !!st.every;
+    list.innerHTML = "";
+    const chip = (text, title, onClick) => {
+      const b = document.createElement("button");
+      b.textContent = text; b.title = title;
+      b.addEventListener("click", async () => { await onClick(); clientBars(); });
+      list.append(b, document.createTextNode(" "));
+    };
+    if (st.every) {
+      (st.off || []).forEach(name => chip(`${name} (off) ↺`, `Give ${name} its bar back`, () => invoke("clientbar_set", { name, on: true }).catch(() => {})));
+    } else {
+      if (!st.clients.length) { const s2 = document.createElement("span"); s2.className = "soon"; s2.style.margin = "0"; s2.textContent = "none yet"; list.append(s2); }
+      st.clients.forEach(name => chip(name + " ✕", "Take the bar off " + name, () => invoke("clientbar_set", { name, on: false }).catch(() => {})));
+    }
+    add.innerHTML = "";
+    const offer = st.every ? (st.off || []) : st.open.filter(n => !st.clients.includes(n));
+    add.style.display = offer.length ? "" : "none";
+    add.append(new Option("+ Add a client…", ""));
+    offer.forEach(n => add.append(new Option(n, n)));
+  }
+  document.getElementById("cbEvery").addEventListener("change", async (e) => {
+    await invoke("clientbar_every", { on: e.target.checked }).catch(() => {});
+    clientBars();
+  });
+  document.getElementById("cbAdd").addEventListener("change", async (e) => {
+    const name = e.target.value;
+    if (!name) return;
+    try { await invoke("clientbar_set", { name, on: true }); soon.textContent = `${name} has a bar now: 🔒 unlock, then hold ✥ to move it.`; }
+    catch (err) { soon.textContent = String(err); }
+    clientBars();
+  });
+  document.getElementById("cbAdd").addEventListener("focus", clientBars);
+  clientBars();
+  const cwSay = async (cmd) => { try { soon.textContent = await invoke(cmd); } catch (e) { soon.textContent = String(e); } };
+  document.getElementById("cwRemember").addEventListener("click", () => cwSay("client_windows_remember"));
+  document.getElementById("cwPlace").addEventListener("click", () => cwSay("client_windows_place"));
+  pOpacity.addEventListener("input", () => {
+    pOpacityVal.textContent = pOpacity.value + "%";
+    invoke("set_previews_opacity", { opacity: Number(pOpacity.value) / 100 }).catch(() => {});
+  });
+  pEdit.addEventListener("click", async () => {
+    const on = !pEdit.classList.contains("on");
+    try {
+      await invoke("set_preview_edit", { on });
+      showEdit(on);
+      soon.textContent = on ? "Editing: drag previews, resize from the yellow corner. Small ones: use Preview settings… for their settings. Lock when done." : "Previews locked in place.";
+    } catch (e) { soon.textContent = String(e); }
+  });
+  document.getElementById("pClose").addEventListener("click", async () => { await invoke("close_previews").catch(() => {}); showEdit(false); soon.textContent = "Previews closed."; });
+
+</script>
+</body>
+</html>

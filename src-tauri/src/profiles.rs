@@ -115,7 +115,7 @@ pub(crate) fn root() -> Result<PathBuf, String> {
 }
 
 fn labels_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join("profiles.json"))
+    crate::shared::app_config(app, "profiles.json")
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

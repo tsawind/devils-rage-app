@@ -245,31 +245,6 @@ pub fn open_repair() -> Result<String, String> {
     Ok("Devil's Rage Repair is open in its own window.".into())
 }
 
-/// Settings → Repair: switch to Devil's Rage Client Tools (previews, bars and hotkeys only). It
-/// won't run next to the app, so it's started two seconds after this app closes.
-#[tauri::command]
-pub fn open_client_tools(app: AppHandle) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let tools = exe.parent().ok_or("no app folder")?.join(crate::clienttools::EXE);
-    if !tools.is_file() {
-        return Err("Client Tools isn't next to the app yet (it comes with the next install).".into());
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // cmd's own quoting (raw), not Rust's: the path has spaces.
-        std::process::Command::new("cmd")
-            // ping as the 2 s wait: `timeout` refuses to run without a console window.
-            .raw_arg(format!("/c ping -n 3 127.0.0.1 >nul & start \"\" \"{}\"", tools.display()))
-            .creation_flags(0x0800_0000)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    log::info!("switching to Client Tools");
-    app.exit(0);
-    Ok(())
-}
-
 /// Settings → Admin: the mapper's App admin page (the mapper checks who may open it).
 #[tauri::command]
 pub fn open_admin(app: AppHandle) {

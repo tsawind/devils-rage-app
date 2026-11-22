@@ -21,10 +21,28 @@
   const title = document.createElement("b");
   title.textContent = "Client setups";
   nav.append(title);
+  // 22 Nov: Setups lives in Devil's Peepshow (its own program); Client settings and tuning stay
+  // in the Devils app. In Peepshow, Setups stands alone; in the app, its tab opens Peepshow.
+  if (window.__PEEPSHOW__) {
+    title.textContent = "Setups";
+    h1.replaceWith(nav);
+    return;
+  }
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  let peepshow = false;
+  invoke("peepshow_status").then(st => { peepshow = !!(st && st.installed); }).catch(() => {});
   for (const [page, name, what] of TABS) {
     const a = document.createElement("a");
     a.href = page; a.textContent = name; a.title = what;
     if (page === here) a.className = "on";
+    if (page === "setups.html") {
+      a.title = what + " (in Devil's Peepshow)";
+      a.addEventListener("click", (e) => {
+        if (!peepshow) return;
+        e.preventDefault();
+        invoke("open_peepshow", { page: "setups.html" }).catch(() => {});
+      });
+    }
     nav.append(a);
   }
   h1.replaceWith(nav);

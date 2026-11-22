@@ -43,3 +43,9 @@ jobs:
 
       - name: Tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      # 22 Nov: Devil's Peepshow, built on the app's library, in the app's target folder.
+      - name: Compile Devil's Peepshow
+        run: cargo check --manifest-path peepshow/Cargo.toml
+        env:
+          CARGO_TARGET_DIR: src-tauri/target

@@ -269,7 +269,7 @@
   const titleText = () => "EVE - " + NAME + (loginLabel ? " · " + loginLabel : "");
   $("title").textContent = titleText();
   // 20 Nov: in Client Tools (no mapper), no camera or scanner pop-out buttons.
-  if (window.__CLIENT_TOOLS__) for (const id of ["cam", "pop"]) $(id).style.display = "none";
+  // 22 Nov: in Devil's Peepshow, Camera and Pop out ask the Devils app (it says so when it's closed).
   // 20 Nov: Spy / Ally / Public mark (checked again now and then: it can change in Your accounts).
   const loadMark = () => invoke("character_mark", { name: NAME }).then((m) => {
     for (const k of ["spy", "ally", "public"]) document.body.classList.toggle("mark-" + k, m === k);

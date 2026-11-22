@@ -1,0 +1,31 @@
+[package]
+name = "devils-peepshow"
+version = "0.1.0"
+description = "Devil's Peepshow: EVE client previews, taskbars and window modes, window spots, hotkeys"
+authors = ["Tsawind"]
+license = "MIT"
+repository = "https://github.com/tsawind/devils-rage-app"
+edition = "2021"
+rust-version = "1.85"
+
+# 22 Nov: the same code as the Devils app (its library), started as Peepshow with its own
+# config (identifier, folders, installer, update channel). Built into the app's target folder
+# (CARGO_TARGET_DIR=../src-tauri/target) so the shared code is compiled once.
+
+[[bin]]
+name = "devils-peepshow"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+devils-rage-app = { path = "../src-tauri" }
+tauri = { version = "2", features = ["devtools", "unstable", "tray-icon"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -66,7 +66,9 @@ pub fn check_now(app: AppHandle) {
 
 async fn check(app: &AppHandle, manual: bool) -> Result<(), String> {
     let channel = settings::load(app).channel(app);
-    let manifest: Url = format!("{MANIFEST_BASE}/{}.json", channel.as_str())
+    // 22 Nov: Devil's Peepshow has its own channel files (peepshow-dev.json, …).
+    let program = if crate::clienttools::on() { "peepshow-" } else { "" };
+    let manifest: Url = format!("{MANIFEST_BASE}/{program}{}.json", channel.as_str())
         .parse()
         .map_err(|e| format!("bad manifest url: {e}"))?;
 
@@ -94,7 +96,8 @@ async fn check(app: &AppHandle, manual: bool) -> Result<(), String> {
 
     record(format!("Version {} is ready", update.version));
     let question = format!(
-        "Devil's Rage {} is ready ({} channel). You have {}.\n\nInstall it and restart now?",
+        "{} {} is ready ({} channel). You have {}.\n\nInstall it and restart now?",
+        if crate::clienttools::on() { "Devil's Peepshow" } else { "Devil's Rage" },
         update.version,
         channel.as_str(),
         update.current_version

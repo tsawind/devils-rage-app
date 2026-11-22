@@ -480,7 +480,7 @@
   }
 
   $("reload").addEventListener("click", load);
-  $("home").addEventListener("click", () => { location.href = "index.html#groups"; });
+  $("home").addEventListener("click", () => { location.href = window.__PEEPSHOW__ ? "peepshow.html" : "index.html#groups"; });
   load();
 </script>
 </body>

@@ -144,8 +144,8 @@
       <button class="b" id="openRepair">Open Repair</button>
     </div>
     <div class="row">
-      <div class="l">Devil's Rage Client Tools<small>Previews, client bars, window spots and hotkeys only: no mapper or SeAT, nothing that needs the internet. For when this app won't start. Switching closes this app; opening the app again closes Client Tools. Also in the Start menu.</small></div>
-      <button class="b" id="openTools">Switch to Client Tools</button>
+      <div class="l">Devil's Peepshow<small>Previews, client bars, window spots, hotkeys and Setups: its own program (tray icon, bottom right), installed with this app. It keeps working when this app, SeAT or the mapper doesn't. Also in the Start menu.</small></div>
+      <button class="b" id="openTools">Open Devil's Peepshow</button>
     </div>
   </section>
 
@@ -292,7 +292,7 @@
   });
   $("openLog").addEventListener("click", () => invoke("open_log").catch(e => toast(String(e))));
   $("openTools").addEventListener("click", async () => {
-    try { await invoke("open_client_tools"); } catch (e) { toast(String(e)); }
+    try { toast(await invoke("open_peepshow", { page: null })); } catch (e) { toast(String(e)); }
   });
   $("openRepair").addEventListener("click", async () => {
     try { toast(await invoke("open_repair")); } catch (e) { toast(String(e)); }

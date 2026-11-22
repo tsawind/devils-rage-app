@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Devils Peepshow",
+  "version": "0.1.0",
+  "identifier": "com.tsawind.peepshow",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Tsawind",
+    "shortDescription": "Devil's Peepshow: EVE client previews, taskbars, window spots and hotkeys",
+    "category": "Utility",
+    "icon": [
+      "../src-tauri/icons/32x32.png",
+      "../src-tauri/icons/128x128.png",
+      "../src-tauri/icons/128x128@2x.png",
+      "../src-tauri/icons/icon.icns",
+      "../src-tauri/icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    },
+    "createUpdaterArtifacts": true,
+    "copyright": "Copyright (c) 2026 Tsawind and the Devil's Rage app contributors. MIT License."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg1RjJFOEM4OENDNzQwN0MKUldSOFFNZU15T2p5aGRjeXd4OVhuZDYyd0tld1pMa2drS3Y3clVjT0RsL1lIV2ppN01pVFdrYTkK",
+      "endpoints": [
+        "https://raw.githubusercontent.com/tsawind/devils-rage-app/updates/peepshow-stable.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

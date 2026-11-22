@@ -20,7 +20,13 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let place = MenuItem::with_id(app, "place-clients", "Put EVE windows back", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let line = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&show, &open, &close, &place, &line, &quit])?;
+    // 22 Nov: with Devil's Peepshow running, the previews and windows are its (its own tray icon).
+    let peep = MenuItem::with_id(app, "peepshow", "Open Devil's Peepshow", true, None::<&str>)?;
+    let menu = if crate::clienttools::peepshow_owns() {
+        Menu::with_items(app, &[&show, &peep, &line, &quit])?
+    } else {
+        Menu::with_items(app, &[&show, &open, &close, &place, &line, &quit])?
+    };
     let mut builder = TrayIconBuilder::with_id("devils-rage")
         .tooltip("Devil's Rage")
         .menu(&menu)
@@ -33,6 +39,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             "close-previews" => crate::previews::close_previews(app.clone()),
             "place-clients" => {
                 let _ = crate::clientwindows::client_windows_place(app.clone());
+            }
+            "peepshow" => {
+                let _ = crate::clienttools::open_peepshow(None);
             }
             "quit" => app.exit(0),
             _ => {}

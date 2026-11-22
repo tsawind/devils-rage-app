@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "peepshow",
+  "description": "Devil's Peepshow's own window (peepshow.html, previews.html, setups.html). Local pages only.",
+  "windows": ["peepshow"],
+  "webviews": ["peepshow"],
+  "permissions": ["core:default"]
+}
