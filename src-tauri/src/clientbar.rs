@@ -1820,6 +1820,49 @@ pub fn clientbar_eve_fixed_size(name: String, width: i64, height: i64) -> Result
     ))
 }
 
+/// 22 Nov: which windows we made frameless, kept on disk, so an app restart (an update) still knows
+/// them from EVE's own Fixed Window (Tsa: "client is in window mode, our taskbar won't let me
+/// switch to window mode").
+static BARE_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static BARE_SAVED: Mutex<Option<Vec<(isize, u32, u32)>>> = Mutex::new(None);
+
+fn bare_file(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_local_data_dir().ok().map(|d| d.join("frameless-clients.json"))
+}
+
+fn load_bare(app: &AppHandle, clients: &[(String, isize)]) {
+    if BARE_LOADED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let Some(file) = bare_file(app) else { return };
+    let Ok(text) = std::fs::read_to_string(&file) else { return };
+    let Ok(list) = serde_json::from_str::<Vec<(isize, u32, u32)>>(&text) else { return };
+    let mut guard = BARE.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    for (handle, bits, ex_bits) in list {
+        // Still open and still without Windows' frame: still ours.
+        if clients.iter().any(|(_, h)| *h == handle) && !win::captioned(handle) {
+            map.entry(handle).or_insert((bits, ex_bits));
+            log::info!("frameless client from before the restart: {handle}");
+        }
+    }
+}
+
+fn save_bare(app: &AppHandle) {
+    let mut now: Vec<(isize, u32, u32)> = BARE.lock().unwrap().as_ref().map(|m| m.iter().map(|(h, (b, e))| (*h, *b, *e)).collect()).unwrap_or_default();
+    now.sort_unstable();
+    let mut saved = BARE_SAVED.lock().unwrap();
+    if saved.as_ref() == Some(&now) {
+        return;
+    }
+    if let Some(file) = bare_file(app) {
+        if let Ok(text) = serde_json::to_string(&now) {
+            let _ = std::fs::write(file, text);
+        }
+    }
+    *saved = Some(now);
+}
+
 /// A client we made frameless changed size without us: EVE's own Display Mode menu (Fixed Window
 /// at the size saved in its profile, or the whole screen) or its Window Size list. The picture
 /// goes back to the size and spot it had, with our title bar round it (Tsa: "switch the
@@ -1837,6 +1880,7 @@ fn eve_switch_while_bare(app: &AppHandle, name: &str, handle: isize) {
     // WS_POPUP: EVE's own Fixed Window now (Windows' frame back is EVE's menu again).
     let (style, ex) = win::styles(handle);
     let eve_fixed = style & 0x8000_0000 != 0;
+    log::info!("{name}: window style now {style:#x} / {ex:#x}");
     if eve_fixed {
         if let Some(m) = BARE.lock().unwrap().as_mut() {
             m.remove(&handle);
@@ -1857,6 +1901,8 @@ fn eve_switch_while_bare(app: &AppHandle, name: &str, handle: isize) {
 /// itself (its own Display Mode menu): left alone, the bar says so; a remembered client that
 /// opens in Window mode loses Windows' frame once, 2.5 s after it appeared.
 fn keep_styles(app: &AppHandle, clients: &[(String, isize)]) {
+    load_bare(app, clients);
+    save_bare(app);
     let wanted = settings(app);
     {
         let mut guard = FIRST_SEEN.lock().unwrap();
