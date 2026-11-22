@@ -316,9 +316,8 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         "close" => {
-            if let Some(w) = window {
-                let _ = w.close();
-            }
+            let _ = window;
+            clienttools::quit_app(app);
         }
         "drag" => {
             if let Some(w) = window {
@@ -670,6 +669,11 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                 let app = handle.clone();
                 window.on_window_event(move |event| match event {
                     WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => layout(&me),
+                    // Alt+F4 / the taskbar's Close window: ask about Peepshow first (clienttools.rs).
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        clienttools::quit_app(&app);
+                    }
                     // Closing the main window closes the app: pop-outs and character windows
                     // are drawn by its page, so they'd stay open but dead.
                     WindowEvent::Destroyed => {

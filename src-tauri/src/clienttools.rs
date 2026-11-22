@@ -206,6 +206,30 @@ pub fn peepshow_status() -> serde_json::Value {
     })
 }
 
+/// 22 Nov (Tsa): closing the Devils app asks whether Devil's Peepshow should close too (it keeps
+/// the previews, bars and hotkeys going on its own otherwise).
+pub fn quit_app(app: &AppHandle) {
+    if on() || !held(PEEPSHOW_LOCK) {
+        app.exit(0);
+        return;
+    }
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    app.dialog()
+        .message("Devil's Peepshow is still running: your client bars, previews, window spots and hotkeys.\n\nClose it too, or keep it running without the app?")
+        .title("Closing Devil's Rage")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom("Close Peepshow too".into(), "Keep Peepshow running".into()))
+        .show(|close_both| {
+            if close_both {
+                crate::mailbox::send(crate::mailbox::To::Peepshow, serde_json::json!({ "do": "quit" }));
+            }
+            log::info!("closing the app ({})", if close_both { "Peepshow too" } else { "Peepshow keeps running" });
+            if let Some(app) = crate::mainthread::app() {
+                app.exit(0);
+            }
+        });
+}
+
 /// Peepshow's window: is the Devils app on this PC (its button shows only then)?
 #[tauri::command]
 pub fn peepshow_app_installed() -> bool {
@@ -288,6 +312,10 @@ fn peepshow_message(_app: &AppHandle, message: serde_json::Value) {
             crate::mainthread::run(|app| {
                 let _ = crate::previews::open_previews(app.clone());
             });
+        }
+        "quit" => {
+            log::info!("the Devils app is closing and asked Peepshow to close too");
+            crate::mainthread::run(|app| app.exit(0));
         }
         other => log::info!("unknown message for Peepshow: {other}"),
     }
