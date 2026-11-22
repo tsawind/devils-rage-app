@@ -807,9 +807,11 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
             }
             continue;
         };
+        // 22 Nov: placed as the whole bar, then a shrunk (›) one keeps the whole bar's right end,
+        // so ✕ stays put and the rest folds into it (Tsa).
+        let mini = tall.is_none() && wanted.mini.contains(name);
         let width = match tall {
             Some(_) => BAR_W,
-            None if wanted.mini.contains(name) => BAR_MINI_W,
             None => bar_width(&wanted.buttons).max(BAR_MINI_W),
         };
         let captioned = win::captioned(*handle);
@@ -832,6 +834,11 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
                 place.x = frame.x + dx;
                 place.y = frame.y + dy;
             }
+        }
+        if mini && !place.frame {
+            let mini_w = (BAR_MINI_W * scale).round() as i32;
+            place.x += (place.w - mini_w).max(0);
+            place.w = mini_w;
         }
         if BAR_MOVING.lock().unwrap().as_deref() == Some(label.as_str()) {
             continue;
@@ -966,6 +973,7 @@ pub fn clientbar_move_bar(app: AppHandle, window: tauri::WebviewWindow, name: St
     let frame = win::frame(handle).ok_or("that client is minimised")?;
     let start = window.outer_position().map_err(|e| e.to_string())?;
     let mouse0 = win::cursor().ok_or("no mouse position")?;
+    let scale = window.scale_factor().unwrap_or(1.0);
     *BAR_MOVING.lock().unwrap() = Some(window.label().to_string());
     std::thread::Builder::new()
         .name("bar-move".into())
@@ -985,7 +993,9 @@ pub fn clientbar_move_bar(app: AppHandle, window: tauri::WebviewWindow, name: St
                 std::thread::sleep(Duration::from_millis(8));
             }
             change(&app, |s| {
-                s.offsets.insert(name, (at.0 - frame.x, at.1 - frame.y));
+                // Kept as the whole bar's spot: a shrunk one sits at its right end.
+                let shift = if s.mini.contains(&name) { ((bar_width(&s.buttons).max(BAR_MINI_W) - BAR_MINI_W) * scale).round() as i32 } else { 0 };
+                s.offsets.insert(name, (at.0 - frame.x - shift, at.1 - frame.y));
             });
             *BAR_MOVING.lock().unwrap() = None;
         })
