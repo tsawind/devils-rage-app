@@ -153,7 +153,9 @@ jobs:
           releaseDraft: ${{ needs.version.outputs.draft == 'true' }}
           prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
           includeUpdaterJson: true
-          args: ${{ matrix.args }} ${{ matrix.platform == 'windows-latest' && '--config src-tauri/peepshow-bundle.json' || '' }}
+          # 22 Nov: peepshow/ has a tauri.conf.json too; point at the app's own.
+          projectPath: src-tauri
+          args: ${{ matrix.args }} ${{ matrix.platform == 'windows-latest' && '--config peepshow-bundle.json' || '' }}
 
       - name: Devil's Peepshow to the release (installer and its update file)
         if: matrix.platform == 'windows-latest'
