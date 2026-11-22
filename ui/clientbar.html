@@ -242,6 +242,7 @@
     invoke("clientbar_menu", { height: null }).catch(() => {});
   }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenus(); back(); } });
+  window.closeMenus = closeMenus;
   window.addEventListener("blur", () => { closeMenus(); disarmClose(); });
 
   $("lock").addEventListener("click", async () => { await setLock(!locked); back(); });

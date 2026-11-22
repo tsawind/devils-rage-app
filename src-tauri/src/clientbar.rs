@@ -846,12 +846,16 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
         // Shown whenever the client is; kept just above its client in Windows' stacking
         // order (not on top of everything), so whatever covers the client covers it too.
         let see = true;
+        // 22 Nov: always, menu open or not: an open ⚙ menu never gets the focus, so it never
+        // closed by itself, and the bar fell behind its client once that was moved (Tsa).
         if let Some(ours) = our_hwnd(&window) {
-            if tall.is_none() {
-                win::stack_above(ours, *handle);
-            }
+            win::stack_above(ours, *handle);
         }
         let before = shown.get(&label).copied();
+        // The client moved with a menu open (dragged by Windows' title bar): close the menu.
+        if tall.is_some() && before.is_some_and(|b| (b.1.x, b.1.y) != (place.x, place.y)) && DRAGGING.lock().unwrap().is_none() {
+            let _ = window.eval("window.closeMenus && window.closeMenus()");
+        }
         if before.is_none_or(|b| b.1.x != place.x || b.1.y != place.y) {
             let _ = window.set_position(PhysicalPosition::new(place.x, place.y));
         }
