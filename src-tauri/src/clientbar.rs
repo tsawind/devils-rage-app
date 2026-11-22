@@ -607,7 +607,7 @@ pub fn tool_window(window: &tauri::WebviewWindow) {
 }
 
 /// Each bar's frame mode, for the page (clientbar_info): name -> (frame, top in CSS px).
-static MODES: Mutex<Option<HashMap<String, (bool, f64)>>> = Mutex::new(None);
+static MODES: Mutex<Option<HashMap<String, (bool, f64, bool)>>> = Mutex::new(None);
 
 fn our_hwnd(window: &tauri::WebviewWindow) -> Option<isize> {
     #[cfg(windows)]
@@ -812,7 +812,11 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
             None if wanted.mini.contains(name) => BAR_MINI_W,
             None => bar_width(&wanted.buttons).max(BAR_MINI_W),
         };
-        let mut place = place_for(frame, win::captioned(*handle), wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+        let captioned = win::captioned(*handle);
+        let mut place = place_for(frame, captioned, wanted.floating.contains(name), win::work_area(frame), &wanted.corner, scale, width, tall.unwrap_or(BAR_H));
+        // 22 Nov: the ⋮⋮ grip (and a dragged-off bar spot) only in Floating; Window mode's bar sits
+        // on Windows' title bar, Fixed has our own title bar.
+        let grip = !place.frame && !captioned && wanted.floating.contains(name);
         // A Fixed Window client (login screens too) that opened flush against the top
         // has no room for our title bar: the first time, nudge it into its snapped spot.
         if !place.frame && !win::captioned(*handle) && !wanted.floating.contains(name) && first_sight(*handle) {
@@ -823,7 +827,7 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
                 }
             }
         }
-        if !place.frame {
+        if grip {
             if let Some((dx, dy)) = wanted.offsets.get(name) {
                 place.x = frame.x + dx;
                 place.y = frame.y + dy;
@@ -857,10 +861,11 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
                 win::shape(ours, place.w, place.h, place.frame.then_some((place.top, 1)), menu);
             }
         }
-        if before.is_none_or(|b| b.1.frame != place.frame || b.1.top != place.top) {
+        let grip_was = MODES.lock().unwrap().as_ref().and_then(|m| m.get(name)).map(|m| m.2);
+        if before.is_none_or(|b| b.1.frame != place.frame || b.1.top != place.top) || grip_was != Some(grip) {
             let top_css = place.top as f64 / scale;
-            MODES.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.clone(), (place.frame, top_css));
-            let _ = window.eval(format!("window.setMode && window.setMode({}, {top_css})", place.frame));
+            MODES.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.clone(), (place.frame, top_css, grip));
+            let _ = window.eval(format!("window.setMode && window.setMode({}, {top_css}, {grip})", place.frame));
         }
         if before.is_none_or(|b| b.0 != see) {
             let _ = if see { window.show() } else { window.hide() };
@@ -1145,7 +1150,7 @@ pub fn clientbar_info(app: AppHandle, name: String) -> serde_json::Value {
         "remembers": crate::clientwindows::keeps_a_spot(&name),
         "profile": handle.and_then(crate::startline::settings_folder_of_window),
         "maximised": handle.is_some_and(win::zoomed),
-        "titleBar": MODES.lock().unwrap().as_ref().and_then(|m| m.get(&name).copied()).map(|(on, top)| serde_json::json!({ "on": on, "top": top })),
+        "titleBar": MODES.lock().unwrap().as_ref().and_then(|m| m.get(&name).copied()).map(|(on, top, _)| serde_json::json!({ "on": on, "top": top })),
     })
 }
 
