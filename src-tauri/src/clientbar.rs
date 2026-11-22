@@ -221,6 +221,18 @@ pub fn place_for(frame: Spot, captioned: bool, floating: bool, work: Option<Spot
     Place { frame: false, x, y, w: (width * scale).round() as i32, h: (height * scale).round() as i32, top: 0 }
 }
 
+/// A shrunk (›) bar: placed as the whole bar, it keeps that bar's right end, so ✕ stays put and
+/// the rest folds into it (Tsa, 22 Nov). Our title bar (frame) never folds.
+pub fn folded(mut place: Place, scale: f64) -> Place {
+    if place.frame {
+        return place;
+    }
+    let mini_w = (BAR_MINI_W * scale).round() as i32;
+    place.x += (place.w - mini_w).max(0);
+    place.w = mini_w;
+    place
+}
+
 /// The client with our title bar and edge round it (what snaps when it's dragged).
 pub fn outer_of(frame: Spot, scale: f64) -> Spot {
     let (top, side) = chrome(scale);
@@ -835,10 +847,8 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
                 place.y = frame.y + dy;
             }
         }
-        if mini && !place.frame {
-            let mini_w = (BAR_MINI_W * scale).round() as i32;
-            place.x += (place.w - mini_w).max(0);
-            place.w = mini_w;
+        if mini {
+            place = folded(place, scale);
         }
         if BAR_MOVING.lock().unwrap().as_deref() == Some(label.as_str()) {
             continue;
@@ -1464,6 +1474,78 @@ mod tests {
         // A Fixed Window login screen goes under room for our title bar.
         let fixed = Spot { x: 500, y: 500, w: 1918, h: 1024 };
         assert_eq!(like_spot(fixed, fixed, tsawind, false, 1.0, Some(work)), Spot { x: 1, y: 31, w: 1918, h: 1024 });
+    }
+
+    // 22 Nov, before the stable release: the bar's placement in each window mode.
+    const MONITOR: Spot = Spot { x: 0, y: 0, w: 3840, h: 2112 };
+
+    #[test]
+    fn window_mode_bar_sits_on_windows_title_bar_clear_of_its_buttons() {
+        let frame = Spot { x: 100, y: 200, w: 1920, h: 1056 };
+        let width = bar_width(&default_buttons());
+        let place = place_for(frame, true, false, Some(MONITOR), "right", 1.0, width, BAR_H);
+        assert!(!place.frame);
+        assert_eq!(place.y, frame.y);
+        let (right_x, _) = bar_spot(frame, "right", 1.0, width);
+        assert_eq!(place.x, right_x - CAPTION_BUTTONS as i32);
+        // Floating is only for frameless clients: Window mode ignores it.
+        assert_eq!(place_for(frame, true, true, Some(MONITOR), "right", 1.0, width, BAR_H), place);
+    }
+
+    #[test]
+    fn fixed_gets_our_title_bar_and_edge_round_the_picture() {
+        let picture = Spot { x: 1, y: 31, w: 1918, h: 1024 };
+        let place = place_for(picture, false, false, Some(MONITOR), "right", 1.0, 300.0, BAR_H);
+        assert_eq!(place, Place { frame: true, x: 0, y: 0, w: 1920, h: 1056, top: 31 });
+        assert_eq!(outer_of(picture, 1.0), Spot { x: 0, y: 0, w: 1920, h: 1056 });
+        // At 150 %: a 47 px title bar.
+        let big = place_for(Spot { x: 1, y: 47, w: 1918, h: 1024 }, false, false, Some(MONITOR), "right", 1.5, 300.0, BAR_H);
+        assert_eq!((big.frame, big.y, big.top, big.h), (true, 0, 47, 1024 + 47 + 1));
+    }
+
+    #[test]
+    fn fixed_flush_against_the_top_falls_back_to_the_small_bar() {
+        let picture = Spot { x: 0, y: 0, w: 1918, h: 1024 };
+        let place = place_for(picture, false, false, Some(MONITOR), "right", 1.0, 300.0, BAR_H);
+        assert!(!place.frame);
+        assert_eq!(place.top, 0);
+    }
+
+    #[test]
+    fn floating_is_the_small_bar_over_the_top_edge() {
+        let picture = Spot { x: 1, y: 31, w: 1918, h: 1024 };
+        let width = bar_width(&default_buttons());
+        let place = place_for(picture, false, true, Some(MONITOR), "right", 1.0, width, BAR_H);
+        assert!(!place.frame);
+        assert_eq!((place.x, place.y), bar_spot(picture, "right", 1.0, width));
+    }
+
+    #[test]
+    fn a_folded_bar_keeps_its_close_button_where_it_was() {
+        let frame = Spot { x: 100, y: 200, w: 1920, h: 1056 };
+        let width = bar_width(&default_buttons());
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for corner in ["left", "center", "right"] {
+                let whole = place_for(frame, true, false, Some(MONITOR), corner, scale, width, BAR_H);
+                let small = folded(whole, scale);
+                assert_eq!(small.x + small.w, whole.x + whole.w, "{corner} at {scale}");
+                assert_eq!(small.w, (BAR_MINI_W * scale).round() as i32);
+                assert_eq!(small.y, whole.y);
+            }
+        }
+        // Our title bar never folds.
+        let title = place_for(Spot { x: 1, y: 31, w: 1918, h: 1024 }, false, false, Some(MONITOR), "right", 1.0, width, BAR_H);
+        assert_eq!(folded(title, 1.0), title);
+    }
+
+    #[test]
+    fn window_sizes_outside_what_eve_takes_are_refused() {
+        assert!(size_ok(1918, 1024).is_ok());
+        assert!(size_ok(640, 480).is_ok());
+        assert!(size_ok(7680, 4320).is_ok());
+        assert!(size_ok(639, 1024).is_err());
+        assert!(size_ok(1918, 479).is_err());
+        assert!(size_ok(7681, 1024).is_err());
     }
 
     #[test]

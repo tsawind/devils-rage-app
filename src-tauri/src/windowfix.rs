@@ -171,7 +171,7 @@ fn tell(app: &AppHandle, title: &str, text: String, kind: MessageDialogKind) {
 /// they share the profile (each rewrites it as it closes). `known` = the profile folder read from
 /// the client's start-up line; `profile_hint` = the account's own profile, used only if neither
 /// that nor a changed file says which profile it is.
-pub fn run(app: AppHandle, clients: Vec<(String, isize, Spot)>, to_fixed: bool, width: i64, height: i64, known: Option<String>, profile_hint: Option<String>) -> Result<(), String> {
+pub fn run(_app: AppHandle, clients: Vec<(String, isize, Spot)>, to_fixed: bool, width: i64, height: i64, known: Option<String>, profile_hint: Option<String>) -> Result<(), String> {
     let root = crate::profiles::root()?;
     let before = yamls(&root);
     let Some((name, _, _)) = clients.first().cloned() else { return Err("no client".into()) };
@@ -183,6 +183,8 @@ pub fn run(app: AppHandle, clients: Vec<(String, isize, Spot)>, to_fixed: bool, 
     std::thread::Builder::new()
         .name("window-fix".into())
         .spawn(move || {
+            // The app's one handle, borrowed (no handle dropped on this thread; mainthread.rs).
+            let Some(app) = crate::mainthread::app() else { return };
             let names: Vec<String> = clients.iter().map(|(n, _, _)| n.clone()).collect();
             let who = names.join(", ");
             let title = format!("{name} · window mode");

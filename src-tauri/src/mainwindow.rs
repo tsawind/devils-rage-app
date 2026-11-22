@@ -180,11 +180,12 @@ fn note_page(app: &AppHandle, url: &Url) {
     let host = url.host_str().unwrap_or_default();
     if host == crate::host_of(crate::MAPPER_URL) {
         // A mapper page (re)opened: once it's listening, tell it where everyone is.
-        let app = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_secs(3)).await;
-            crate::location::resend_all(&app);
-            crate::scanner::announce(&app);
+            if let Some(app) = crate::mainthread::app() {
+                crate::location::resend_all(app);
+                crate::scanner::announce(app);
+            }
         });
     }
     // Patch 66b: Your accounts opened (or changed something): read the launch groups again.

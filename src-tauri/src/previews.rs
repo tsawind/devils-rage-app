@@ -155,14 +155,15 @@ fn save_soon(app: &AppHandle) {
     if SAVE_PENDING.swap(true, Ordering::SeqCst) {
         return;
     }
-    let app = app.clone();
+    let _ = app;
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(600));
         SAVE_PENDING.store(false, Ordering::SeqCst);
-        let text = with_layout(&app, |layout| {
+        let Some(app) = crate::mainthread::app() else { return };
+        let text = with_layout(app, |layout| {
             serde_json::to_string_pretty(layout).unwrap_or_default()
         });
-        if let Some(path) = layout_path(&app) {
+        if let Some(path) = layout_path(app) {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
@@ -621,11 +622,12 @@ fn watch_tick(app: &AppHandle, st: &mut WatchState) {
         let fresh = new_names.iter().any(|n| !crate::clipboard::is_login_label(n));
         st.known = open;
         if fresh {
-            let app = app.clone();
             // A new client (or one that just logged in) goes to its remembered spot.
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(2));
-                crate::clientwindows::on_new_clients(&app, &new_names);
+                if let Some(app) = crate::mainthread::app() {
+                    crate::clientwindows::on_new_clients(app, &new_names);
+                }
             });
         }
         if fresh

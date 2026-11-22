@@ -127,8 +127,9 @@ pub fn recordings(app: &AppHandle) -> Result<PathBuf, String> {
 /// folder next to the app) into Videos, Pictures and Scans, once, in the background. Anything
 /// that can't move stays where it was.
 pub fn move_old_recordings(app: &AppHandle) {
-    let app = app.clone();
+    let _ = app;
     let _ = std::thread::Builder::new().name("move-recordings".into()).spawn(move || {
+        let Some(app) = crate::mainthread::app() else { return };
         let olds: Vec<PathBuf> = [
             app.path().app_local_data_dir().ok().map(|d| d.join("recordings")),
             std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("Recordings"))),

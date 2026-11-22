@@ -22,6 +22,12 @@ pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
 }
 
+/// The app's one handle, for threads that only need to borrow it: no clone and no drop off the
+/// main thread (moving `app.clone()` into a thread drops it there; that touches the same counter).
+pub fn app() -> Option<&'static AppHandle> {
+    APP.get()
+}
+
 /// Run `f` on the main thread and wait for its answer (None if the app is closing, or the main
 /// thread didn't get to it within 5 s). Don't hold a lock the main thread may need while waiting.
 pub fn run<T: Send + 'static>(f: impl FnOnce(&AppHandle) -> T + Send + 'static) -> Option<T> {

@@ -112,9 +112,12 @@ fn main_view_may_go(app: &AppHandle, me: &str, url: &Url) -> bool {
     if belongs == me {
         return true;
     }
-    let app = app.clone();
     let url = url.clone();
-    tauri::async_runtime::spawn(async move { go(&app, url) });
+    tauri::async_runtime::spawn(async move {
+        if let Some(app) = mainthread::app() {
+            go(app, url)
+        }
+    });
     false
 }
 
@@ -280,19 +283,19 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         // Off the window's own thread: building a window from inside a plain command can hang on Windows.
-        "video" => {
-            let app = app.clone();
-            std::thread::spawn(move || devrec::open_video(&app));
-        }
-        "snapshot-pick" => {
-            let app = app.clone();
-            std::thread::spawn(move || devrec::open_video(&app));
+        "video" | "snapshot-pick" => {
+            std::thread::spawn(|| {
+                if let Some(app) = mainthread::app() {
+                    devrec::open_video(app);
+                }
+            });
         }
         "snapshot" => {
-            let app = app.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = devrec::snapshot(&app) {
-                    log::warn!("snapshot: {e}");
+            std::thread::spawn(|| {
+                if let Some(app) = mainthread::app() {
+                    if let Err(e) = devrec::snapshot(app) {
+                        log::warn!("snapshot: {e}");
+                    }
                 }
             });
         }
@@ -388,9 +391,20 @@ pub fn run() {
 
     // Cameras: each EVE client's picture for the mapper's share page (capture.rs).
     builder = builder.register_asynchronous_uri_scheme_protocol(capture::SCHEME, |ctx, request, responder| {
-        let app = ctx.app_handle().clone();
+        let _ = ctx;
         // Patch 66: /launch-… is SeAT handing over launch groups; the rest is camera capture.
-        std::thread::spawn(move || responder.respond(if seatsync::wants(&request) { seatsync::handle(&app, request) } else { capture::handle(request) }));
+        // 22 Nov: no handle cloned per request (cameras ask many times a second; mainthread.rs).
+        std::thread::spawn(move || {
+            let answer = if seatsync::wants(&request) {
+                match mainthread::app() {
+                    Some(app) => seatsync::handle(app, request),
+                    None => capture::handle(request),
+                }
+            } else {
+                capture::handle(request)
+            };
+            responder.respond(answer)
+        });
     });
 
     builder
@@ -984,8 +998,11 @@ fn new_window_handler(
         let our_site = url.host_str().is_some_and(|host| host == host_of(SEAT_URL) || host == host_of(MAPPER_URL));
         if !solo && our_site {
             log::info!("new window for {} opened in the app's page instead", url.path());
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move { go(&app, url) });
+            tauri::async_runtime::spawn(async move {
+                if let Some(app) = mainthread::app() {
+                    go(app, url)
+                }
+            });
             return NewWindowResponse::Deny;
         }
         if !solo {
@@ -1121,9 +1138,10 @@ fn open_in_browser(app: &AppHandle, from: &str, url: &str) {
         return;
     }
     log::info!("opening in the browser (from {from}): {url}");
-    let app = app.clone();
+    let _ = app;
     let url = url.to_string();
     std::thread::spawn(move || {
+        let Some(app) = mainthread::app() else { return };
         if let Err(err) = app.opener().open_url(&url, None::<&str>) {
             log::warn!("couldn't open {url} in the browser: {err}");
         }
