@@ -152,12 +152,12 @@
   <div class="pop" id="pop"><h5 id="popT"></h5><div class="popB" id="popB"></div><div class="row" id="popBtns"></div></div>
   <div class="head"><h4 id="who"></h4><span class="m" id="where"></span></div>
   <div class="m" id="profile"></div>
-  <div class="sect">Frame <span class="m" style="margin:0">· switches now, no restart</span></div>
+  <div class="sect">Window mode <span class="m" style="margin:0">· switches now, no restart</span></div>
   <div class="seg" id="seg">
     <button data-s="windows" title="Windows' own title bar and edges (EVE's Window mode)">
-      <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="2"/><path d="M2 8h36"/><path d="M27 5h2M31 5h2M35 5h1"/></svg><b>Windows</b><small>resizable</small></button>
-    <button data-s="devil" title="Our title bar and a thin edge, no Windows frame">
-      <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="1"/><path class="hot" d="M2 3.5h36"/><path class="hot" d="M2 5.5h36"/></svg><b>Devil's</b><small>locked size</small></button>
+      <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="2"/><path d="M2 8h36"/><path d="M27 5h2M31 5h2M35 5h1"/></svg><b>Window</b><small>Windows' frame</small></button>
+    <button data-s="devil" title="Fixed: our title bar and a thin edge, no Windows frame, locked size">
+      <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="1"/><path class="hot" d="M2 3.5h36"/><path class="hot" d="M2 5.5h36"/></svg><b>Fixed</b><small>our title bar</small></button>
     <button data-s="floating" title="No frame at all, just the small bar over the top edge">
       <svg viewBox="0 0 40 28"><rect x="2" y="2" width="36" height="24" rx="0" stroke-dasharray="2 2"/><rect class="hot" x="24" y="3" width="12" height="4" rx="2"/></svg><b>Floating</b><small>no frame</small></button>
   </div>
@@ -425,7 +425,7 @@
   // 21 Nov: the frame, switched live: Windows / Devil's / Floating. Nothing closes.
   const STYLE_TEXT = {
     windows: "Windows' own title bar and edges: drag the edges to resize; Windows can snap or maximise it.",
-    devil: "Our title bar and a thin edge instead of Windows' frame: the size is locked, Windows can't resize or half-snap it by accident.",
+    devil: "Fixed: our title bar and a thin edge instead of Windows' frame. The size is locked; Windows can't resize or half-snap it by accident.",
     floating: "No frame at all, only this small bar over the top edge: for packing clients edge to edge.",
   };
   const segOf = (style) => (style || "windows").replace("eve-", "");
@@ -463,8 +463,8 @@
     const size = info?.size || { w: 1918, h: 1024 };
     $("mw").value = size.w; $("mh").value = size.h;
     let note = STYLE_TEXT[seg] || "";
-    if (style.startsWith("eve-")) note = "EVE's own Fixed Window (picked in EVE's Display Mode menu). " + (seg === "devil" ? "Our title bar on it." : "Just the small bar on it.");
-    else if (seg !== "windows") note += " EVE stays in Window mode underneath.";
+    if (style.startsWith("eve-")) note = "Fixed by EVE's own menu (Esc → Settings). " + (seg === "devil" ? "Our title bar on it; Floating swaps it for the small bar." : "Just the small bar on it; Fixed puts our title bar on it.") + " For Window, use EVE's menu again.";
+    else if (seg !== "windows") note += " The app did this: EVE's own setting still says Window mode, which is fine.";
     if (seg !== "windows" && info?.remembered) note += ` ${NAME} opens this way every time.`;
     if (info?.maximised) note = "Maximised: picking Devil's or Floating un-maximises it first. " + note;
     $("styleNote").textContent = note;
@@ -488,14 +488,14 @@
     showPop("This one is in EVE's own Fixed Window", `
       <p>EVE itself was switched to Fixed Window (its Esc menu), so the app can't hand it Windows' frame without EVE fighting it.</p>
       <p>To get Windows' frame back, in EVE: <span class="key">Esc → Settings → Display &amp; Graphics → Display Mode → Window mode</span>. EVE then uses the size it last had in Window mode.</p>
-      <p>After that, use these three buttons instead of EVE's menu: they switch instantly and keep the size.</p>`,
+      <p>After that, use these three buttons instead of EVE's menu: they switch instantly, both ways, and keep the size.</p>`,
       [["Got it", null, true]]);
   }
 
   function explainSwitch(to, go) {
     const bodies = {
       devil: `<p>Windows' title bar and edges come off this window, <b>right now</b>; our title bar takes their place. Same spot, same size (${$("mw").value}×${$("mh").value}).</p>
-        <p>EVE isn't restarted and stays in Window mode underneath: the switch is the app's, not EVE's. Windows can't resize, maximise or half-snap it any more; move it with our title bar.</p>
+        <p>EVE isn't restarted. Its own menu keeps saying Window mode: the app does the fixing, not EVE, which is why it can switch both ways any time. Windows can't resize, maximise or half-snap it any more; move it with our title bar.</p>
         <p>${info?.remembers ? `${NAME} opens this way every time from now on (2–3 s after it appears).` : "Login screens with a changing number aren't remembered."} Windows' button puts the frame back any time.</p>`,
       floating: `<p>Windows' frame comes off and there's no title bar of ours either: just this small bar over the top edge. Same spot and size.</p>
         <p>For packing clients edge to edge (a 1920×1080 picture fills a quarter of a 4K screen exactly). Move it with ✥ on the bar.</p>
@@ -504,13 +504,13 @@
         <p>You can resize it by its edges again, and Windows can snap or maximise it. ${info?.remembered ? `${NAME} stops opening without a frame.` : ""}</p>`,
     };
     if (seen("style-" + to)) { go(); return; }
-    const names = { windows: "Windows' frame", devil: "Devil's frame", floating: "Floating" };
+    const names = { windows: "Window", devil: "Fixed", floating: "Floating" };
     showPop(`Switch ${NAME} to ${names[to]}?`, bodies[to], [["Switch now", go, true], ["Cancel", null]], "style-" + to);
   }
 
   document.querySelectorAll("#seg button").forEach(b => b.addEventListener("click", () => {
     const to = b.dataset.s, now = segOf(info?.style);
-    if (to === now) { say("gearSay", "It's already that.", ""); return; }
+    if (to === now) { say("gearSay", eveFixed() ? "It's already fixed (by EVE's own menu)." : "It's already that.", ""); return; }
     if (to === "windows" && eveFixed()) { explainEveFixed(); return; }
     // EVE's own Fixed Window: Devil's ↔ Floating is just the bar.
     if (eveFixed()) { switchStyle(to); return; }
@@ -532,8 +532,8 @@
     if (menu !== "gearMenu") { $("who").textContent = NAME; fillFrame(); openMenu("gearMenu"); }
     showPop("EVE put Windows' frame back", `
       <p>EVE gave this window its title bar again, usually because its own Display Mode menu was used. The app leaves it like that and won't fight EVE over it.</p>
-      <p>Want our frame again? Click Devil's or Floating: it switches now, no restart.</p>`,
-      [["Devil's frame again", () => switchStyle("devil"), true], ["Leave it", null]]);
+      <p>Want it fixed again? Click Fixed or Floating: it switches now, no restart.</p>`,
+      [["Fixed again", () => switchStyle("devil"), true], ["Leave it", null]]);
   };
 
   // EVE's own display mode: what its Esc menu does, and its Fixed Window size (written when the
@@ -542,7 +542,7 @@
     const p = info?.profile;
     const { width, height } = sizeNow();
     $("eveNote").textContent = p
-      ? `EVE's Display Mode menu (Esc → Settings) doesn't use our size: it uses the sizes saved in settings_${p}, read when the client starts. The buttons above don't need it.${p.toLowerCase() === "default" ? " settings_Default is shared by every account without its own profile." : ""}`
+      ? `EVE's Display Mode menu (Esc → Settings) uses the sizes saved in settings_${p} (none saved: the whole screen). When it's used, the app puts the picture back to the size it had. The buttons above don't need it.${p.toLowerCase() === "default" ? " settings_Default is shared by every account without its own profile." : ""}`
       : "EVE's Display Mode menu (Esc → Settings) uses the sizes saved in the client's profile, read when it starts. The buttons above don't need it.";
     $("eveSize").textContent = `Make EVE's own Fixed Window ${width}×${height} (nothing closes)`;
     say("eveSay", "");
