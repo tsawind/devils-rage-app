@@ -100,14 +100,14 @@
   .menu details[open] > summary::before { content: "▾ "; }
   .menu summary:hover { color: #fff; }
   .menu button.go2 { width: 100%; background: #121216; border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 3px 6px; cursor: pointer; font: inherit; }
-  .pop { display: none; position: absolute; inset: 6px; z-index: 5; background: #121217; border: 1px solid var(--red-hi); border-radius: 8px; padding: 10px 12px; overflow: auto; }
-  .pop.on { display: block; }
-  .pop h5 { margin: 0 0 6px; font-size: 13px; }
+  .dlg { display: none; position: absolute; inset: 6px; z-index: 5; background: #121217; border: 1px solid var(--red-hi); border-radius: 8px; padding: 10px 12px; overflow: auto; }
+  .dlg.on { display: block; }
+  .dlg h5 { margin: 0 0 6px; font-size: 13px; }
   .popB { color: #c9c9d0; font-size: 12px; line-height: 1.45; }
   .popB p { margin: 0 0 6px; }
   .popB .key { color: #ffcf5a; }
-  .pop .row button.main { border-color: var(--red-hi); background: #1c0d0e; }
-  .pop label { display: flex; gap: 5px; align-items: center; color: var(--muted); font-size: 11px; margin-top: 4px; cursor: pointer; }
+  .dlg .row button.main { border-color: var(--red-hi); background: #1c0d0e; }
+  .dlg label { display: flex; gap: 5px; align-items: center; color: var(--muted); font-size: 11px; margin-top: 4px; cursor: pointer; }
 </style>
 </head>
 <body class="right">
@@ -149,7 +149,7 @@
 </div>
 
 <div class="menu" id="gearMenu">
-  <div class="pop" id="pop"><h5 id="popT"></h5><div class="popB" id="popB"></div><div class="row" id="popBtns"></div></div>
+  <div class="dlg" id="dlg"><h5 id="popT"></h5><div class="popB" id="popB"></div><div class="row" id="popBtns"></div></div>
   <div class="head"><h4 id="who"></h4><span class="m" id="where"></span></div>
   <div class="m" id="profile"></div>
   <div class="sect">Window mode <span class="m" style="margin:0">· switches now, no restart</span></div>
@@ -449,12 +449,12 @@
       b.addEventListener("click", () => { if (dontAskKey && $("popDont")?.checked) setSeen(dontAskKey); hidePop(); act && act(); });
       row.appendChild(b);
     }
-    $("pop").classList.add("on");
-    const need = $("pop").scrollHeight + 12;
+    $("dlg").classList.add("on");
+    const need = $("dlg").scrollHeight + 12;
     if ($("gearMenu").offsetHeight < need) $("gearMenu").style.minHeight = need + "px";
     fitMenu();
   }
-  function hidePop() { $("pop").classList.remove("on"); $("gearMenu").style.minHeight = ""; fitMenu(); }
+  function hidePop() { $("dlg").classList.remove("on"); $("gearMenu").style.minHeight = ""; fitMenu(); }
 
   function fillFrame() {
     const style = info?.style || "windows";
