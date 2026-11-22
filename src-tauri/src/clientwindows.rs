@@ -136,6 +136,7 @@ pub fn window_spot(handle: isize) -> Option<Spot> {
 
 /// Move a client window (its title-bar drag, done for it).
 pub fn place_window(handle: isize, spot: Spot) -> bool {
+    crate::clientbar::note_ours(handle);
     win::place(handle, spot)
 }
 
@@ -154,11 +155,13 @@ fn same_mode(layout: &ClientLayout, name: &str, handle: isize, spot: Spot) -> bo
 /// client to 1902x985).
 fn place_named(app: &AppHandle, name: &str, handle: isize, spot: Spot) -> bool {
     if with(app, |layout| same_mode(layout, name, handle, spot)) {
+        crate::clientbar::note_ours(handle);
         return win::place(handle, spot);
     }
     match crate::clientbar::near_spot(app, handle, spot) {
         Some(to) => {
             log::info!("{name}: spot is from the other display mode; moved there, size kept");
+            crate::clientbar::note_ours(handle);
             win::place(handle, to)
         }
         None => false,
@@ -210,6 +213,7 @@ pub fn hold(app: &AppHandle) {
         }
         // Moved off its spot, or resized by more than rounding: put it back.
         if (now.x - spot.x).abs() > 4 || (now.y - spot.y).abs() > 4 || !same_size(now, spot) {
+            crate::clientbar::note_ours(handle);
             win::place(handle, spot);
         }
     }

@@ -700,6 +700,12 @@ fn follow_switches(app: &AppHandle, seen: &mut HashMap<String, (bool, Spot, Opti
         // screen), so the picture keeps the size it had before (Tsa: "the resolution was
         // different window mode to fixed mode"). EVE keeps that size and saves it on close.
         let keep = old_picture.filter(|&(w, h)| w >= 640 && h >= 480);
+        // Into EVE's Fixed Window: our title bar and edge round it (not the small floating bar).
+        if !captioned {
+            change(app, |s| {
+                s.floating.remove(&name);
+            });
+        }
         std::thread::spawn(move || {
             for wait in [300, 900] {
                 std::thread::sleep(Duration::from_millis(wait));
@@ -1109,6 +1115,7 @@ pub fn clientbar_resize_live(name: String, width: i32, height: i32) -> Result<St
         return Err("That's for Fixed Window clients.".into());
     }
     let rect = win::window_rect(handle).ok_or("restore the client first (it's minimised)")?;
+    note_ours(handle);
     win::resize(handle, Spot { x: rect.x, y: rect.y, w: width, h: height });
     std::thread::sleep(Duration::from_millis(600));
     let now = win::client_size(handle).unwrap_or((0, 0));
@@ -1576,7 +1583,24 @@ fn is_bare(handle: isize) -> bool {
     BARE.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&handle))
 }
 
+/// Windows the app itself moved or resized just now, so a size change on them isn't EVE's.
+static OURS: Mutex<Option<HashMap<isize, Instant>>> = Mutex::new(None);
+/// Where each frameless client's picture last was while nobody changed its size.
+static BARE_SPOT: Mutex<Option<HashMap<isize, Spot>>> = Mutex::new(None);
+
+pub fn note_ours(handle: isize) {
+    let mut guard = OURS.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    map.retain(|_, t| t.elapsed() < Duration::from_secs(10));
+    map.insert(handle, Instant::now());
+}
+
+fn ours_lately(handle: isize) -> bool {
+    OURS.lock().unwrap().as_ref().and_then(|m| m.get(&handle)).is_some_and(|t| t.elapsed() < Duration::from_millis(2500))
+}
+
 fn mark_restyled(handle: isize) {
+    note_ours(handle);
     let mut guard = RESTYLED.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
     map.retain(|_, t| t.elapsed() < Duration::from_secs(10));
@@ -1676,6 +1700,7 @@ fn set_client_size(handle: isize, width: i32, height: i32) -> Result<(), String>
     size_ok(width, height)?;
     let client = win::client_on_screen(handle).ok_or("Restore the client first (it's minimised).")?;
     let (style, ex) = win::styles(handle);
+    note_ours(handle);
     if !win::restyle(handle, style, ex, Spot { w: width, h: height, ..client }) {
         return Err("Windows didn't let the app resize that window.".into());
     }
@@ -1780,6 +1805,39 @@ pub fn clientbar_eve_fixed_size(name: String, width: i64, height: i64) -> Result
     ))
 }
 
+/// A client we made frameless changed size without us: EVE's own Display Mode menu (Fixed Window
+/// at the size saved in its profile, or the whole screen) or its Window Size list. The picture
+/// goes back to the size and spot it had, with our title bar round it (Tsa: "switch the
+/// resolution of the fixed mode to the same resolution… automatically flip to Fixed").
+fn eve_switch_while_bare(app: &AppHandle, name: &str, handle: isize) {
+    let Some(now) = win::client_on_screen(handle) else { return };
+    let last = BARE_SPOT.lock().unwrap().as_ref().and_then(|m| m.get(&handle).copied());
+    let ours = just_restyled(handle) || ours_lately(handle) || DRAGGING.lock().unwrap().is_some();
+    let changed = last.is_some_and(|l| (l.w, l.h) != (now.w, now.h));
+    if ours || !changed {
+        BARE_SPOT.lock().unwrap().get_or_insert_with(HashMap::new).insert(handle, now);
+        return;
+    }
+    let Some(last) = last else { return };
+    // WS_POPUP: EVE's own Fixed Window now (Windows' frame back is EVE's menu again).
+    let (style, ex) = win::styles(handle);
+    let eve_fixed = style & 0x8000_0000 != 0;
+    if eve_fixed {
+        if let Some(m) = BARE.lock().unwrap().as_mut() {
+            m.remove(&handle);
+        }
+    }
+    log::info!("{name}: EVE changed it to {}×{} by itself ({}); back to {}×{} at {},{}", now.w, now.h, if eve_fixed { "its Fixed Window" } else { "its own size list" }, last.w, last.h, last.x, last.y);
+    change(app, |s| {
+        s.floating.remove(name);
+    });
+    mark_restyled(handle);
+    win::restyle(handle, style, ex, last);
+    BARE_SPOT.lock().unwrap().get_or_insert_with(HashMap::new).insert(handle, last);
+    let name = name.to_string();
+    remember_soon(name, handle);
+}
+
 /// The display-mode follower's part (main thread, every look): Windows' frame put back by EVE
 /// itself (its own Display Mode menu): left alone, the bar says so; a remembered client that
 /// opens in Window mode loses Windows' frame once, 2.5 s after it appeared.
@@ -1796,8 +1854,15 @@ fn keep_styles(app: &AppHandle, clients: &[(String, isize)]) {
     if let Some(m) = BARE.lock().unwrap().as_mut() {
         m.retain(|h, _| clients.iter().any(|(_, c)| c == h));
     }
+    if let Some(m) = BARE_SPOT.lock().unwrap().as_mut() {
+        m.retain(|h, _| is_bare(*h) && clients.iter().any(|(_, c)| c == h));
+    }
     for (name, handle) in clients {
         let handle = *handle;
+        if !win::captioned(handle) && is_bare(handle) {
+            eve_switch_while_bare(app, name, handle);
+            continue;
+        }
         if !win::captioned(handle) || just_restyled(handle) || win::frame(handle).is_none() {
             continue;
         }
