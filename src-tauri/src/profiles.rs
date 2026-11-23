@@ -21,7 +21,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
-const BACKUP_PREFIX: &str = "Devils Rage backup ";
+pub(crate) const BACKUP_PREFIX: &str = "Devils Rage backup ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

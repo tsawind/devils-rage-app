@@ -43,6 +43,7 @@ mod piscan;
 mod planetscan;
 mod previews;
 mod profiles;
+mod snapshots;
 mod scanner;
 mod seatsync;
 mod settings;
@@ -514,6 +515,15 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             profiles::profiles_restore,
             profiles::profiles_copy,
             profiles::profiles_clone,
+            snapshots::profile_snapshot,
+            snapshots::profile_snapshots,
+            snapshots::profile_snapshot_restore,
+            snapshots::profile_snapshot_delete,
+            snapshots::profile_folder_archive,
+            snapshots::profile_archived,
+            snapshots::profile_folder_unarchive,
+            snapshots::profile_archived_delete,
+            snapshots::profile_folder_delete,
             profiles::profiles_apply_group,
             profiles::tuning_read,
             profiles::tuning_apply,

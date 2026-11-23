@@ -45,6 +45,19 @@
   .backups div { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid #1f1f25; }
   .backups span { flex: 1; }
   .steps { display: grid; gap: 8px; }
+  /* 23 Nov: snapshots, archive, delete per profile. */
+  .pacts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px solid #1f1f25; }
+  .pacts .sp { flex: 1; }
+  .pmsg { font-size: 12.5px; margin-top: 6px; }
+  .pmsg.ok { color: var(--ok); }
+  .pmsg.bad { display: block; background: #3a1416; color: #f27a7a; font-weight: 700; font-size: 14px; border-radius: 6px; padding: 7px 10px; }
+  .snaps { margin-top: 6px; font-size: 12.5px; }
+  .snaps summary { cursor: pointer; color: var(--muted); }
+  .snaps .s { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid #1f1f25; }
+  .snaps .s span { flex: 1; }
+  .snaps .s small { color: var(--muted); }
+  .ask { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; font-size: 13px; }
+  .ask input { flex: 1; min-width: 140px; }
   .steps b.n { display: inline-block; width: 20px; height: 20px; border-radius: 50%; background: var(--red); text-align: center; line-height: 20px; font-size: 12px; margin-right: 6px; }
 </style>
 </head>
@@ -108,7 +121,14 @@
     <span class="muted">then pick it as the client profile in the EVE launcher.</span>
   </div>
 
-  <h2>Backups</h2>
+  <h2>Archived and deleted profiles</h2>
+  <div class="card">
+    <p class="note" style="margin-bottom: 6px">Archived folders sit in <code>Devils Rage archive</code> beside your profiles, where the launcher doesn't look. A deleted profile keeps a snapshot of its files until you delete that too.</p>
+    <div class="backups" id="archived"></div>
+    <div class="pmsg" id="archMsg"></div>
+  </div>
+
+  <h2>Whole-PC backups (every profile at once)</h2>
   <div class="card">
     <div class="row" style="margin-bottom: 6px"><button class="btn" id="backup">Back up every profile now</button>
       <span class="muted">Saved next to your profiles, like your own “backup 11-20-2025” folders.</span></div>
@@ -120,6 +140,7 @@
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  let snaps = [], archived = [], msgs = {};
   let scan = null, names = {}, groups = [], ticked = new Set(), accounts = [], seatGroups = [];
   // Patch 66: account "29" in Your accounts uses client profile settings_29.
   const accountFor = (p) => accounts.find(a => a.profile === p.name);
@@ -138,6 +159,8 @@
     const seat = await invoke("seat_launch_groups").catch(() => ({ accounts: [], groups: [] }));
     accounts = seat.accounts || [];
     seatGroups = (seat.groups || []).map(x => x.group);
+    snaps = await invoke("profile_snapshots").catch(() => []);
+    archived = await invoke("profile_archived").catch(() => []);
     const ids = [...new Set([...scan.profiles.flatMap(p => p.chars.map(c => c.id)), ...scan.templates.filter(t => t.kind === "char").map(t => t.id)])];
     render();
     names = Object.assign(names, await invoke("profiles_names", { ids }).catch(() => ({})));
@@ -265,7 +288,7 @@
           inner.append(row);
         });
       }
-      card.append(h, label, list);
+      card.append(h, label, list, profileTools(p));
       host.append(card);
     });
 
@@ -282,7 +305,98 @@
       r.addEventListener("click", () => restore(name));
       row.append(r); b.append(row);
     });
+    drawArchived();
     summary();
+  }
+
+  // ---- 23 Nov: snapshots, archive and delete, one profile at a time ----
+  const stampOf = (ms) => ms ? new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  function say(box, text, bad) { box.textContent = text || ""; box.className = "pmsg" + (text ? (bad ? " bad" : " ok") : ""); }
+  async function run(key, cmd, args) {
+    try { msgs[key] = { text: await invoke(cmd, args), bad: false }; }
+    catch (e) { msgs[key] = { text: String(e), bad: true }; }
+    await load();
+  }
+  // Ask twice in place, then do it.
+  function twice(host, first, second, yes) {
+    const keep = [...host.childNodes];
+    const back = () => { host.innerHTML = ""; keep.forEach(k => host.append(k)); };
+    const step = (text, next) => {
+      host.innerHTML = "";
+      const box = el("div", "ask"); box.append(el("span", null, text));
+      const y = el("button", "btn small red", "Yes"), n = el("button", "btn small", "Cancel");
+      y.addEventListener("click", next); n.addEventListener("click", back);
+      box.append(y, n); host.append(box);
+    };
+    step(first, () => step(second, () => { back(); yes(); }));
+  }
+  function snapList(profile, key) {
+    const mine = snaps.filter(x => x.profile === profile);
+    const d = el("details", "snaps");
+    d.open = !!msgs[key + ":open"];
+    d.addEventListener("toggle", () => { msgs[key + ":open"] = d.open; });
+    d.append(el("summary", null, mine.length ? `Snapshots (${mine.length})` : "No snapshots yet"));
+    mine.forEach(x => {
+      const row = el("div", "s");
+      const t = el("span"); t.append(document.createTextNode(stampOf(x.at) + (x.note ? " · " + x.note : "")), el("small", null, ` ${x.files} files${x.auto ? " · taken by the app" : ""}`));
+      const back = el("button", "btn small", "Put back"); back.title = "Make this profile exactly this snapshot (what's there now is snapshotted first). Every EVE client and the launcher closed.";
+      back.addEventListener("click", () => twice(row, `Put settings_${profile} back to ${stampOf(x.at)}?`, "What's there now gets its own snapshot first. Go ahead?", () => run(key, "profile_snapshot_restore", { profile, id: x.id })));
+      const del = el("button", "btn small", "Delete");
+      del.addEventListener("click", () => twice(row, "Delete this snapshot?", "It can't be undone. Delete it?", () => run(key, "profile_snapshot_delete", { profile, id: x.id })));
+      row.append(t, back, del); d.append(row);
+    });
+    return d;
+  }
+  function profileTools(p) {
+    const key = "p:" + p.name;
+    const wrap = el("div");
+    const acts = el("div", "pacts");
+    const snap = el("button", "btn small", "📸 Snapshot");
+    snap.title = "Save this profile's files as they are now, to put back later";
+    snap.addEventListener("click", () => {
+      acts.innerHTML = "";
+      const box = el("div", "ask");
+      const note = el("input"); note.type = "text"; note.placeholder = "Note (optional), e.g. before the overview change"; note.maxLength = 80;
+      const save = el("button", "btn small", "Save snapshot"), cancel = el("button", "btn small", "Cancel");
+      save.addEventListener("click", () => run(key, "profile_snapshot", { profile: p.name, note: note.value }));
+      note.addEventListener("keydown", (e) => { if (e.key === "Enter") save.click(); });
+      cancel.addEventListener("click", () => render());
+      box.append(note, save, cancel); acts.append(box); note.focus();
+    });
+    const arch = el("button", "btn small", "Archive");
+    arch.title = "Move the whole folder out of the launcher's sight; nothing is lost (Put back below)";
+    arch.addEventListener("click", () => twice(acts, `Archive settings_${p.name}? The launcher stops listing it.`, "Every EVE client and the launcher must be closed. Archive it?", () => run(key, "profile_folder_archive", { profile: p.name })));
+    const del = el("button", "btn small red", "Delete");
+    del.title = "Delete the whole folder (a snapshot of its files is kept first)";
+    del.addEventListener("click", () => twice(acts, `Delete settings_${p.name}?`, "A snapshot of its files is kept; the folder is gone. Every EVE client and the launcher must be closed. Delete it?", () => run(key, "profile_folder_delete", { profile: p.name })));
+    acts.append(snap, el("span", "sp"), arch, del);
+    const msg = el("div", "pmsg");
+    if (msgs[key]) say(msg, msgs[key].text, msgs[key].bad);
+    wrap.append(acts, msg, snapList(p.name, key));
+    return wrap;
+  }
+  function drawArchived() {
+    const host = $("archived"); host.innerHTML = "";
+    const live = new Set(scan.profiles.map(p => p.name));
+    // Deleted profiles: snapshots of a folder that isn't there now.
+    const gone = [...new Set(snaps.map(x => x.profile))].filter(n => !live.has(n));
+    if (!archived.length && !gone.length) host.append(el("span", "muted", "Nothing archived or deleted."));
+    archived.forEach(a => {
+      const row = el("div");
+      row.append(el("span", null, `${a.id} · ${a.files} files`));
+      const back = el("button", "btn small", "Put back");
+      back.addEventListener("click", () => run("arch", "profile_folder_unarchive", { id: a.id }));
+      const del = el("button", "btn small red", "Delete for good");
+      del.addEventListener("click", () => twice(row, `Delete ${a.id} for good?`, "It can't be undone. Delete it?", () => run("arch", "profile_archived_delete", { id: a.id })));
+      row.append(back, del); host.append(row);
+    });
+    gone.forEach(n => {
+      const row = el("div", null);
+      row.style.display = "block";
+      row.append(el("b", null, `settings_${n} (deleted)`), snapList(n, "arch"));
+      host.append(row);
+    });
+    say($("archMsg"), msgs.arch?.text, msgs.arch?.bad);
   }
 
   function visibleSpecs() {
