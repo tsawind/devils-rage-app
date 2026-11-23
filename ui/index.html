@@ -184,10 +184,13 @@
         <button id="pSame" title="Make every preview this size (open ones and the saved spots of the rest)">Set</button>
         <button id="pSmaller" title="Every preview 10% smaller">−</button><button id="pBigger" title="Every preview 10% bigger">+</button></div>
       <div class="acts">
-        <button id="pEdit" title="Arrange previews: drag, resize from the corner. Lock when done.">Edit preview layout</button>
+        <button id="pEdit" title="Arrange previews: drag anywhere, resize from any edge, right-click for settings. Lock when done.">Edit preview layout</button>
         <button id="pSettings" title="Every preview's settings in one place: shown, click-through, opacity, and its exact spot and size">Preview settings…</button>
         <button id="pClose">Close previews</button>
+        <button id="pPlace" title="Step through the previews one at a time: the others fade, so you can line them up">Place previews…</button>
       </div>
+      <label title="While arranging, each monitor shows a grid and a dropped preview fills the cells it's over (grid size: right-click a preview)"><input type="checkbox" id="pSnap"> Snap mode (a grid while arranging)</label>
+      <div style="font-size:12px;color:#8a8a92">Right-click a preview for its settings, size, snap and line-up.</div>
     </div>
     <div class="pcard">
       <h3>EVE windows</h3>
@@ -195,6 +198,7 @@
       <label title="A client moved off its spot goes straight back (Window mode). Use Arrange windows or the client bar to change spots."><input type="checkbox" id="cwLock"> Lock windows</label>
       <div class="acts">
         <button id="cwArrange" title="For Fixed Window clients: a handle over each client; drag to move its window, pull the corner to resize. Done remembers them.">Arrange windows</button>
+        <button id="cwPlaceOne" title="Step through every client one at a time: the others show as frames (or fade / hide), so a stack lines up exactly on top of each other">Place clients…</button>
         <details><summary>More</summary>
           <button id="cwRemember" title="Remember where every logged-in client's window is now">Remember where they are now</button>
           <button id="cwPlace" title="Move every open client back to its remembered spot">Put them all back now</button>
@@ -280,6 +284,14 @@
   document.getElementById("psSetups").addEventListener("click", () => psOpen("setups.html"));
 
   // Patch 63c: preview layout controls.
+  // 23 Nov: snap mode and Place clients / previews.
+  const pSnap = document.getElementById("pSnap");
+  if (pSnap) {
+    invoke("preview_layout").then(l => { pSnap.checked = !!(l && l.snap_on); }).catch(() => {});
+    pSnap.addEventListener("change", () => invoke("set_previews_snap_mode", { on: pSnap.checked }).catch(() => {}));
+  }
+  document.getElementById("pPlace")?.addEventListener("click", () => invoke("place_clients_open", { previews: true }).catch(() => {}));
+  document.getElementById("cwPlaceOne")?.addEventListener("click", () => invoke("place_clients_open", { previews: false }).catch(() => {}));
   const pEdit = document.getElementById("pEdit");
   const showEdit = (on) => { pEdit.classList.toggle("on", on); pEdit.textContent = on ? "Lock previews (done editing)" : "Edit preview layout"; };
   const pOpacity = document.getElementById("pOpacity");

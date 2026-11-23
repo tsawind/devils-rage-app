@@ -22,11 +22,11 @@ use tauri::{
 };
 
 /// Label every preview window shares a prefix, so we can find and close them together.
-const PREFIX: &str = "preview-";
+pub(crate) const PREFIX: &str = "preview-";
 const DEFAULT_SIZE: (f64, f64) = (320.0, 200.0);
 const MIN_SIZE: (f64, f64) = (80.0, 45.0);
 
-fn label_for(name: &str) -> String {
+pub(crate) fn label_for(name: &str) -> String {
     // Keep it to a safe window label (letters and digits); the page gets the real name.
     let slug: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     format!("{PREFIX}{slug}")
@@ -100,6 +100,14 @@ pub struct Layout {
     /// alts at character select would otherwise each get a live window).
     #[serde(default)]
     pub login_previews: bool,
+    /// 23 Nov: snap mode while arranging: each monitor becomes a grid of `snap_cols` x
+    /// `snap_rows` cells and a dropped preview fills the cells it's over.
+    #[serde(default)]
+    pub snap_on: bool,
+    #[serde(default = "eight")]
+    pub snap_cols: u32,
+    #[serde(default = "eight")]
+    pub snap_rows: u32,
     /// Patch 114: the square on each preview (in / out of the pedal's hotkey group) and the
     /// orange frame round the ones that are in it.
     #[serde(default = "yes")]
@@ -113,6 +121,9 @@ const AUTO_MAX: usize = 48;
 fn ten() -> u32 {
     10
 }
+fn eight() -> u32 {
+    8
+}
 
 impl Default for Layout {
     fn default() -> Self {
@@ -124,6 +135,9 @@ impl Default for Layout {
             hide_active: false,
             snap: 10,
             login_previews: false,
+            snap_on: false,
+            snap_cols: 8,
+            snap_rows: 8,
             group_marks: true,
         }
     }
@@ -139,7 +153,7 @@ fn layout_path(app: &AppHandle) -> Option<std::path::PathBuf> {
         .map(|dir| dir.join("previews.json"))
 }
 
-fn with_layout<T>(app: &AppHandle, f: impl FnOnce(&mut Layout) -> T) -> T {
+pub(crate) fn with_layout<T>(app: &AppHandle, f: impl FnOnce(&mut Layout) -> T) -> T {
     let mut guard = LAYOUT.lock().unwrap();
     if guard.is_none() {
         let loaded = layout_path(app)
@@ -152,7 +166,7 @@ fn with_layout<T>(app: &AppHandle, f: impl FnOnce(&mut Layout) -> T) -> T {
 }
 
 /// Save soon (window moves fire many times while dragging; one write after they stop).
-fn save_soon(app: &AppHandle) {
+pub(crate) fn save_soon(app: &AppHandle) {
     if SAVE_PENDING.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -176,13 +190,13 @@ fn save_soon(app: &AppHandle) {
     });
 }
 
-fn prefs_for(app: &AppHandle, name: &str) -> ClientPrefs {
+pub(crate) fn prefs_for(app: &AppHandle, name: &str) -> ClientPrefs {
     with_layout(app, |layout| {
         layout.clients.get(name).cloned().unwrap_or_default()
     })
 }
 
-fn edit_mode(app: &AppHandle) -> bool {
+pub(crate) fn edit_mode(app: &AppHandle) -> bool {
     with_layout(app, |layout| layout.edit)
 }
 
@@ -203,7 +217,7 @@ fn mode_json(app: &AppHandle, name: &str) -> serde_json::Value {
 }
 
 /// Push the mode to one preview window: click-through (locked mode only) and its page.
-fn apply_mode(app: &AppHandle, window: &WebviewWindow, name: &str) {
+pub(crate) fn apply_mode(app: &AppHandle, window: &WebviewWindow, name: &str) {
     let prefs = prefs_for(app, name);
     let edit = edit_mode(app);
     let _ = window.set_ignore_cursor_events(!edit && prefs.click_through);
@@ -370,6 +384,7 @@ fn build_preview(app: &AppHandle, name: &str) {
                     prefs.y = Some(pos.y);
                 });
                 save_soon(&app_for_events);
+                crate::previewtools::on_preview_changed(&app_for_events, &name_for_events);
             }
             WindowEvent::Resized(size) if size.width > 0 && size.height > 0 => {
                 with_layout(&app_for_events, |layout| {
@@ -378,6 +393,7 @@ fn build_preview(app: &AppHandle, name: &str) {
                     prefs.h = Some(size.height);
                 });
                 save_soon(&app_for_events);
+                crate::previewtools::on_preview_changed(&app_for_events, &name_for_events);
             }
             _ => {}
         }
@@ -391,6 +407,8 @@ fn build_preview(app: &AppHandle, name: &str) {
 pub fn set_preview_edit(app: AppHandle, on: bool) -> Result<(), String> {
     with_layout(&app, |layout| layout.edit = on);
     save_soon(&app);
+    let snap = with_layout(&app, |layout| layout.snap_on);
+    crate::previewtools::show_grid(&app, on && snap);
     if on {
         // Make sure every open client has a preview to arrange.
         let _ = open_previews(app.clone());
@@ -781,6 +799,24 @@ pub fn preview_start_drag(window: WebviewWindow) {
     let _ = window.start_dragging();
 }
 
+/// 23 Nov: resize a preview from any edge or corner (Windows' own resize, smooth).
+#[tauri::command]
+pub fn preview_start_resize(window: WebviewWindow, edge: String) {
+    use tauri::window::ResizeDirection as D;
+    let dir = match edge.as_str() {
+        "n" => D::North,
+        "s" => D::South,
+        "e" => D::East,
+        "w" => D::West,
+        "ne" => D::NorthEast,
+        "nw" => D::NorthWest,
+        "se" => D::SouthEast,
+        "sw" => D::SouthWest,
+        _ => return,
+    };
+    let _ = window.start_resize_dragging(dir);
+}
+
 /// Click-through previews let every click through to the game, so their square couldn't be
 /// clicked: while the pointer is over a click-through preview's square, that window takes
 /// clicks again (labels here are the ones currently taking them).
@@ -909,6 +945,7 @@ pub fn close_preview(app: AppHandle, window: WebviewWindow) {
 pub fn close_previews(app: AppHandle) {
     AUTO_PAUSED.store(true, std::sync::atomic::Ordering::Relaxed);
     with_layout(&app, |layout| layout.edit = false);
+    crate::previewtools::show_grid(&app, false);
     save_soon(&app);
     let all = app
         .webview_windows()
@@ -950,7 +987,7 @@ fn destroy_all(app: &AppHandle, windows: Vec<WebviewWindow>) {
 }
 
 /// Which character a preview window shows (from its title "Name · preview").
-fn name_of_window(window: &WebviewWindow) -> Option<String> {
+pub(crate) fn name_of_window(window: &WebviewWindow) -> Option<String> {
     window
         .title()
         .ok()

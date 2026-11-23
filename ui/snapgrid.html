@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Snap grid</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; pointer-events: none; font: 12px "Segoe UI", system-ui, sans-serif; }
+  #grid { position: fixed; inset: 0; }
+  .ln { position: absolute; background: #f0c04059; }
+  .ln.v { top: 0; bottom: 0; width: 1px; }
+  .ln.h { left: 0; right: 0; height: 1px; }
+  #hl { position: absolute; border: 2px solid #f0c040; background: #f0c04026; border-radius: 4px; display: none; box-sizing: border-box; }
+  .ol { position: absolute; border: 2px dashed #ff40aa; border-radius: 3px; box-sizing: border-box; }
+  .ol.cur { border: 3px solid #adff2f; }
+  .ol span { position: absolute; left: 4px; top: 3px; background: #000c; color: #ff8ccf; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+  .ol.cur span { color: #adff2f; }
+</style>
+</head>
+<body>
+<div id="grid"></div>
+<div id="outlines"></div>
+<div id="hl"></div>
+<script>
+  const pct = (v) => (v * 100).toFixed(4) + "%";
+  window.__layer = (s) => {
+    const grid = document.getElementById("grid");
+    grid.innerHTML = "";
+    if (s.grid) {
+      for (let i = 1; i < s.cols; i++) { const d = document.createElement("div"); d.className = "ln v"; d.style.left = pct(i / s.cols); grid.append(d); }
+      for (let i = 1; i < s.rows; i++) { const d = document.createElement("div"); d.className = "ln h"; d.style.top = pct(i / s.rows); grid.append(d); }
+    }
+    const box = document.getElementById("outlines");
+    box.innerHTML = "";
+    for (const o of s.outlines || []) {
+      const d = document.createElement("div");
+      d.className = "ol" + (o.current ? " cur" : "");
+      Object.assign(d.style, { left: pct(o.x), top: pct(o.y), width: pct(o.w), height: pct(o.h) });
+      const t = document.createElement("span"); t.textContent = o.name; d.append(t);
+      box.append(d);
+    }
+  };
+  window.__hl = (r) => {
+    const hl = document.getElementById("hl");
+    if (!r) { hl.style.display = "none"; return; }
+    Object.assign(hl.style, { display: "block", left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) });
+  };
+  if (window.__LAYER__) window.__layer(window.__LAYER__);
+</script>
+</body>
+</html>

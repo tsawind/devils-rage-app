@@ -36,17 +36,23 @@
   body.mark-spy #pic { filter: saturate(.55); }
   #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 3;
          text-align: center; padding: 16px; color: #c98a5a; pointer-events: none; }
-  /* Edit mode toolbar */
-  #bar { position: fixed; left: 4px; right: 4px; bottom: 4px; z-index: 6; display: none; gap: 6px; align-items: center;
-         flex-wrap: wrap; background: #000c; border: 1px solid #333; border-radius: 6px; padding: 3px 6px; font-size: 11px; }
-  /* Only while the pointer is over this preview, so small previews stay draggable and visible. */
-  body.edit:hover #bar { display: flex; }
-  #bar label { display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
-  #bar input[type=range] { width: 60px; }
-  #bar button { font: inherit; background: #1c0d0e; color: #f3c6c6; border: 1px solid #a8181f; border-radius: 4px; padding: 1px 7px; cursor: pointer; margin-left: auto; }
+  /* 23 Nov: no settings panel inside the preview any more (right-click opens the menu), so a
+     small preview is all drag surface. Every edge and corner resizes. */
+  .edge { position: fixed; z-index: 7; display: none; }
+  body.edit .edge { display: block; }
+  .edge.n { top: 0; left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+  .edge.s { bottom: 0; left: 10px; right: 18px; height: 6px; cursor: ns-resize; }
+  .edge.w { left: 0; top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+  .edge.e { right: 0; top: 10px; bottom: 18px; width: 6px; cursor: ew-resize; }
+  .edge.nw { left: 0; top: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+  .edge.ne { right: 0; top: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+  .edge.sw { left: 0; bottom: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+  #hint { position: fixed; left: 0; right: 0; bottom: 3px; text-align: center; z-index: 3; font-size: 10px; color: #f0c040;
+          text-shadow: 0 1px 2px #000; pointer-events: none; display: none; }
+  body.edit:hover #hint { display: block; }
   #off { position: fixed; top: 40%; left: 0; right: 0; text-align: center; z-index: 3; display: none; color: #ddd; pointer-events: none; }
   body.edit.off #off { display: block; }
-  #grip { position: fixed; right: 0; bottom: 0; width: 14px; height: 14px; z-index: 7; cursor: nwse-resize; display: none;
+  #grip { position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; z-index: 8; cursor: nwse-resize; display: none;
           background: linear-gradient(135deg, transparent 50%, #f0c040 50%); }
   body.edit #grip { display: block; }
   #close { position: fixed; top: 2px; right: 4px; width: 18px; height: 18px; line-height: 16px; text-align: center; z-index: 7;
@@ -62,7 +68,6 @@
   #groups .sq { width: 14px; height: 14px; cursor: pointer; border: 2px solid var(--c); border-radius: 3px; background: #0009; }
   #groups .sq.on { background: var(--c); box-shadow: inset 0 0 0 2px #000; }
   #groups .sq:hover { opacity: 1 !important; filter: brightness(1.3); }
-  #bar input[type=number] { width: 48px; font: inherit; background: #111; color: #eee; border: 1px solid #444; border-radius: 3px; padding: 0 2px; }
   #close:hover { background: #a8181f; color: #fff; }
 </style>
 </head>
@@ -71,15 +76,11 @@
   <div id="drag"></div>
   <div id="name">…</div>
   <div id="frame"></div>
-  <div id="off">Hidden — tick “Shown” to keep it</div>
+  <div id="off">Hidden (right-click → Shown to keep it)</div>
   <div id="msg" hidden></div>
-  <div id="bar">
-    <label title="Show this client's preview when previews are open"><input type="checkbox" id="shown"> Shown</label>
-    <label title="Clicks go straight through to the game; switch with the pedal / hotkeys"><input type="checkbox" id="through"> Click-through</label>
-    <label title="How see-through the preview is">Opacity <input type="range" id="opacity" min="20" max="100" step="5"></label>
-    <label title="Size in pixels: type a width and height, Enter to apply">Size <input type="number" id="sizeW" min="80" max="4000" step="10"> × <input type="number" id="sizeH" min="45" max="4000" step="10"></label>
-    <button id="done" title="Lock every preview in place">Done</button>
-  </div>
+  <div id="hint">right-click for settings</div>
+  <div class="edge n" data-edge="n"></div><div class="edge s" data-edge="s"></div><div class="edge w" data-edge="w"></div><div class="edge e" data-edge="e"></div>
+  <div class="edge nw" data-edge="nw"></div><div class="edge ne" data-edge="ne"></div><div class="edge sw" data-edge="sw"></div>
   <div id="grip" title="Drag to resize"></div>
   <div id="close" title="Close this preview">✕</div>
   <div id="groups"></div>
@@ -114,11 +115,7 @@
     document.getElementById("pic").style.opacity = String(m.enabled ? m.opacity * (m.master ?? 1) : 0.25);
     // Only movable in edit mode.
     if (m.edit) drag.setAttribute("data-tauri-drag-region", ""); else drag.removeAttribute("data-tauri-drag-region");
-    document.getElementById("shown").checked = !!m.enabled;
-    document.getElementById("through").checked = !!m.clickThrough;
-    document.getElementById("opacity").value = String(Math.round((m.opacity || 1) * 100));
     drawStacks(m.stacks || []);
-    showSize();
   };
   invoke("preview_mode", { name }).then(window.__previewMode).catch(() => {});
   // The app pushes the client in front the moment it changes (no waiting for a picture).
@@ -162,11 +159,13 @@
     if (moved < 5 && !mode.edit) invoke("preview_focus", { name }).catch(() => {});
   });
 
-  // Edit toolbar.
-  document.getElementById("shown").addEventListener("change", (e) => invoke("set_preview_client", { name, enabled: e.target.checked }).catch(() => {}));
-  document.getElementById("through").addEventListener("change", (e) => invoke("set_preview_client", { name, clickThrough: e.target.checked }).catch(() => {}));
-  document.getElementById("opacity").addEventListener("input", (e) => invoke("set_preview_client", { name, opacity: Number(e.target.value) / 100 }).catch(() => {}));
-  document.getElementById("done").addEventListener("click", () => invoke("set_preview_edit", { on: false }).catch(() => {}));
+  // 23 Nov: right-click opens this preview's menu (its own window, beside the mouse).
+  document.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    invoke("preview_menu_open", { name }).catch(() => {});
+  });
+  // Place clients: the others fade while one is being placed.
+  window.__placeGhost = (alpha) => { document.body.style.opacity = alpha == null ? "" : String(alpha); };
 
   // Patch 116: the stack squares ("on", "off" = switched off in it, "out" = not in it).
   const groupsBox = document.getElementById("groups");
@@ -201,40 +200,14 @@
     document.getElementById("name").style.paddingRight = (8 + 18 * groupsBox.children.length + (mode.edit ? 24 : 0)) + "px";
   }
 
-  // Patch 114: type a size (physical pixels, like the saved layout).
-  const sizeW = document.getElementById("sizeW"), sizeH = document.getElementById("sizeH");
-  function showSize() {
-    const dpr = window.devicePixelRatio || 1;
-    if (document.activeElement !== sizeW) sizeW.value = String(Math.round(window.innerWidth * dpr));
-    if (document.activeElement !== sizeH) sizeH.value = String(Math.round(window.innerHeight * dpr));
-  }
-  window.addEventListener("resize", showSize);
-  for (const box of [sizeW, sizeH]) {
-    box.addEventListener("mousedown", (e) => e.stopPropagation());
-    box.addEventListener("change", () => {
-      const width = Math.round(Number(sizeW.value)), height = Math.round(Number(sizeH.value));
-      if (width >= 80 && height >= 45) invoke("preview_resize", { width, height }).catch(() => {});
+  // Resize from any edge or corner with Windows' own resize (edit mode).
+  for (const el of document.querySelectorAll(".edge, #grip")) {
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      invoke("preview_start_resize", { edge: el.dataset.edge || "se" }).catch(() => {});
     });
-    box.addEventListener("keydown", (e) => { if (e.key === "Enter") box.blur(); });
   }
-
-  // Resize from the corner (edit mode).
-  const grip = document.getElementById("grip");
-  let sizing = null, pending = null;
-  grip.addEventListener("pointerdown", (e) => {
-    const dpr = window.devicePixelRatio || 1;
-    sizing = { x: e.screenX, y: e.screenY, w: window.innerWidth * dpr, h: window.innerHeight * dpr, dpr };
-    grip.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  grip.addEventListener("pointermove", (e) => {
-    if (!sizing) return;
-    const width = Math.round(sizing.w + (e.screenX - sizing.x) * sizing.dpr);
-    const height = Math.round(sizing.h + (e.screenY - sizing.y) * sizing.dpr);
-    if (pending) return;
-    pending = setTimeout(() => { pending = null; invoke("preview_resize", { width, height }).catch(() => {}); }, 30);
-  });
-  grip.addEventListener("pointerup", () => { sizing = null; });
 
   document.getElementById("close").addEventListener("click", (e) => {
     e.stopPropagation();

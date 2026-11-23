@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Preview menu</title>
+<style>
+  html, body { margin: 0; background: #16161a; color: #e6e6ea; font: 12.5px/1.4 "Segoe UI", system-ui, sans-serif; user-select: none; overflow: hidden; }
+  #box { border: 1px solid #3a3a42; border-radius: 8px; padding: 4px 0; }
+  .head { padding: 4px 12px 6px; font-weight: 600; color: #f0c040; border-bottom: 1px solid #26262c; display: flex; gap: 6px; align-items: center; }
+  .head span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .head small { color: #8a8a92; font-weight: 400; }
+  .it { display: flex; align-items: center; gap: 8px; padding: 4px 12px; cursor: pointer; }
+  .it:hover { background: #24242b; }
+  .it .k { width: 16px; text-align: center; color: #8a8a92; }
+  .it.off { color: #66666e; cursor: default; }
+  .it.off:hover { background: none; }
+  .row { display: flex; align-items: center; gap: 6px; padding: 3px 12px; flex-wrap: wrap; }
+  .row .lab { width: 62px; color: #8a8a92; }
+  .sep { border-top: 1px solid #26262c; margin: 4px 0; }
+  .chip { border: 1px solid #3a3a42; border-radius: 6px; padding: 1px 8px; cursor: pointer; background: #101014; }
+  .chip:hover { border-color: #d6242c; }
+  .chip.on { border-color: #f0c040; color: #f0c040; }
+  input[type=range] { flex: 1; }
+  input[type=number] { width: 54px; background: #101014; color: #eee; border: 1px solid #3a3a42; border-radius: 5px; padding: 1px 4px; font: inherit; }
+  input[type=checkbox] { margin: 0; accent-color: #d6242c; }
+  #said { padding: 4px 12px; color: #adff2f; min-height: 0; }
+  #said.bad { color: #f27a7a; }
+  #said:empty { display: none; }
+</style>
+</head>
+<body>
+<div id="box">
+  <div class="head"><span id="title">…</span><small id="mode"></small></div>
+  <div class="it" id="edit"><span class="k">✥</span><span id="editLabel">Arrange previews</span></div>
+  <div class="sep"></div>
+  <label class="it"><span class="k"><input type="checkbox" id="shown"></span>Shown</label>
+  <label class="it" title="Clicks go straight through to the game; switch with the pedal / hotkeys"><span class="k"><input type="checkbox" id="through"></span>Click-through</label>
+  <div class="row"><span class="lab">Opacity</span><input type="range" id="opacity" min="20" max="100" step="5"></div>
+  <div class="row"><span class="lab">Size</span>
+    <span class="chip" data-act="size-s" title="An eighth of the monitor's width">S</span>
+    <span class="chip" data-act="size-m" title="A sixth of the monitor's width">M</span>
+    <span class="chip" data-act="size-l" title="A quarter of the monitor's width">L</span>
+    <span class="chip" data-act="size-all" title="Every preview gets this one's size">All this size</span>
+  </div>
+  <div class="row"><span class="lab"></span><input type="number" id="w" min="80" max="4000" step="10"> × <input type="number" id="h" min="45" max="4000" step="10"><span class="chip" id="setSize">Set</span></div>
+  <div class="sep"></div>
+  <label class="it" title="While arranging, each monitor shows a grid and a dropped preview fills the cells it's over"><span class="k"><input type="checkbox" id="snap"></span>Snap mode</label>
+  <div class="row"><span class="lab">Grid</span>
+    <span class="chip" data-grid="4">4×4</span><span class="chip" data-grid="6">6×6</span><span class="chip" data-grid="8">8×8</span><span class="chip" data-grid="12">12×12</span><span class="chip" data-grid="16">16×16</span>
+  </div>
+  <div class="row"><span class="lab"></span><input type="number" id="cols" min="2" max="32"> × <input type="number" id="rows" min="2" max="32"><span class="chip" id="setGrid">Set</span></div>
+  <div class="it" data-act="snap-now"><span class="k">▦</span>Snap this one to the grid</div>
+  <div class="sep"></div>
+  <div class="row"><span class="lab">Line up</span>
+    <span class="chip" data-act="row-monitor" title="Every preview on this monitor, in rows from here">Rows</span>
+    <span class="chip" data-act="col-monitor" title="Every preview on this monitor, in columns from here">Columns</span>
+  </div>
+  <div class="row" id="stackRow"><span class="lab">Its stack</span>
+    <span class="chip" data-act="row-stack" title="The previews of everyone in its stack, in rows from here">Rows</span>
+    <span class="chip" data-act="col-stack" title="The previews of everyone in its stack, in columns from here">Columns</span>
+  </div>
+  <div class="row" id="monRow"><span class="lab">Monitor</span><span id="mons"></span></div>
+  <div class="it" data-act="undo" id="undo"><span class="k">↶</span>Undo the last move</div>
+  <div class="sep"></div>
+  <div class="it" id="place"><span class="k">⧉</span>Place clients…</div>
+  <div class="it" id="placePrev"><span class="k">⧉</span>Place previews one by one…</div>
+  <div class="it" id="closeAll"><span class="k">✕</span>Close every preview</div>
+  <div id="said"></div>
+</div>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  let st = null;
+  const say = (t, bad) => { $("said").textContent = t || ""; $("said").className = bad ? "bad" : ""; fit(); };
+  const fit = () => requestAnimationFrame(() => invoke("preview_menu_fit", { height: $("box").offsetHeight + 2 }).catch(() => {}));
+  const close = () => invoke("preview_menu_close").catch(() => {});
+
+  async function load() {
+    st = await invoke("preview_menu_state").catch(() => null);
+    if (!st) return;
+    $("title").textContent = st.name;
+    $("mode").textContent = st.edit ? "arranging" : "";
+    $("editLabel").textContent = st.edit ? "Done arranging" : "Arrange previews";
+    $("shown").checked = !!st.enabled;
+    $("through").checked = !!st.clickThrough;
+    $("opacity").value = String(Math.round((st.opacity || 1) * 100));
+    $("snap").checked = !!st.snapOn;
+    $("cols").value = st.cols; $("rows").value = st.rows;
+    for (const c of document.querySelectorAll("[data-grid]")) c.classList.toggle("on", Number(c.dataset.grid) === st.cols && st.cols === st.rows);
+    if (st.size) { $("w").value = st.size[0]; $("h").value = st.size[1]; }
+    $("stackRow").hidden = !st.inStack;
+    $("undo").classList.toggle("off", !st.canUndo);
+    const mons = $("mons"); mons.innerHTML = "";
+    for (let i = 0; i < st.monitors; i++) {
+      const c = document.createElement("span");
+      c.className = "chip" + (i === st.monitor ? " on" : "");
+      c.textContent = String(i + 1);
+      c.title = i === st.monitor ? "It's on this monitor" : `Move it to monitor ${i + 1}`;
+      c.addEventListener("click", () => act("monitor", i));
+      mons.append(c);
+    }
+    $("monRow").hidden = st.monitors < 2;
+    fit();
+  }
+  window.__menuFor = () => { say(""); load(); };
+
+  async function act(action, value) {
+    try { say(await invoke("preview_action", { name: st.name, action, value: value ?? null })); }
+    catch (e) { say(String(e), true); }
+    load();
+  }
+  for (const c of document.querySelectorAll("[data-act]")) c.addEventListener("click", () => { if (!c.classList.contains("off")) act(c.dataset.act); });
+  $("setSize").addEventListener("click", () => act("size-set", Math.round(Number($("w").value)) * 100000 + Math.round(Number($("h").value))));
+  $("edit").addEventListener("click", async () => { await invoke("set_preview_edit", { on: !st.edit }).catch(() => {}); close(); });
+  $("shown").addEventListener("change", (e) => invoke("set_preview_client", { name: st.name, enabled: e.target.checked }).then(load).catch(() => {}));
+  $("through").addEventListener("change", (e) => invoke("set_preview_client", { name: st.name, clickThrough: e.target.checked }).then(load).catch(() => {}));
+  $("opacity").addEventListener("input", (e) => invoke("set_preview_client", { name: st.name, opacity: Number(e.target.value) / 100 }).catch(() => {}));
+  const grid = (on, cols, rows) => invoke("set_previews_snap_mode", { on, cols, rows }).then(() => {
+    say(on ? (st.edit ? "Snap mode on: the grid shows while arranging." : "Snap mode on: it works while arranging (Arrange previews).") : "Snap mode off.");
+    load();
+  }).catch(() => {});
+  $("snap").addEventListener("change", (e) => grid(e.target.checked, null, null));
+  for (const c of document.querySelectorAll("[data-grid]")) c.addEventListener("click", () => { const n = Number(c.dataset.grid); grid(true, n, n); });
+  $("setGrid").addEventListener("click", () => grid(true, Math.round(Number($("cols").value)), Math.round(Number($("rows").value))));
+  $("place").addEventListener("click", () => { invoke("place_clients_open", { previews: false }).catch(() => {}); close(); });
+  $("placePrev").addEventListener("click", () => { invoke("place_clients_open", { previews: true }).catch(() => {}); close(); });
+  $("closeAll").addEventListener("click", () => { invoke("close_previews").catch(() => {}); close(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  load();
+</script>
+</body>
+</html>

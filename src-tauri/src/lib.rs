@@ -42,6 +42,8 @@ mod parsec;
 mod piscan;
 mod planetscan;
 mod previews;
+mod previewtools;
+mod placeclients;
 mod profiles;
 mod snapshots;
 mod scanner;
@@ -491,6 +493,20 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             previews::set_previews_size,
             previews::scale_previews,
             previews::preview_start_drag,
+            previews::preview_start_resize,
+            previewtools::preview_menu_open,
+            previewtools::preview_menu_fit,
+            previewtools::preview_menu_close,
+            previewtools::preview_menu_state,
+            previewtools::set_previews_snap_mode,
+            previewtools::preview_action,
+            placeclients::place_clients_open,
+            placeclients::place_state,
+            placeclients::place_go,
+            placeclients::place_others,
+            placeclients::place_kind,
+            placeclients::place_action,
+            placeclients::place_done,
             previews::set_preview_spot,
             previews::preview_settings,
             launch::stack_order,

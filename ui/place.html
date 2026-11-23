@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Place clients</title>
+<style>
+  :root { --line:#2c2c33; --muted:#8a8a92; --red:#a8181f; --red-hi:#d6242c; --pink:#ff40aa; --ok:#adff2f; }
+  html, body { margin: 0; height: 100%; background: #0d0d10; color: #e6e6ea; font: 13px/1.45 "Segoe UI", system-ui, sans-serif; user-select: none; }
+  main { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; height: 100%; box-sizing: border-box; }
+  .top { display: flex; align-items: center; gap: 8px; }
+  .top h1 { font-size: 15px; margin: 0; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top h1 small { color: var(--muted); font-weight: 400; }
+  .btn { border: 1px solid #3a3a42; border-radius: 7px; background: #141418; color: #e6e6ea; padding: 4px 10px; font: inherit; cursor: pointer; }
+  .btn:hover { border-color: var(--red-hi); }
+  .btn.main { border-color: var(--red); background: #1c0d0e; }
+  .seg { display: inline-flex; border: 1px solid #3a3a42; border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: #141418; color: #c9c9d0; padding: 3px 9px; font: inherit; cursor: pointer; }
+  .seg button + button { border-left: 1px solid #3a3a42; }
+  .seg button.on { background: #2a1420; color: var(--pink); }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .lab { color: var(--muted); min-width: 52px; }
+  .list { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .list div { padding: 3px 10px; display: flex; gap: 8px; cursor: pointer; }
+  .list div:hover { background: #1b1b21; }
+  .list div.cur { background: #1d2412; color: var(--ok); }
+  .list div small { color: var(--muted); margin-left: auto; }
+  .nudge { display: grid; grid-template-columns: repeat(3, 28px); gap: 2px; }
+  .nudge button { padding: 2px 0; }
+  #said { min-height: 1.4em; color: var(--ok); }
+  #said.bad { color: #f27a7a; font-weight: 600; }
+  .muted { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <button class="btn" id="prev" title="Previous (Page Up)">◀</button>
+    <h1 id="title">…</h1>
+    <button class="btn" id="next" title="Next (Page Down)">▶</button>
+  </div>
+  <div class="row"><span class="lab">Placing</span>
+    <span class="seg" id="kind"><button data-k="0">Client windows</button><button data-k="1">Previews</button></span>
+  </div>
+  <div class="row"><span class="lab">Others</span>
+    <span class="seg" id="others">
+      <button data-o="outline" title="Leave them be; their frames and names show on top">Outline</button>
+      <button data-o="fade" title="Fade the other clients to 10% (test: if one goes black, pick another option; it's put back as soon as you move on)">Fade 10%</button>
+      <button data-o="hide" title="Minimise the others while you place this one (put back afterwards)">Hide</button>
+      <button data-o="normal" title="Don't touch the others, no frames">Normal</button>
+    </span>
+  </div>
+  <div class="row">
+    <button class="btn" data-a="same-prev" title="Put this one exactly where the previous one is">Same spot as previous</button>
+    <button class="btn" data-a="snap" id="snapBtn">Snap to grid</button>
+    <button class="btn" data-a="stack" title="Everyone in this one's stack (launch group with a pedal key) gets this spot">Set the whole stack</button>
+  </div>
+  <div class="row">
+    <div class="nudge" title="Nudge 1 px (hold Shift: 10 px). Arrow keys work too.">
+      <span></span><button class="btn" data-n="up">↑</button><span></span>
+      <button class="btn" data-n="left">←</button><button class="btn" data-n="down">↓</button><button class="btn" data-n="right">→</button>
+    </div>
+    <span class="muted" id="rect"></span>
+    <span style="flex:1"></span>
+    <button class="btn main" data-a="save" id="save" title="Remember every client's spot now: each goes back there when it starts">Save spots</button>
+    <button class="btn" id="done">Done</button>
+  </div>
+  <div class="list" id="list"></div>
+  <div id="said"></div>
+  <div class="muted" id="tip">Move the client by its bar (✥) or title bar; the others' frames follow. Nothing is clicked inside EVE.</div>
+</main>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  const $ = (id) => document.getElementById(id);
+  let st = null;
+  const say = (t, bad) => { $("said").textContent = t || ""; $("said").className = bad ? "bad" : ""; };
+
+  async function load() {
+    st = await invoke("place_state").catch(() => null);
+    if (!st || !st.open) return;
+    const n = st.names.length;
+    $("title").innerHTML = "";
+    $("title").append(st.current || "Nothing open");
+    const sm = document.createElement("small"); sm.textContent = n ? `  ${st.index + 1} of ${n}` : ""; $("title").append(sm);
+    for (const b of $("kind").children) b.classList.toggle("on", (b.dataset.k === "1") === !!st.previews);
+    for (const b of $("others").children) b.classList.toggle("on", b.dataset.o === st.others);
+    $("snapBtn").textContent = `Snap to grid (${st.grid[0]}×${st.grid[1]})`;
+    $("snapBtn").title = "Snap this one to the grid's cells (set the grid in a preview's right-click menu)";
+    $("save").hidden = !!st.previews;
+    $("rect").textContent = st.rect ? `${st.rect.x}, ${st.rect.y} · ${st.rect.w}×${st.rect.h}` : "";
+    const list = $("list"); list.innerHTML = "";
+    st.names.forEach((name, i) => {
+      const d = document.createElement("div");
+      d.className = i === st.index ? "cur" : "";
+      d.append(name);
+      if (!st.previews) { const s = document.createElement("small"); s.textContent = st.remembered[i] ? "has a spot" : "no spot yet"; d.append(s); }
+      d.addEventListener("click", () => go(i));
+      list.append(d);
+    });
+  }
+  window.__reload = () => { say(""); load(); };
+  const go = (i) => invoke("place_go", { index: i }).then(load).catch(() => {});
+  async function act(action, step) {
+    try { const t = await invoke("place_action", { action, step: step ?? null }); if (t) say(t); }
+    catch (e) { say(String(e), true); }
+    load();
+  }
+  $("prev").addEventListener("click", () => go((st?.index ?? 0) - 1));
+  $("next").addEventListener("click", () => go((st?.index ?? 0) + 1));
+  for (const b of $("kind").children) b.addEventListener("click", () => invoke("place_kind", { previews: b.dataset.k === "1" }).then(load).catch(() => {}));
+  for (const b of $("others").children) b.addEventListener("click", () => invoke("place_others", { mode: b.dataset.o }).then(load).catch(() => {}));
+  for (const b of document.querySelectorAll("[data-a]")) b.addEventListener("click", () => act(b.dataset.a));
+  for (const b of document.querySelectorAll("[data-n]")) b.addEventListener("click", (e) => act(b.dataset.n, e.shiftKey ? 10 : 1));
+  $("done").addEventListener("click", () => invoke("place_done").catch(() => {}));
+  document.addEventListener("keydown", (e) => {
+    const keys = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+    if (keys[e.key]) { e.preventDefault(); act(keys[e.key], e.shiftKey ? 10 : 1); }
+    else if (e.key === "PageDown") { e.preventDefault(); go((st?.index ?? 0) + 1); }
+    else if (e.key === "PageUp") { e.preventDefault(); go((st?.index ?? 0) - 1); }
+  });
+  load();
+  setInterval(load, 1000);
+</script>
+</body>
+</html>

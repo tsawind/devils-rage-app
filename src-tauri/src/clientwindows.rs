@@ -129,6 +129,11 @@ mod win {
     }
 }
 
+/// 23 Nov: whether a client window has a title bar (Window mode) and so can be resized.
+pub fn captioned_window(handle: isize) -> bool {
+    win::captioned(handle)
+}
+
 /// A client window's spot now (None while minimised).
 pub fn window_spot(handle: isize) -> Option<Spot> {
     win::spot(handle).filter(|s| s.w > 100 && s.h > 100)
