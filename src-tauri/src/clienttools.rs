@@ -181,16 +181,41 @@ pub fn start_peepshow() -> bool {
         log::info!("Devil's Peepshow isn't installed: the app shows the previews, bars and hotkeys itself");
         return false;
     };
-    match std::process::Command::new(&exe).arg("--hidden").spawn() {
-        Ok(_) => {
-            OWNED.store(true, std::sync::atomic::Ordering::SeqCst);
-            log::info!("started Devil's Peepshow ({}): it shows the previews, bars and hotkeys", exe.display());
-            true
+    OWNED.store(true, std::sync::atomic::Ordering::SeqCst);
+    // A few seconds in: the app's own window loads first (two programs starting WebView2 at the
+    // same moment is one guess for the black window Tsa saw, 22 Nov).
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        if held(PEEPSHOW_LOCK) {
+            return;
         }
-        Err(err) => {
-            log::warn!("couldn't start Devil's Peepshow ({}): {err}; the app does previews and bars itself", exe.display());
-            false
+        match spawn_detached(&exe, &["--hidden"]) {
+            Ok(()) => log::info!("started Devil's Peepshow ({}): it shows the previews, bars and hotkeys", exe.display()),
+            Err(err) => log::warn!("couldn't start Devil's Peepshow ({}): {err}", exe.display()),
         }
+    });
+    true
+}
+
+/// Start the other program on its own: not a child that goes when this one closes (Tsa's
+/// Peepshow went with the app twice, 22 Nov: likely Windows ending the app's job with it).
+pub fn spawn_detached(exe: &std::path::Path, args: &[&str]) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+        let first = std::process::Command::new(exe).args(args).creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB).spawn();
+        if first.is_ok() {
+            return Ok(());
+        }
+        // A job that doesn't allow breaking away: at least its own process group.
+        std::process::Command::new(exe).args(args).creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP).spawn().map(|_| ())
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new(exe).args(args).spawn().map(|_| ())
     }
 }
 
@@ -245,7 +270,7 @@ pub fn open_peepshow(page: Option<String>) -> Result<String, String> {
         return Ok("Opened Devil's Peepshow.".into());
     }
     let exe = crate::shared::find_exe(true).ok_or("Devil's Peepshow isn't installed. Reinstall the Devils Rage app (it brings Peepshow along).")?;
-    std::process::Command::new(&exe).spawn().map_err(|e| format!("Couldn't start Devil's Peepshow: {e}"))?;
+    spawn_detached(&exe, &[]).map_err(|e| format!("Couldn't start Devil's Peepshow: {e}"))?;
     OWNED.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(page) = page {
         // Its window opens by itself; the page follows once it's listening.
@@ -473,7 +498,7 @@ pub fn open_devils_app(app: AppHandle) -> Result<String, String> {
     }
     let exe = crate::shared::find_exe(false).ok_or("The Devils Rage app isn't installed on this PC.")?;
     let _ = app;
-    std::process::Command::new(&exe).spawn().map_err(|e| format!("Couldn't start the app: {e}"))?;
+    spawn_detached(&exe, &[]).map_err(|e| format!("Couldn't start the app: {e}"))?;
     Ok("Starting the Devils Rage app…".into())
 }
 

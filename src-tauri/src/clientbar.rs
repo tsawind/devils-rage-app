@@ -1022,14 +1022,16 @@ pub fn clientbar_move_bar(app: AppHandle, window: tauri::WebviewWindow, name: St
 }
 
 /// A login screen's settings profile (from its start-up line), so the bar can name its account.
+// 22 Nov: async (off the main thread): reading a client's start-up line runs PowerShell, a
+// second or more the first time; a fresh Peepshow froze while every bar asked at once.
 #[tauri::command]
-pub fn clientbar_login_profile(name: String) -> Option<String> {
+pub async fn clientbar_login_profile(name: String) -> Option<String> {
     handle_of(&name).and_then(crate::startline::profile_of_window)
 }
 
 /// Patch 74: the EVE account a client is signed in to (from its sign-in token), if known.
 #[tauri::command]
-pub fn clientbar_login_account(name: String) -> Option<u64> {
+pub async fn clientbar_login_account(name: String) -> Option<u64> {
     handle_of(&name).and_then(crate::startline::account_of_window)
 }
 
@@ -2037,6 +2039,8 @@ fn keep_styles(app: &AppHandle, clients: &[(String, isize)]) {
     }
     for (name, handle) in clients {
         let handle = *handle;
+        // Starts reading each client's start-up line in the background (profile folder, account).
+        let _ = crate::startline::known_profile_of_window(handle);
         if !win::captioned(handle) && is_bare(handle) {
             eve_switch_while_bare(app, name, handle);
             continue;

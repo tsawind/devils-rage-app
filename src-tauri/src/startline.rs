@@ -202,7 +202,11 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
         return hit;
     }
     let mut account = None;
-    let profile = read_line(pid).and_then(|line| {
+    let line = read_line(pid);
+    if line.is_some() {
+        READABLE.lock().unwrap().get_or_insert_with(std::collections::HashSet::new).insert(pid);
+    }
+    let profile = line.and_then(|line| {
         log::info!("EVE client {pid} start-up options (names only): {}", option_names(&line).join(" "));
         let (found, shape, extra) = signed_in(&line);
         if let Some(user) = found {
@@ -229,14 +233,22 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
     profile
 }
 
+/// Processes whose start-up line could be read (a missing profile there means settings_Default).
+static READABLE: Mutex<Option<std::collections::HashSet<u32>>> = Mutex::new(None);
+
 /// The profile folder a client really uses: its `/settingsprofile`, or "Default" when its start-up
-/// line has none (EVE then uses settings_Default). `None` only when the line can't be read.
+/// line has none (EVE then uses settings_Default). Never waits (22 Nov: it read the line with
+/// PowerShell right there, a second or more on the main thread, and the bar's ⚙ looked dead
+/// in a freshly started Peepshow): `None` while the line is still being read in the background
+/// or when it can't be read.
 pub fn settings_folder_of_window(handle: isize) -> Option<String> {
-    if let Some(profile) = profile_of_window(handle) {
-        return Some(profile);
+    match known_profile_of_window(handle)? {
+        Some(profile) => Some(profile),
+        None => {
+            let pid = pid_of(handle)?;
+            READABLE.lock().unwrap().as_ref().is_some_and(|r| r.contains(&pid)).then(|| "Default".to_string())
+        }
     }
-    let pid = pid_of(handle)?;
-    read_line(pid).map(|line| profile_in(&line).unwrap_or_else(|| "Default".to_string()))
 }
 
 /// Processes whose start-up line is being read in the background right now.

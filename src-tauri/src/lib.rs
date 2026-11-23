@@ -251,6 +251,37 @@ fn layout(window: &Window) {
     }
 }
 
+/// The app's own page finished loading at least once (its Home).
+static PAGES_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 22 Nov (Tsa): the window came up black once after reopening: WebView2 failed to start
+/// ("Class not registered" in the log). If Home hasn't loaded after 25 s, say so and offer a
+/// restart instead of leaving a black window.
+fn watch_first_load() {
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(25));
+        if PAGES_LOADED.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        log::warn!("the app's page hasn't loaded after 25 s (WebView2 didn't start?): offering a restart");
+        mainthread::run(|app| {
+            use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+            app.dialog()
+                .message("The app's window didn't load (Windows' web view didn't start).\n\nRestart the app? Devil's Peepshow keeps running.")
+                .title("Devil's Rage")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::OkCancelCustom("Restart the app".into(), "Wait".into()))
+                .show(|restart| {
+                    if restart {
+                        if let Some(app) = mainthread::app() {
+                            app.restart();
+                        }
+                    }
+                });
+        });
+    });
+}
+
 /// What the slim bar's buttons do (bar.html calls the bar_action command).
 pub fn bar_action(app: &AppHandle, action: &str) {
     let window = app.get_window(MAIN_WINDOW);
@@ -654,6 +685,9 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
                                 if matches!(payload.event(), PageLoadEvent::Started) {
                                     scanner::close_for_parent(&app, label);
                                 }
+                                if label == PAGES_VIEW && matches!(payload.event(), PageLoadEvent::Finished) {
+                                    PAGES_LOADED.store(true, std::sync::atomic::Ordering::SeqCst);
+                                }
                             }
                         })
                         .on_new_window(new_window_handler(handle.clone(), marker.clone(), label.into())),
@@ -689,6 +723,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             mainwindow::remember(&handle, &window);
             layout(&window);
             let _ = window.show();
+            watch_first_load();
             mainwindow::follow_pages(handle.clone());
             location::start(handle.clone());
             incognito::load(&handle);
