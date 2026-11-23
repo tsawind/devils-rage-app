@@ -107,7 +107,8 @@ pub struct Layout {
 }
 
 /// At most this many previews open by themselves (more can still be opened by hand).
-const AUTO_MAX: usize = 16;
+/// 23 Nov: was 16, and Tsa runs 20+ clients: past 16 no new client got a preview.
+const AUTO_MAX: usize = 48;
 
 fn ten() -> u32 {
     10
@@ -299,12 +300,14 @@ pub fn open_previews(app: AppHandle) -> Result<usize, String> {
         }
     }
     tauri::async_runtime::spawn(async move {
+        let mut built = Vec::new();
         for name in wanted {
             if app.get_webview_window(&label_for(&name)).is_none() {
                 build_preview(&app, &name);
+                built.push(name);
             }
         }
-        log::info!("previews opened");
+        log::info!("previews opened{}", if built.is_empty() { String::new() } else { format!(": new ones for {}", built.join(", ")) });
     });
     Ok(count)
 }
@@ -625,7 +628,14 @@ fn watch_tick(app: &AppHandle, st: &mut WatchState) {
     if st.tick % 25 == 0 {
         let new_names: Vec<String> = open.iter().filter(|name| !st.known.contains(*name)).cloned().collect();
         let fresh = new_names.iter().any(|n| !crate::clipboard::is_login_label(n));
+        // 23 Nov: a new login screen opens previews too (when login previews are on); before,
+        // only a logged-in client did, so a batch of login screens got none.
+        let logins = with_layout(app, |layout| layout.login_previews);
+        let wants_preview = fresh || (logins && new_names.iter().any(|n| crate::clipboard::is_login_label(n)));
         st.known = open;
+        if !new_names.is_empty() {
+            log::info!("new clients: {}", new_names.join(", "));
+        }
         if fresh {
             // A new client (or one that just logged in) goes to its remembered spot.
             std::thread::spawn(move || {
@@ -635,14 +645,17 @@ fn watch_tick(app: &AppHandle, st: &mut WatchState) {
                 }
             });
         }
-        if fresh
-            && !AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed)
-            && with_layout(app, |layout| layout.auto_open)
-        {
+        if wants_preview {
+            let paused = AUTO_PAUSED.load(std::sync::atomic::Ordering::Relaxed);
+            let auto = with_layout(app, |layout| layout.auto_open);
             let app = app.clone();
             // Give a new client a moment to draw something before its preview opens.
             let open_now = app.webview_windows().keys().filter(|l| l.starts_with(PREFIX)).count();
-            if open_now < AUTO_MAX {
+            if paused || !auto {
+                log::info!("no previews for them: {}", if paused { "previews were closed by hand (Open previews starts them again)" } else { "Open by themselves is off" });
+            } else if open_now >= AUTO_MAX {
+                log::info!("no previews for them: {open_now} previews open already (the most that open by themselves)");
+            } else {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     let _ = open_previews(app);
