@@ -341,12 +341,8 @@ pub const ARCHIVE: &str = "Devils Rage archived characters";
 
 /// Move one character's settings files (core_char_<id>.dat in every profile folder) into the
 /// archive folder. Refused while that character is logged in (EVE would write them again).
-pub fn archive_character(id: u64, name: Option<&str>, only: Option<&str>) -> Result<usize, String> {
-    if let Some(name) = name {
-        if crate::clipboard::open_eve_characters().iter().any(|n| n.eq_ignore_ascii_case(name)) {
-            return Err(format!("{name} is logged in: close that client first."));
-        }
-    }
+pub fn archive_character(id: u64, _name: Option<&str>, only: Option<&str>) -> Result<usize, String> {
+    require_eve_closed()?;
     let root = crate::profiles::root()?;
     let file = format!("core_char_{id}.dat");
     let mut moved = 0;
@@ -412,18 +408,7 @@ pub fn make_account_profile(app: &tauri::AppHandle, user: u64, wanted: Option<&s
     if !crate::profiles::safe_name(&name) {
         return Err("Use letters, numbers, - and _ only (up to 40).".into());
     }
-    // 23 Nov: everything EVE closed first. A client writes its settings when it closes (a copy
-    // taken while one is open misses them, and closing it later writes to the old profile), and
-    // the launcher only reads the list of profiles when it starts.
-    let (clients, launcher) = eve_running();
-    if clients > 0 || launcher {
-        let what = match (clients, launcher) {
-            (0, _) => "the EVE launcher".to_string(),
-            (n, false) => format!("{n} EVE client{}", if n == 1 { "" } else { "s" }),
-            (n, true) => format!("{n} EVE client{} and the launcher", if n == 1 { "" } else { "s" }),
-        };
-        return Err(format!("Close every EVE client and the EVE launcher first (tray icon too): {what} still open. EVE saves settings when a client closes, and the launcher only finds new profiles when it starts."));
-    }
+    require_eve_closed()?;
     let root = crate::profiles::root()?;
     let target = root.join(format!("settings_{name}"));
     if target.exists() {
@@ -472,6 +457,23 @@ pub fn make_account_profile(app: &tauri::AppHandle, user: u64, wanted: Option<&s
     log::info!("made settings_{name} for EVE account {user} from settings_{from}: {copied} files");
     let place = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters') in {place}. Now open the EVE launcher and pick \"{name}\" for this account. If the launcher offers to create \"{name}\" instead, it isn't seeing this folder: don't create it, tell Tsa."))
+}
+
+/// 23 Nov: changing settings files needs every EVE client and the launcher closed. A client writes
+/// its settings when it closes (a copy taken while one is open misses them, and closing it later
+/// writes over what was changed), and the launcher only reads the list of profiles when it starts.
+pub fn require_eve_closed() -> Result<(), String> {
+    let (clients, launcher) = eve_running();
+    if clients == 0 && !launcher {
+        return Ok(());
+    }
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let what = match (clients, launcher) {
+        (0, _) => "the EVE launcher is".to_string(),
+        (n, false) => format!("{n} EVE client{} {}", plural(n), if n == 1 { "is" } else { "are" }),
+        (n, true) => format!("{n} EVE client{} and the launcher are", plural(n)),
+    };
+    Err(format!("Close every EVE client and the EVE launcher first (tray icon too): {what} still open. EVE saves settings when a client closes, and the launcher only finds profiles when it starts."))
 }
 
 /// How many EVE clients are running, and whether the EVE launcher is (any of its windows or its
@@ -529,12 +531,8 @@ pub fn own_profile(info: &AccountInfo) -> Option<String> {
 
 /// Delete one character's settings files for good (Your accounts asks twice first; archiving is
 /// what it recommends). Refused while that character is logged in.
-pub fn delete_character(id: u64, name: Option<&str>, only: Option<&str>) -> Result<usize, String> {
-    if let Some(name) = name {
-        if crate::clipboard::open_eve_characters().iter().any(|n| n.eq_ignore_ascii_case(name)) {
-            return Err(format!("{name} is logged in: close that client first."));
-        }
-    }
+pub fn delete_character(id: u64, _name: Option<&str>, only: Option<&str>) -> Result<usize, String> {
+    require_eve_closed()?;
     let file = format!("core_char_{id}.dat");
     let mut deleted = 0;
     for (folder, dir) in profile_dirs(only)? {
