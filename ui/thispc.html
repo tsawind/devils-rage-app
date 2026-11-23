@@ -220,8 +220,14 @@
     name.placeholder = "name";
     name.title = "The new profile's name (settings_<name>); it can't be one that's already there";
     const from = document.createElement("select");
-    const choices = [...new Set([started, ...candidates.map(c => c[0]), "Default"].filter(Boolean))];
-    from.innerHTML = choices.map(p => `<option value="${esc(p)}">copy settings_${esc(p)}</option>`).join("") + `<option value="fresh">start empty</option>`;
+    // Copy from: this account's folders first, then every other profile folder on this PC.
+    const its = [...new Set([started, ...candidates.map(c => c[0])].filter(Boolean))];
+    const every = new Set([...Object.keys(pc?.folders || {}), ...Object.values(pc?.chars || {}).flatMap(c => (c.profiles || []).map(f => f.name)), "Default"]);
+    const rest = [...every].filter(p => p && !its.includes(p)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    const opts = (list) => list.map(p => `<option value="${esc(p)}">copy settings_${esc(p)}</option>`).join("");
+    from.innerHTML = (its.length ? `<optgroup label="This account's">${opts(its)}</optgroup>` : "")
+      + (rest.length ? `<optgroup label="Other profiles on this PC">${opts(rest)}</optgroup>` : "")
+      + `<option value="fresh">start empty (EVE's defaults)</option>`;
     const make = document.createElement("button");
     make.className = "b small"; make.textContent = "Make it";
     make.addEventListener("click", () => {
