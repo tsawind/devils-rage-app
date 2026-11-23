@@ -458,7 +458,8 @@ pub fn make_account_profile(app: &tauri::AppHandle, user: u64, wanted: Option<&s
     }
     remember_own(app, user, &name);
     log::info!("made settings_{name} for EVE account {user} from settings_{from}: {copied} files");
-    Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters'). Now pick \"{name}\" as this account's client profile in the EVE launcher (not in the list? close the launcher fully, tray icon too, and open it again)."))
+    let place = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters') in {place}. Close the EVE launcher fully (tray icon too), open it again and pick \"{name}\" for this account. If the launcher offers to create \"{name}\" instead, it isn't seeing this folder: don't create it, tell Tsa."))
 }
 
 /// A login name as a folder name (letters, numbers, - and _).

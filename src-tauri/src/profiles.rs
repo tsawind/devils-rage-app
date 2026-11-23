@@ -89,25 +89,68 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 // ---- Where things are -------------------------------------------------------------------------
 
+/// 23 Nov: the settings folder name for an EVE client exe ("C:\EVE\SharedCache\tq\bin64\exefile.exe"
+/// → "c_eve_sharedcache_tq_tranquility"): the launcher names it after where EVE is installed.
+pub fn settings_folder_for_exe(exe: &str) -> Option<String> {
+    let lower = exe.trim().trim_matches('"').replace('/', "\\").to_lowercase();
+    let at = lower.find("\\tq\\")?;
+    let install: String = lower[..at].chars().filter(|c| *c != ':').map(|c| if c == '\\' || c == ' ' { '_' } else { c }).collect();
+    let install = install.trim_matches('_');
+    (!install.is_empty()).then(|| format!("{install}_tq_tranquility"))
+}
+
+/// Where the last EVE client seen on this PC keeps its settings (noted from its start-up line).
+fn noted_root_file() -> Option<PathBuf> {
+    crate::shared::app_local("eve-settings-folder.txt")
+}
+
+/// Note the settings folder a running client uses (from its exe path), when it's really there.
+pub fn note_client_exe(exe: &str) {
+    let Some(name) = settings_folder_for_exe(exe) else { return };
+    let Some(eve) = dirs::data_local_dir().map(|d| d.join(r"CCP\EVE")) else { return };
+    if !eve.join(&name).is_dir() {
+        return;
+    }
+    let Some(file) = noted_root_file() else { return };
+    if std::fs::read_to_string(&file).ok().as_deref().map(str::trim) != Some(name.as_str()) {
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&file, &name);
+        log::info!("EVE's settings folder on this PC: {name} (from a running client)");
+    }
+}
+
 fn cache_root() -> Option<PathBuf> {
     let eve = dirs::data_local_dir()?.join(r"CCP\EVE");
-    let root = eve.join("c_eve_sharedcache_tq_tranquility");
-    if root.is_dir() {
-        return Some(root);
+    // 23 Nov: the folder a running client really uses (David: an old c_eve_sharedcache folder was
+    // still there, so new profiles went where the launcher never looks).
+    if let Some(name) = noted_root_file().and_then(|f| std::fs::read_to_string(f).ok()) {
+        let root = eve.join(name.trim());
+        if !name.trim().is_empty() && root.is_dir() {
+            return Some(root);
+        }
     }
-    // 21 Nov: EVE installed somewhere else (D:\Games\EVE → d_games_eve_sharedcache_tq_tranquility):
-    // the Tranquility folder whose profiles were used last.
+    // Else the Tranquility folder whose profiles were used last (EVE anywhere: D:\Games\EVE →
+    // d_games_eve_sharedcache_tq_tranquility), c_eve_sharedcache only when it's that one.
     let used = |dir: &Path| -> Option<SystemTime> {
-        std::fs::read_dir(dir).ok()?.flatten().filter(|d| profile_of(&d.file_name().to_string_lossy()).is_some()).filter_map(|d| std::fs::metadata(d.path().join("core_public__.yaml")).and_then(|m| m.modified()).ok()).max()
+        std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .filter(|d| profile_of(&d.file_name().to_string_lossy()).is_some())
+            .flat_map(|d| ["core_public__.yaml", "core_user__.dat", "core_char__.dat"].map(|f| d.path().join(f)))
+            .filter_map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok())
+            .max()
     };
-    std::fs::read_dir(&eve)
+    let newest = std::fs::read_dir(&eve)
         .ok()?
         .flatten()
         .map(|d| d.path())
         .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().ends_with("_tq_tranquility")))
         .filter_map(|p| used(&p).map(|t| (t, p)))
         .max_by_key(|(t, _)| *t)
-        .map(|(_, p)| p)
+        .map(|(_, p)| p);
+    newest.or_else(|| Some(eve.join("c_eve_sharedcache_tq_tranquility")).filter(|r| r.is_dir()))
 }
 
 pub(crate) fn root() -> Result<PathBuf, String> {
@@ -594,6 +637,13 @@ pub fn profiles_clone(from: String, name: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_folder_names() {
+        assert_eq!(settings_folder_for_exe(r"C:\EVE\SharedCache\tq\bin64\exefile.exe").as_deref(), Some("c_eve_sharedcache_tq_tranquility"));
+        assert_eq!(settings_folder_for_exe(r"D:\Games\CCP\EVE Online\SharedCache\tq\bin64\exefile.exe").as_deref(), Some("d_games_ccp_eve_online_sharedcache_tq_tranquility"));
+        assert_eq!(settings_folder_for_exe(r"C:\elsewhere\exefile.exe"), None);
+    }
 
     #[test]
     fn reads_settings_file_names() {

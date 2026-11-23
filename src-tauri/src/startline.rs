@@ -208,6 +208,9 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
     }
     let profile = line.and_then(|line| {
         log::info!("EVE client {pid} start-up options (names only): {}", option_names(&line).join(" "));
+        if let Some(exe) = args(&line).first() {
+            crate::profiles::note_client_exe(exe);
+        }
         let (found, shape, extra) = signed_in(&line);
         if let Some(user) = found {
             INFO.lock().unwrap().get_or_insert_with(HashMap::new).insert(user, (extra.0, extra.1, profile_in(&line)));
