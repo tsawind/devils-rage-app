@@ -188,12 +188,28 @@
       return { who, at, stale };
     });
     row.innerHTML = `<span class="m">Its own settings profile:</span>`;
-    if (started) {
+    // Every folder this account has files in: its own user file, or any of its characters'.
+    const seen = new Map();
+    const mark = (p, at) => { if (p) seen.set(p, Math.max(seen.get(p) || 0, at || 0)); };
+    for (const [p, list] of Object.entries(pc?.folders || {})) {
+      if (list.map(String).includes(String(user))) mark(p, pc?.folder_times?.[p]?.[String(user)]);
+    }
+    for (const c of acct.characters || []) {
+      for (const f of pc?.chars?.[String(c.id)]?.profiles || []) mark(f.name, f.at);
+    }
+    const candidates = [...seen.entries()].sort((a, b) => (b[0] === started) - (a[0] === started) || b[1] - a[1]);
+    if (candidates.length) {
+      const pick = document.createElement("select");
+      pick.title = "Every settings folder this account or its characters have files in, newest first";
+      pick.innerHTML = candidates.map(([p, at]) => {
+        const sharers = (pc?.folders?.[p] || []).filter(u => String(u) !== String(user)).length;
+        const bits = [p === started ? "starts with it now" : "", at ? `used ${when(at)}` : "", sharers ? `${sharers} other account${sharers === 1 ? "" : "s"} too` : ""].filter(Boolean).join(" · ");
+        return `<option value="${esc(p)}">settings_${esc(p)}${bits ? " (" + esc(bits) + ")" : ""}</option>`;
+      }).join("");
       const use = document.createElement("button");
-      use.className = "b small main"; use.textContent = `Use settings_${started}`;
-      use.title = `It starts with settings_${started} now: make that its own`;
-      use.addEventListener("click", () => act(user, { existing: started }));
-      row.appendChild(use);
+      use.className = "b small main"; use.textContent = "Use it";
+      use.addEventListener("click", () => act(user, { existing: pick.value }));
+      row.append(pick, use);
       const or = document.createElement("span"); or.className = "m"; or.textContent = "or make a new one:";
       row.appendChild(or);
     }
@@ -204,24 +220,28 @@
     name.placeholder = "name";
     name.title = "The new profile's name (settings_<name>); it can't be one that's already there";
     const from = document.createElement("select");
-    const choices = [...new Set([started, "Default"].filter(Boolean))];
+    const choices = [...new Set([started, ...candidates.map(c => c[0]), "Default"].filter(Boolean))];
     from.innerHTML = choices.map(p => `<option value="${esc(p)}">copy settings_${esc(p)}</option>`).join("") + `<option value="fresh">start empty</option>`;
     const make = document.createElement("button");
     make.className = "b small"; make.textContent = "Make it";
     make.addEventListener("click", () => {
       const n = safeName(name.value);
       if (!n) { notes.set(String(user), { bad: true, text: "Give the new profile a name (letters, numbers, - or _)." }); draw(); return; }
-      if (taken.has(n.toLowerCase())) { notes.set(String(user), { bad: true, text: `settings_${n} is already there: use it with the button, or pick a new name.` }); draw(); return; }
+      if (taken.has(n.toLowerCase())) { notes.set(String(user), { bad: true, text: `settings_${n} is already there: pick it in the list above and Use it, or give a new name.` }); draw(); return; }
       act(user, { name: n, from: from.value });
     });
-    row.append(name, from, make);
+    const row2 = document.createElement("div");
+    row2.className = "prof";
+    row2.append(name, from, make);
+    box.insertBefore(row2, row.nextSibling);
     if (started && others.length) {
       const m = document.createElement("div");
       m.className = "pnote";
       const stale = others.every(o => o.stale);
       m.textContent = stale
-        ? `settings_${started} also has an old file from ${others.map(o => `${o.who}${o.at ? ` (last written ${when(o.at)})` : ""}`).join(", ")}: a leftover copy, not in use. Using settings_${started} is fine.`
-        : `${others.map(o => o.who).join(", ")} ${others.length === 1 ? "uses" : "use"} settings_${started} too (last ${when(Math.max(...others.map(o => o.at)))}). Fine if that's on purpose; otherwise make this account its own.`;
+        ? `settings_${started} also has old files from ${others.length === 1 ? others[0].who + (others[0].at ? ` (last written ${when(others[0].at)})` : "") : others.length + " other accounts"}: leftover copies, not in use. Using settings_${started} is fine.`
+        : `${others.length === 1 ? others[0].who + " uses" : others.length + " other accounts use"} settings_${started} too (last ${when(Math.max(...others.map(o => o.at)))}). Fine if that's on purpose (a shared Alphas profile, say); otherwise pick or make one of its own.`;
+      m.title = others.map(o => o.who).join(", ");
       box.appendChild(m);
     }
     return box;
