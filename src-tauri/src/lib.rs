@@ -541,6 +541,7 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             clientbar::clientbar_floating,
             clientbar::clientbar_window_mode,
             clientbar::clientbar_profile_sharers,
+            clientbar::clientbar_js_error,
             clientbar::clientbar_style,
             clientbar::clientbar_eve_fixed_size,
             clientbar::clientbar_move_bar,

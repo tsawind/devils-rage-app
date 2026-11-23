@@ -243,6 +243,10 @@
   }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeMenus(); back(); } });
   window.closeMenus = closeMenus;
+  // 22 Nov: script errors into the app's log (a bar has no console anyone can see).
+  const report = (text) => invoke("clientbar_js_error", { name: NAME, text: String(text) }).catch(() => {});
+  window.addEventListener("error", (e) => report(`${e.message} (line ${e.lineno})`));
+  window.addEventListener("unhandledrejection", (e) => report(e.reason && e.reason.stack || e.reason));
   window.addEventListener("blur", () => { closeMenus(); disarmClose(); });
 
   $("lock").addEventListener("click", async () => { await setLock(!locked); back(); });

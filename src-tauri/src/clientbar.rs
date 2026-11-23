@@ -863,7 +863,15 @@ fn bars_tick(app: &AppHandle, shown: &mut HashMap<String, (bool, Place, (bool, i
         }
         let before = shown.get(&label).copied();
         // The client moved with a menu open (dragged by Windows' title bar): close the menu.
-        if tall.is_some() && before.is_some_and(|b| (b.1.x, b.1.y) != (place.x, place.y)) && DRAGGING.lock().unwrap().is_none() {
+        // 22 Nov: the client's own frame, not the bar's spot: opening ⚙ widens the bar, which
+        // moves its spot, and the menu closed the moment it opened (dev.248–253).
+        let moved = {
+            let mut guard = CLIENT_FRAMES.lock().unwrap();
+            let frames = guard.get_or_insert_with(HashMap::new);
+            let was = frames.insert(label.clone(), (frame.x, frame.y));
+            was.is_some_and(|w| w != (frame.x, frame.y))
+        };
+        if tall.is_some() && moved && DRAGGING.lock().unwrap().is_none() {
             let _ = window.eval("window.closeMenus && window.closeMenus()");
         }
         if before.is_none_or(|b| b.1.x != place.x || b.1.y != place.y) {
@@ -1217,6 +1225,12 @@ pub fn clientbar_buttons(app: AppHandle, buttons: Vec<String>) -> Result<(), Str
     picked.dedup();
     change(&app, |s| s.buttons = picked);
     Ok(())
+}
+
+/// 22 Nov: a bar's script error goes into the log (a bar has no console anyone can see).
+#[tauri::command]
+pub fn clientbar_js_error(name: String, text: String) {
+    log::warn!("client bar {name}: script error: {}", text.chars().take(400).collect::<String>());
 }
 
 /// A menu opened or closed: the bar grows to fit it.
@@ -1716,6 +1730,9 @@ static AUTO_DONE: Mutex<Option<HashSet<(isize, String)>>> = Mutex::new(None);
 fn is_bare(handle: isize) -> bool {
     BARE.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&handle))
 }
+
+/// Where each bar's client was last time round (to notice the client being moved).
+static CLIENT_FRAMES: Mutex<Option<HashMap<String, (i32, i32)>>> = Mutex::new(None);
 
 /// Windows the app itself moved or resized just now, so a size change on them isn't EVE's.
 static OURS: Mutex<Option<HashMap<isize, Instant>>> = Mutex::new(None);
