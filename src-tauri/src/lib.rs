@@ -294,6 +294,8 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         "settings" => go(app, app_url("settings.html")),
+        // 22 Nov: Your accounts, this PC's side (the app's own page; editing stays on SeAT's).
+        "thispc" => go(app, app_url("thispc.html")),
         "assets" => go(app, app_url("assets.html")),
         "admin" => {
             if let Ok(url) = format!("{MAPPER_URL}/desktop-app/admin").parse() {
@@ -542,6 +544,10 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             clientbar::clientbar_window_mode,
             clientbar::clientbar_profile_sharers,
             clientbar::clientbar_js_error,
+            seatsync::pc_accounts_view,
+            pcaccounts::pc_account_profile,
+            pcaccounts::pc_eve_apps,
+            pcaccounts::pc_set_spy,
             clientbar::clientbar_style,
             clientbar::clientbar_eve_fixed_size,
             clientbar::clientbar_move_bar,

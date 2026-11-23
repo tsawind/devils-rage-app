@@ -130,81 +130,95 @@ pub fn send_pc_accounts(app: &AppHandle, me: &str) {
     let (app, me) = (app.clone(), me.to_string());
     tauri::async_runtime::spawn(async move {
         use tauri::Manager;
-        let mut detail = pc_accounts();
-        // Seen logged in: add each to its EVE account (the launcher's lists may not have it).
-        let seen = crate::pcaccounts::seen(&app);
-        let ids = esi_ids(seen.keys().cloned().collect()).await;
-        if let Some(accounts) = detail["accounts"].as_array_mut() {
-            for (name, user) in &seen {
-                let Some(id) = ids.get(&name.to_lowercase()).copied() else { continue };
-                // Seen on this account now: off any other account the older lists put it on.
-                for account in accounts.iter_mut() {
-                    if account["user_id"].as_u64() != Some(*user) {
-                        if let Some(list) = account["characters"].as_array_mut() {
-                            list.retain(|c| c["id"].as_u64() != Some(id));
-                        }
-                    }
-                }
-                let entry = match accounts.iter_mut().position(|a| a["user_id"].as_u64() == Some(*user)) {
-                    Some(i) => &mut accounts[i],
-                    None => {
-                        accounts.push(serde_json::json!({ "user_id": user, "characters": [] }));
-                        accounts.last_mut().expect("just pushed")
-                    }
-                };
-                if let Some(list) = entry["characters"].as_array_mut() {
-                    if !list.iter().any(|c| c["id"].as_u64() == Some(id)) {
-                        list.push(serde_json::json!({ "id": id, "incognito": !crate::incognito::is_public_id(id), "how": "client", "name": name }));
-                    }
-                }
-            }
-        }
-        // Each EVE account's login name and tier, as its sign-in token said (this PC only).
-        let info: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::infos(&app)
-            .into_iter()
-            .map(|(user, i)| {
-                // Its own profile folder, when it's there.
-                let own = crate::pcaccounts::own_profile(&i);
-                (user.to_string(), serde_json::json!({ "login": i.login, "tier": i.tier, "profile": i.profile, "own": own, "at": i.at }))
-            })
-            .collect();
-        detail["info"] = serde_json::Value::Object(info);
-        // Which EVE accounts' files each profile folder holds (one = it's that account's own already).
-        let folders: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::folders().into_iter().map(|f| (f.profile, serde_json::json!(f.users))).collect();
-        detail["folders"] = serde_json::Value::Object(folders);
-        detail["seen"] = serde_json::Value::Array(seen.iter().map(|(name, user)| serde_json::json!({ "name": name, "user_id": user })).collect());
-        // Every other character with settings on this PC that no account list has.
-        let placed: std::collections::BTreeSet<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();
-        let others: Vec<serde_json::Value> = crate::pcaccounts::others(&app, &placed)
-            .into_iter()
-            .map(|(id, last, profiles)| serde_json::json!({ "id": id, "last": last, "profiles": profiles, "incognito": !crate::incognito::is_public_id(id) }))
-            .collect();
-        detail["others"] = serde_json::Value::Array(others);
-        // Every character's last-played date and profile folders on this PC (shown on its row).
-        let chars: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::all_chars()
-            .into_iter()
-            .map(|(id, profiles)| (id.to_string(), serde_json::json!({ "last": profiles.first().map(|p| p.1).unwrap_or(0), "profiles": profiles.iter().map(|(p, t)| serde_json::json!({ "name": p, "at": t })).collect::<Vec<_>>() })))
-            .collect();
-        detail["chars"] = serde_json::Value::Object(chars);
-        let mut ids: Vec<u64> = placed.into_iter().collect();
-        ids.extend(detail["others"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64()));
-        let names = crate::profiles::profiles_names(ids).await;
-        if let Some(accounts) = detail["accounts"].as_array_mut() {
-            for character in accounts.iter_mut().filter_map(|a| a["characters"].as_array_mut()).flatten() {
-                if let Some(name) = character["id"].as_u64().and_then(|id| names.get(&id)) {
-                    character["name"] = serde_json::Value::String(name.clone());
-                }
-            }
-        }
-        if let Some(others) = detail["others"].as_array_mut() {
-            for character in others.iter_mut() {
-                if let Some(name) = character["id"].as_u64().and_then(|id| names.get(&id)) {
-                    character["name"] = serde_json::Value::String(name.clone());
-                }
-            }
-        }
+        let detail = pc_detail(&app).await;
         if let Some(view) = app.get_webview(&me) {
             let _ = view.eval(format!("window.dispatchEvent(new CustomEvent('devils-rage-app:pc-accounts', {{ detail: {detail} }}));"));
         }
     });
+}
+
+/// Everything this PC knows about the EVE accounts here (the launcher's lists, characters seen
+/// logged in, login names and tiers, profile folders, last played), for SeAT's Your accounts
+/// page and the app's own This PC page (22 Nov).
+pub async fn pc_detail(app: &AppHandle) -> serde_json::Value {
+    let mut detail = pc_accounts();
+    // Seen logged in: add each to its EVE account (the launcher's lists may not have it).
+    let seen = crate::pcaccounts::seen(&app);
+    let ids = esi_ids(seen.keys().cloned().collect()).await;
+    if let Some(accounts) = detail["accounts"].as_array_mut() {
+        for (name, user) in &seen {
+            let Some(id) = ids.get(&name.to_lowercase()).copied() else { continue };
+            // Seen on this account now: off any other account the older lists put it on.
+            for account in accounts.iter_mut() {
+                if account["user_id"].as_u64() != Some(*user) {
+                    if let Some(list) = account["characters"].as_array_mut() {
+                        list.retain(|c| c["id"].as_u64() != Some(id));
+                    }
+                }
+            }
+            let entry = match accounts.iter_mut().position(|a| a["user_id"].as_u64() == Some(*user)) {
+                Some(i) => &mut accounts[i],
+                None => {
+                    accounts.push(serde_json::json!({ "user_id": user, "characters": [] }));
+                    accounts.last_mut().expect("just pushed")
+                }
+            };
+            if let Some(list) = entry["characters"].as_array_mut() {
+                if !list.iter().any(|c| c["id"].as_u64() == Some(id)) {
+                    list.push(serde_json::json!({ "id": id, "incognito": !crate::incognito::is_public_id(id), "how": "client", "name": name }));
+                }
+            }
+        }
+    }
+    // Each EVE account's login name and tier, as its sign-in token said (this PC only).
+    let info: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::infos(&app)
+        .into_iter()
+        .map(|(user, i)| {
+            // Its own profile folder, when it's there.
+            let own = crate::pcaccounts::own_profile(&i);
+            (user.to_string(), serde_json::json!({ "login": i.login, "tier": i.tier, "profile": i.profile, "own": own, "at": i.at }))
+        })
+        .collect();
+    detail["info"] = serde_json::Value::Object(info);
+    // Which EVE accounts' files each profile folder holds (one = it's that account's own already).
+    let folders: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::folders().into_iter().map(|f| (f.profile, serde_json::json!(f.users))).collect();
+    detail["folders"] = serde_json::Value::Object(folders);
+    detail["seen"] = serde_json::Value::Array(seen.iter().map(|(name, user)| serde_json::json!({ "name": name, "user_id": user })).collect());
+    // Every other character with settings on this PC that no account list has.
+    let placed: std::collections::BTreeSet<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();
+    let others: Vec<serde_json::Value> = crate::pcaccounts::others(&app, &placed)
+        .into_iter()
+        .map(|(id, last, profiles)| serde_json::json!({ "id": id, "last": last, "profiles": profiles, "incognito": !crate::incognito::is_public_id(id) }))
+        .collect();
+    detail["others"] = serde_json::Value::Array(others);
+    // Every character's last-played date and profile folders on this PC (shown on its row).
+    let chars: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::all_chars()
+        .into_iter()
+        .map(|(id, profiles)| (id.to_string(), serde_json::json!({ "last": profiles.first().map(|p| p.1).unwrap_or(0), "profiles": profiles.iter().map(|(p, t)| serde_json::json!({ "name": p, "at": t })).collect::<Vec<_>>() })))
+        .collect();
+    detail["chars"] = serde_json::Value::Object(chars);
+    let mut ids: Vec<u64> = placed.into_iter().collect();
+    ids.extend(detail["others"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64()));
+    let names = crate::profiles::profiles_names(ids).await;
+    if let Some(accounts) = detail["accounts"].as_array_mut() {
+        for character in accounts.iter_mut().filter_map(|a| a["characters"].as_array_mut()).flatten() {
+            if let Some(name) = character["id"].as_u64().and_then(|id| names.get(&id)) {
+                character["name"] = serde_json::Value::String(name.clone());
+            }
+        }
+    }
+    if let Some(others) = detail["others"].as_array_mut() {
+        for character in others.iter_mut() {
+            if let Some(name) = character["id"].as_u64().and_then(|id| names.get(&id)) {
+                character["name"] = serde_json::Value::String(name.clone());
+            }
+        }
+    }
+    detail
+}
+
+/// 22 Nov: the app's This PC page (Your accounts, this PC's side).
+#[tauri::command]
+pub async fn pc_accounts_view(app: AppHandle) -> serde_json::Value {
+    pc_detail(&app).await
 }

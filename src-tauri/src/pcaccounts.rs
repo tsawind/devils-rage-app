@@ -534,3 +534,41 @@ pub fn open_folder(id: u64, only: Option<&str>) {
     #[cfg(not(windows))]
     let _ = newest;
 }
+
+// ---- 22 Nov: the app's own This PC page (Your accounts, this PC's side) ----
+
+fn clip(text: Option<String>) -> Option<String> {
+    text.map(|t| t.trim().chars().take(40).collect::<String>()).filter(|t| !t.is_empty())
+}
+
+/// An account's own settings profile: use an existing folder, make one (copied from `from`, or
+/// "fresh"), or forget it.
+#[tauri::command]
+pub fn pc_account_profile(app: tauri::AppHandle, user: u64, name: Option<String>, from: Option<String>, existing: Option<String>, forget: Option<bool>) -> Result<String, String> {
+    if forget == Some(true) {
+        return set_own(&app, user, "");
+    }
+    if let Some(existing) = clip(existing) {
+        return set_own(&app, user, &existing);
+    }
+    make_account_profile(&app, user, clip(name).as_deref(), clip(from).as_deref())
+}
+
+/// EVE's third-party apps page for a character (its own window; shows which account to sign in).
+/// Async: it opens a window (a window built in a sync command can lock up on Windows).
+#[tauri::command]
+pub async fn pc_eve_apps(app: tauri::AppHandle, character: u64, login: Option<String>) {
+    let login = login.map(|l| l.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.').take(40).collect::<String>());
+    crate::eveapps::open(&app, character, login.as_deref());
+}
+
+/// Mark a character as a Spy on this PC (never named to SeAT or the mapper), or not.
+#[tauri::command]
+pub fn pc_set_spy(app: tauri::AppHandle, name: String, on: bool) -> Result<(), String> {
+    let name: String = name.trim().chars().take(40).collect();
+    if name.is_empty() {
+        return Err("no name".into());
+    }
+    crate::incognito::set_spy(&app, &name, on);
+    Ok(())
+}
