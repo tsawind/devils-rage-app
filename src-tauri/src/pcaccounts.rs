@@ -412,6 +412,18 @@ pub fn make_account_profile(app: &tauri::AppHandle, user: u64, wanted: Option<&s
     if !crate::profiles::safe_name(&name) {
         return Err("Use letters, numbers, - and _ only (up to 40).".into());
     }
+    // 23 Nov: everything EVE closed first. A client writes its settings when it closes (a copy
+    // taken while one is open misses them, and closing it later writes to the old profile), and
+    // the launcher only reads the list of profiles when it starts.
+    let (clients, launcher) = eve_running();
+    if clients > 0 || launcher {
+        let what = match (clients, launcher) {
+            (0, _) => "the EVE launcher".to_string(),
+            (n, false) => format!("{n} EVE client{}", if n == 1 { "" } else { "s" }),
+            (n, true) => format!("{n} EVE client{} and the launcher", if n == 1 { "" } else { "s" }),
+        };
+        return Err(format!("Close every EVE client and the EVE launcher first (tray icon too): {what} still open. EVE saves settings when a client closes, and the launcher only finds new profiles when it starts."));
+    }
     let root = crate::profiles::root()?;
     let target = root.join(format!("settings_{name}"));
     if target.exists() {
@@ -427,7 +439,7 @@ pub fn make_account_profile(app: &tauri::AppHandle, user: u64, wanted: Option<&s
         std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
         remember_own(app, user, &name);
         log::info!("made an empty settings_{name} for EVE account {user}");
-        return Ok(format!("Made settings_{name}, empty: EVE starts it with its default settings. Now pick \"{name}\" as this account's client profile in the EVE launcher (not in the list? close the launcher fully, tray icon too, and open it again)."));
+        return Ok(format!("Made settings_{name}, empty: EVE starts it with its default settings. Now open the EVE launcher and pick \"{name}\" for this account."));
     };
     if !crate::profiles::safe_name(&from) {
         return Err("That profile has an odd name.".into());
@@ -459,7 +471,26 @@ pub fn make_account_profile(app: &tauri::AppHandle, user: u64, wanted: Option<&s
     remember_own(app, user, &name);
     log::info!("made settings_{name} for EVE account {user} from settings_{from}: {copied} files");
     let place = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters') in {place}. Close the EVE launcher fully (tray icon too), open it again and pick \"{name}\" for this account. If the launcher offers to create \"{name}\" instead, it isn't seeing this folder: don't create it, tell Tsa."))
+    Ok(format!("Made settings_{name} from settings_{from} ({copied} files: its game settings, the account's and its characters') in {place}. Now open the EVE launcher and pick \"{name}\" for this account. If the launcher offers to create \"{name}\" instead, it isn't seeing this folder: don't create it, tell Tsa."))
+}
+
+/// How many EVE clients are running, and whether the EVE launcher is (any of its windows or its
+/// tray icon). Read from the process list, so minimized and login-screen clients count too.
+#[cfg(windows)]
+fn eve_running() -> (usize, bool) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(out) = std::process::Command::new("tasklist").args(["/FO", "CSV", "/NH"]).creation_flags(CREATE_NO_WINDOW).output() else {
+        return (0, false);
+    };
+    let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+    let names: Vec<&str> = text.lines().filter_map(|l| l.split(',').next()).map(|n| n.trim_matches('"')).collect();
+    (names.iter().filter(|n| **n == "exefile.exe").count(), names.contains(&"eve-online.exe"))
+}
+
+#[cfg(not(windows))]
+fn eve_running() -> (usize, bool) {
+    (0, false)
 }
 
 /// A login name as a folder name (letters, numbers, - and _).

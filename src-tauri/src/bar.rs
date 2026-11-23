@@ -37,7 +37,7 @@ pub fn bar_state(app: AppHandle) -> BarState {
                 "mapper"
             } else if host == crate::host_of(crate::SEAT_URL) {
                 if path.starts_with("/devilsrage/accounts") || path.starts_with("/devilsrage/your-accounts") {
-                    "thispc"
+                    "accounts"
                 } else if path.starts_with("/devilsrage/pi") {
                     "pi"
                 } else {
@@ -47,9 +47,6 @@ pub fn bar_state(app: AppHandle) -> BarState {
                 "settings"
             } else if path.ends_with("assets.html") {
                 "assets"
-            } else if path.ends_with("thispc.html") {
-                // 22 Nov: Your accounts' tab: this PC's side (the app's page) and SeAT's page.
-                "thispc"
             } else if path.ends_with("index.html") || path == "/" {
                 "home"
             } else {

@@ -294,8 +294,6 @@ pub fn bar_action(app: &AppHandle, action: &str) {
             }
         }
         "settings" => go(app, app_url("settings.html")),
-        // 22 Nov: Your accounts, this PC's side (the app's own page; editing stays on SeAT's).
-        "thispc" => go(app, app_url("thispc.html")),
         "assets" => go(app, app_url("assets.html")),
         "admin" => {
             if let Ok(url) = format!("{MAPPER_URL}/desktop-app/admin").parse() {
