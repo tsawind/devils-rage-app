@@ -28,27 +28,40 @@ struct Placing {
     minimised: Vec<isize>,
     /// Previews we hid or faded.
     ghosted: Vec<String>,
+    /// We turned arranging on for Place previews (turned off again when done).
+    edit_on: bool,
 }
 
 static PLACING: Mutex<Option<Placing>> = Mutex::new(None);
 
 // ---- What's being placed ------------------------------------------------------------------------
 
-/// The clients (or previews) to step through, in a steady order: characters by name, then
-/// login screens by number.
-fn names(app: &AppHandle, previews: bool) -> Vec<String> {
-    let mut list: Vec<String> = if previews {
-        app.webview_windows().into_iter().filter(|(l, _)| l.starts_with(crate::previews::PREFIX)).filter_map(|(_, w)| crate::previews::name_of_window(&w)).collect()
-    } else {
-        crate::clipboard::open_clients().into_iter().map(|(n, _)| n).collect()
-    };
-    list.sort_by_key(|n| {
-        let login = crate::clipboard::is_login_label(n);
-        let num = n.strip_prefix("Login ").and_then(|x| x.parse::<u32>().ok()).unwrap_or(0);
-        (login, num, n.to_lowercase())
-    });
-    list.dedup();
+/// 23 Nov: everyone, open or not: each account's login screen ("Login 3") then its characters,
+/// in Your accounts order, then any other client open now. A client that isn't open is placed
+/// with a stand-in frame (client windows) or its preview opened empty (previews).
+fn names(app: &AppHandle, _previews: bool) -> Vec<String> {
+    let seat = crate::launch::load_seat(app);
+    let mut accounts: Vec<&crate::launch::SeatAccount> = seat.accounts.iter().collect();
+    accounts.sort_by_key(|a| crate::launch::nickname_key(&a.nickname));
+    let mut list: Vec<String> = Vec::new();
+    for (i, a) in accounts.iter().enumerate() {
+        list.push(crate::clipboard::login_label(i));
+        for c in &a.characters {
+            if !c.name.is_empty() {
+                list.push(c.name.clone());
+            }
+        }
+    }
+    let mut extra: Vec<String> = crate::clipboard::open_clients().into_iter().map(|(n, _)| n).filter(|n| !list.contains(n)).collect();
+    extra.sort_by_key(|n| n.to_lowercase());
+    list.extend(extra);
+    let mut seen = std::collections::HashSet::new();
+    list.retain(|n| seen.insert(n.clone()));
     list
+}
+
+fn is_open(name: &str) -> bool {
+    handle_of(name).is_some()
 }
 
 fn handle_of(name: &str) -> Option<isize> {
@@ -57,19 +70,100 @@ fn handle_of(name: &str) -> Option<isize> {
 
 fn rect_of(app: &AppHandle, previews: bool, name: &str) -> Option<Spot> {
     if previews {
-        app.get_webview_window(&crate::previews::label_for(name)).and_then(|w| preview_rect(&w))
-    } else {
-        handle_of(name).and_then(crate::clientwindows::window_spot)
+        return app.get_webview_window(&crate::previews::label_for(name)).and_then(|w| preview_rect(&w));
+    }
+    match handle_of(name) {
+        Some(h) => crate::clientwindows::window_spot(h),
+        None if standin_for().as_deref() == Some(name) => standin_rect(app),
+        None => None,
     }
 }
 
 fn move_to(app: &AppHandle, previews: bool, name: &str, to: Spot) -> bool {
     if previews {
         set_preview_rect(app, name, to);
-        true
-    } else {
-        handle_of(name).is_some_and(|h| crate::clientwindows::place_window(h, to))
+        return true;
     }
+    match handle_of(name) {
+        Some(h) => crate::clientwindows::place_window(h, to),
+        None if standin_for().as_deref() == Some(name) => {
+            set_standin(app, name, to);
+            true
+        }
+        None => false,
+    }
+}
+
+// ---- The stand-in: a frame for a client that isn't open -----------------------------------------
+
+const STANDIN: &str = "standin";
+static STANDIN_FOR: Mutex<Option<String>> = Mutex::new(None);
+
+fn standin_for() -> Option<String> {
+    STANDIN_FOR.lock().unwrap().clone()
+}
+
+fn standin_rect(app: &AppHandle) -> Option<Spot> {
+    app.get_webview_window(STANDIN).and_then(|w| preview_rect(&w))
+}
+
+/// Show the stand-in frame for `name` at `at` (built the first time).
+fn set_standin(app: &AppHandle, name: &str, at: Spot) {
+    *STANDIN_FOR.lock().unwrap() = Some(name.to_string());
+    let arg = serde_json::json!(name);
+    if let Some(w) = app.get_webview_window(STANDIN) {
+        let _ = w.set_position(tauri::PhysicalPosition::new(at.x, at.y));
+        let _ = w.set_size(tauri::PhysicalSize::new(at.w.max(200) as u32, at.h.max(120) as u32));
+        let _ = w.eval(format!("window.__standin && window.__standin({arg});"));
+        let _ = w.show();
+        return;
+    }
+    let app2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let built = WebviewWindowBuilder::new(&app2, STANDIN, WebviewUrl::App("standin.html".into()))
+            .initialization_script(format!("window.__STANDIN__ = {arg};"))
+            .title("Stand-in")
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(false)
+            .resizable(true)
+            .focused(false)
+            .visible(false)
+            .build();
+        match built {
+            Ok(w) => {
+                crate::clientbar::tool_window(&w);
+                let _ = w.set_position(tauri::PhysicalPosition::new(at.x, at.y));
+                let _ = w.set_size(tauri::PhysicalSize::new(at.w.max(200) as u32, at.h.max(120) as u32));
+                let _ = w.show();
+            }
+            Err(e) => log::warn!("couldn't open the stand-in frame: {e}"),
+        }
+    });
+}
+
+fn hide_standin(app: &AppHandle) {
+    *STANDIN_FOR.lock().unwrap() = None;
+    if let Some(w) = app.get_webview_window(STANDIN) {
+        let _ = w.hide();
+    }
+}
+
+/// Where a client that isn't open would go: its saved spot, else the previous one's, else a
+/// 1280 x 720 frame on the first monitor.
+fn spot_for_closed(app: &AppHandle, list: &[String], index: usize, name: &str) -> Spot {
+    if let Some(s) = crate::clientwindows::remembered(app, name) {
+        return s;
+    }
+    if index > 0 {
+        if let Some(s) = rect_of(app, false, &list[index - 1]).or_else(|| crate::clientwindows::remembered(app, &list[index - 1])) {
+            return s;
+        }
+    }
+    let m = monitors(app).first().copied().unwrap_or(Spot { x: 0, y: 0, w: 1920, h: 1080 });
+    Spot { x: m.x + 40, y: m.y + 40, w: 1280.min(m.w), h: 720.min(m.h) }
 }
 
 // ---- Looks: fade, minimise, put back ---------------------------------------------------------------
@@ -159,6 +253,17 @@ fn apply(app: &AppHandle, st: &mut Placing) {
     let current = list[st.index].clone();
     // Restore last step's looks first (but leave others minimised when we stay in "hide").
     put_back(app, st, None);
+    if st.previews || is_open(&current) {
+        hide_standin(app);
+    } else {
+        let at = spot_for_closed(app, &list, st.index, &current);
+        set_standin(app, &current, at);
+    }
+    if st.previews && app.get_webview_window(&crate::previews::label_for(&current)).is_none() {
+        // Its client isn't open: open its preview (empty) so it can be put where it goes.
+        let (app2, name) = (app.clone(), current.clone());
+        tauri::async_runtime::spawn(async move { crate::previews::build_preview(&app2, &name) });
+    }
     if st.previews {
         for name in list.iter().filter(|n| **n != current) {
             let Some(w) = app.get_webview_window(&crate::previews::label_for(name)) else { continue };
@@ -201,8 +306,24 @@ fn apply(app: &AppHandle, st: &mut Placing) {
 }
 
 fn draw_outlines(app: &AppHandle, previews: bool, list: &[String], current: &str) {
-    let outlines: Vec<(Spot, String, bool)> = list.iter().filter_map(|n| rect_of(app, previews, n).map(|r| (r, n.clone(), n == current))).collect();
+    let open = open_map();
+    let outlines: Vec<(Spot, String, bool)> = list
+        .iter()
+        .filter(|n| *n == current || open.contains_key(*n))
+        .filter_map(|n| {
+            let r = match (previews, open.get(n)) {
+                (false, Some(h)) => crate::clientwindows::window_spot(*h),
+                _ => rect_of(app, previews, n),
+            };
+            r.map(|r| (r, n.clone(), n == current))
+        })
+        .collect();
     set_outlines(app, outlines);
+}
+
+/// The clients open now, by name (one look at the windows).
+fn open_map() -> std::collections::HashMap<String, isize> {
+    crate::clipboard::open_clients().into_iter().collect()
 }
 
 // ---- Commands -----------------------------------------------------------------------------------
@@ -218,6 +339,12 @@ pub fn place_clients_open(app: AppHandle, previews: Option<bool>) {
         }
         *guard = Some(Placing { previews, others: "outline".into(), ..Placing::default() });
     }
+    if previews && !crate::previews::edit_mode(&app) {
+        let _ = crate::previews::set_preview_edit(app.clone(), true);
+        if let Some(st) = PLACING.lock().unwrap().as_mut() {
+            st.edit_on = true;
+        }
+    }
     if let Some(w) = app.get_webview_window(WINDOW) {
         let _ = w.eval("window.__reload && window.__reload();");
         let _ = w.show();
@@ -229,8 +356,8 @@ pub fn place_clients_open(app: AppHandle, previews: Option<bool>) {
     tauri::async_runtime::spawn(async move {
         let built = WebviewWindowBuilder::new(&app2, WINDOW, WebviewUrl::App("place.html".into()))
             .title("Place clients")
-            .inner_size(460.0, 380.0)
-            .min_inner_size(380.0, 300.0)
+            .inner_size(560.0, 760.0)
+            .min_inner_size(420.0, 420.0)
             .always_on_top(true)
             .visible(true)
             .build();
@@ -256,9 +383,14 @@ fn step(app: &AppHandle) {
 }
 
 fn done(app: &AppHandle) {
-    if let Some(mut st) = PLACING.lock().unwrap().take() {
+    let taken = PLACING.lock().unwrap().take();
+    if let Some(mut st) = taken {
         put_back(app, &mut st, None);
+        if st.edit_on {
+            let _ = crate::previews::set_preview_edit(app.clone(), false);
+        }
     }
+    hide_standin(app);
     set_outlines(app, Vec::new());
     log::info!("Place clients closed: everything put back");
 }
@@ -274,13 +406,20 @@ pub fn place_state(app: AppHandle) -> serde_json::Value {
     if let Some(c) = &current {
         draw_outlines(&app, st.previews, &list, c);
     }
-    let remembered: Vec<bool> = list.iter().map(|n| crate::clientwindows::remembered(&app, n).is_some()).collect();
+    let remembered: Vec<bool> = list
+        .iter()
+        .map(|n| if st.previews { crate::previews::prefs_for(&app, n).x.is_some() } else { crate::clientwindows::remembered(&app, n).is_some() })
+        .collect();
+    let open_now = open_map();
+    let open: Vec<bool> = list.iter().map(|n| open_now.contains_key(n)).collect();
     let (snap_on, cols, rows) = crate::previews::with_layout(&app, |l| (l.snap_on, l.snap_cols, l.snap_rows));
     serde_json::json!({
         "open": true,
         "previews": st.previews,
         "names": list,
         "remembered": remembered,
+        "open": open,
+        "standin": current.as_deref().is_some_and(|c| standin_for().as_deref() == Some(c)),
         "index": index,
         "current": current,
         "rect": current.as_deref().and_then(|c| rect_of(&app, st.previews, c)),
@@ -319,7 +458,10 @@ pub fn place_kind(app: AppHandle, previews: bool) {
     let Some(st) = guard.as_mut() else { return };
     put_back(&app, st, None);
     st.previews = previews;
-    st.index = 0;
+    if previews && !crate::previews::edit_mode(&app) {
+        let _ = crate::previews::set_preview_edit(app.clone(), true);
+        st.edit_on = true;
+    }
     apply(&app, st);
 }
 
@@ -372,6 +514,13 @@ pub fn place_action(app: AppHandle, action: String, step: Option<i32>) -> Result
                 }
             }
             format!("{moved} other{} in its stack moved onto this spot.", if moved == 1 { "" } else { "s" })
+        }
+        "save-one" => {
+            if previews {
+                return Ok(format!("{current}'s preview spot is saved ({} x {}).", here.w, here.h));
+            }
+            crate::clientwindows::remember_one(&app, &current, here);
+            format!("Saved: {current} goes to {}, {} ({} x {}) when it starts.", here.x, here.y, here.w, here.h)
         }
         "save" => {
             if previews {

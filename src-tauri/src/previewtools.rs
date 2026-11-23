@@ -72,8 +72,8 @@ pub fn monitor_of(mons: &[Spot], r: Spot) -> Option<usize> {
 /// The cells a rectangle snaps to on a monitor of `cols` x `rows` cells: as many cells as it
 /// covers (at least one), starting at the nearest grid line, kept on the monitor.
 pub fn cell_target(mon: Spot, cols: u32, rows: u32, r: Spot) -> Spot {
-    let cols = cols.clamp(1, 48) as i32;
-    let rows = rows.clamp(1, 48) as i32;
+    let cols = cols.clamp(1, 96) as i32;
+    let rows = rows.clamp(1, 96) as i32;
     let cw = mon.w as f64 / cols as f64;
     let ch = mon.h as f64 / rows as f64;
     let span_c = ((r.w as f64 / cw).round() as i32).clamp(1, cols);
@@ -445,10 +445,10 @@ pub fn set_previews_snap_mode(app: AppHandle, on: bool, cols: Option<u32>, rows:
     with_layout(&app, |l| {
         l.snap_on = on;
         if let Some(c) = cols {
-            l.snap_cols = c.clamp(2, 32);
+            l.snap_cols = c.clamp(2, 96);
         }
         if let Some(r) = rows {
-            l.snap_rows = r.clamp(2, 32);
+            l.snap_rows = r.clamp(2, 96);
         }
     });
     save_soon(&app);
@@ -470,16 +470,27 @@ pub fn preview_action(app: AppHandle, name: String, action: String, value: Optio
     let (_, cols, rows) = grid_size(&app);
     let mut moves: Vec<(String, Spot)> = Vec::new();
     let said = match action.as_str() {
-        "size-s" | "size-m" | "size-l" => {
+        "size-xs" | "size-s" | "size-m" | "size-l" => {
+            // 23 Nov: parts of the monitor's width (S was an eighth: too big on 4K).
             let part = match action.as_str() {
-                "size-s" => 8.0,
-                "size-m" => 6.0,
-                _ => 4.0,
+                "size-xs" => 16.0,
+                "size-s" => 12.0,
+                "size-m" => 8.0,
+                _ => 6.0,
             };
             let w = (mon.w as f64 / part) as i32;
             let h = (w as f64 * me.h as f64 / me.w.max(1) as f64) as i32;
             moves.push((name.clone(), Spot { w, h, ..me }));
-            "Resized.".to_string()
+            format!("{w} x {h}.")
+        }
+        "smaller" | "bigger" => {
+            let f = if action == "smaller" { 0.9 } else { 1.1 };
+            let (w, h) = (((me.w as f64) * f) as i32, ((me.h as f64) * f) as i32);
+            if w < 80 || h < 45 {
+                return Err("That's as small as a preview goes.".into());
+            }
+            moves.push((name.clone(), Spot { w, h, ..me }));
+            format!("{w} x {h}.")
         }
         "size-set" => {
             let v = value.unwrap_or(0);

@@ -326,7 +326,7 @@ pub fn open_previews(app: AppHandle) -> Result<usize, String> {
     Ok(count)
 }
 
-fn build_preview(app: &AppHandle, name: &str) {
+pub(crate) fn build_preview(app: &AppHandle, name: &str) {
     let label = label_for(name);
     let prefs = prefs_for(app, name);
     let init = format!(
@@ -372,8 +372,8 @@ fn build_preview(app: &AppHandle, name: &str) {
     let app_for_events = app.clone();
     let name_for_events = name.to_string();
     window.on_window_event(move |event| {
-        // Login screen previews can be moved any time (patch 114); the rest only while editing.
-        if !edit_mode(&app_for_events) && !crate::clipboard::is_login_label(&name_for_events) {
+        // Only while arranging (23 Nov: login screen previews too; they were movable any time).
+        if !edit_mode(&app_for_events) {
             return;
         }
         match event {
@@ -457,6 +457,10 @@ pub fn set_preview_client(
         } else {
             apply_mode(&app, &window, &name);
         }
+    } else if enabled == Some(true) && crate::clipboard::open_clients().iter().any(|(n, _)| *n == name) {
+        // 23 Nov: Shown ticked again: its preview was closed when it was unticked, so open it.
+        let app2 = app.clone();
+        tauri::async_runtime::spawn(async move { build_preview(&app2, &name) });
     }
     Ok(())
 }

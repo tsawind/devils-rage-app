@@ -235,7 +235,7 @@ fn load_prefs(app: &AppHandle) -> SeatPrefs {
 }
 
 /// Sort key for an account nickname, numbers by value ("2" before "10"), like the pages do.
-fn nickname_key(nickname: &str) -> (u8, u64, String) {
+pub(crate) fn nickname_key(nickname: &str) -> (u8, u64, String) {
     match nickname.trim().parse::<u64>() {
         Ok(n) => (0, n, String::new()),
         Err(_) => (1, 0, nickname.to_lowercase()),

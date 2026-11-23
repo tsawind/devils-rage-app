@@ -142,16 +142,9 @@
   tick();
 
   // Click (without dragging) brings that client forward — not while arranging.
-  // Patch 114: a login screen preview can be dragged any time (it moves once the pointer travels).
-  const isLogin = /^Login \d+$/.test(name);
+  // 23 Nov: login screen previews are locked like the rest (move them while arranging).
   let downAt = null;
   drag.addEventListener("mousedown", (e) => { if (e.button === 0) downAt = { x: e.screenX, y: e.screenY }; });
-  drag.addEventListener("mousemove", (e) => {
-    if (!downAt || mode.edit || !isLogin || !(e.buttons & 1)) return;
-    if (Math.abs(e.screenX - downAt.x) + Math.abs(e.screenY - downAt.y) < 5) return;
-    downAt = null;
-    invoke("preview_start_drag").catch(() => {});
-  });
   drag.addEventListener("mouseup", (e) => {
     if (!downAt) return;
     const moved = Math.abs(e.screenX - downAt.x) + Math.abs(e.screenY - downAt.y);

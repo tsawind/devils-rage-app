@@ -1,18 +1,21 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "previewtools",
-  "description": "23 Nov: the preview right-click menu (pmenu), the snap grid / outline layer over each monitor (snapgrid-*), and Place clients (place). Local pages only.",
+  "description": "23 Nov: the preview right-click menu (pmenu), the snap grid / outline layer over each monitor (snapgrid-*), Place clients (place) and its stand-in frame for a client that isn't open (standin). Local pages only.",
   "windows": [
     "pmenu",
     "snapgrid-*",
-    "place"
+    "place",
+    "standin"
   ],
   "webviews": [
     "pmenu",
     "snapgrid-*",
-    "place"
+    "place",
+    "standin"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging"
   ]
 }

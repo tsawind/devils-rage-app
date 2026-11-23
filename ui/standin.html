@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stand-in</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; font: 14px "Segoe UI", system-ui, sans-serif; color: #fff; }
+  #frame { position: fixed; inset: 0; border: 3px solid #adff2f; background: #ff40aa2e; box-sizing: border-box; border-radius: 4px; cursor: move;
+           display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-shadow: 0 1px 3px #000; }
+  #frame b { font-size: 20px; }
+  #frame small { color: #ffd6ec; }
+  .edge { position: fixed; z-index: 2; }
+  .edge.n { top: 0; left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
+  .edge.s { bottom: 0; left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
+  .edge.w { left: 0; top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
+  .edge.e { right: 0; top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
+  .edge.nw { left: 0; top: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+  .edge.ne { right: 0; top: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+  .edge.sw { left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; }
+  .edge.se { right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, #adff2f 50%); }
+</style>
+</head>
+<body>
+<div id="frame" data-tauri-drag-region><b id="name" data-tauri-drag-region>…</b><small id="size" data-tauri-drag-region></small><small data-tauri-drag-region>not open: drag this frame where its client goes, then Save this spot</small></div>
+<div class="edge n" data-edge="n"></div><div class="edge s" data-edge="s"></div><div class="edge w" data-edge="w"></div><div class="edge e" data-edge="e"></div>
+<div class="edge nw" data-edge="nw"></div><div class="edge ne" data-edge="ne"></div><div class="edge sw" data-edge="sw"></div><div class="edge se" data-edge="se"></div>
+<script>
+  const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
+  window.__standin = (name) => { document.getElementById("name").textContent = name; size(); };
+  const size = () => {
+    const d = window.devicePixelRatio || 1;
+    document.getElementById("size").textContent = `${Math.round(window.innerWidth * d)} × ${Math.round(window.innerHeight * d)}`;
+  };
+  window.addEventListener("resize", size);
+  for (const el of document.querySelectorAll(".edge")) {
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      invoke("preview_start_resize", { edge: el.dataset.edge }).catch(() => {});
+    });
+  }
+  if (window.__STANDIN__) window.__standin(window.__STANDIN__);
+</script>
+</body>
+</html>
