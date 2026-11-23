@@ -621,7 +621,7 @@ pub fn tool_window(window: &tauri::WebviewWindow) {
 /// Each bar's frame mode, for the page (clientbar_info): name -> (frame, top in CSS px).
 static MODES: Mutex<Option<HashMap<String, (bool, f64, bool)>>> = Mutex::new(None);
 
-fn our_hwnd(window: &tauri::WebviewWindow) -> Option<isize> {
+pub(crate) fn our_hwnd(window: &tauri::WebviewWindow) -> Option<isize> {
     #[cfg(windows)]
     {
         window.hwnd().ok().map(|h| h.0 as isize)

@@ -799,22 +799,36 @@ pub fn preview_start_drag(window: WebviewWindow) {
     let _ = window.start_dragging();
 }
 
-/// 23 Nov: resize a preview from any edge or corner (Windows' own resize, smooth).
+/// 23 Nov: resize a preview from any edge or corner with Windows' own resize (smooth): the
+/// same as pressing on that edge of a normal window.
 #[tauri::command]
 pub fn preview_start_resize(window: WebviewWindow, edge: String) {
-    use tauri::window::ResizeDirection as D;
-    let dir = match edge.as_str() {
-        "n" => D::North,
-        "s" => D::South,
-        "e" => D::East,
-        "w" => D::West,
-        "ne" => D::NorthEast,
-        "nw" => D::NorthWest,
-        "se" => D::SouthEast,
-        "sw" => D::SouthWest,
-        _ => return,
-    };
-    let _ = window.start_resize_dragging(dir);
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_NCLBUTTONDOWN};
+        let hit = match edge.as_str() {
+            "n" => HTTOP,
+            "s" => HTBOTTOM,
+            "e" => HTRIGHT,
+            "w" => HTLEFT,
+            "ne" => HTTOPRIGHT,
+            "nw" => HTTOPLEFT,
+            "se" => HTBOTTOMRIGHT,
+            "sw" => HTBOTTOMLEFT,
+            _ => return,
+        };
+        let Some(hwnd) = crate::clientbar::our_hwnd(&window) else { return };
+        // SAFETY: our own window; the press on its edge starts Windows' resize loop.
+        unsafe {
+            ReleaseCapture();
+            PostMessageW(hwnd as _, WM_NCLBUTTONDOWN, hit as usize, 0);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, edge);
+    }
 }
 
 /// Click-through previews let every click through to the game, so their square couldn't be
