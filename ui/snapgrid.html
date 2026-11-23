@@ -9,6 +9,12 @@
   .ln { position: absolute; background: #f0c04059; }
   .ln.v { top: 0; bottom: 0; width: 1px; }
   .ln.h { left: 0; right: 0; height: 1px; }
+  .zn { position: absolute; background: #3ad0ff99; }
+  .zn.v { top: 0; bottom: 0; width: 2px; margin-left: -1px; }
+  .zn.h { left: 0; right: 0; height: 2px; margin-top: -1px; }
+  .ctr { position: absolute; background: #ff3b3bcc; }
+  .ctr.v { top: 0; bottom: 0; width: 2px; left: 50%; margin-left: -1px; }
+  .ctr.h { left: 0; right: 0; height: 2px; top: 50%; margin-top: -1px; }
   #hl { position: absolute; border: 2px solid #f0c040; background: #f0c04026; border-radius: 4px; display: none; box-sizing: border-box; }
   .ol { position: absolute; border: 2px dashed #ff40aa; border-radius: 3px; box-sizing: border-box; }
   .ol.cur { border: 3px solid #adff2f; }
@@ -29,6 +35,12 @@
       for (let i = 1; i < s.cols; i++) { const d = document.createElement("div"); d.className = "ln v"; d.style.left = pct(i / s.cols); grid.append(d); }
       for (let i = 1; i < s.rows; i++) { const d = document.createElement("div"); d.className = "ln h"; d.style.top = pct(i / s.rows); grid.append(d); }
     }
+    if (s.zones) {
+      for (let i = 1; i < s.zones[0]; i++) { const d = document.createElement("div"); d.className = "zn v"; d.style.left = pct(i / s.zones[0]); grid.append(d); }
+      for (let i = 1; i < s.zones[1]; i++) { const d = document.createElement("div"); d.className = "zn h"; d.style.top = pct(i / s.zones[1]); grid.append(d); }
+    }
+    // The middle of the monitor, across and down: always clear.
+    if (s.grid || s.zones) for (const k of ["v", "h"]) { const d = document.createElement("div"); d.className = "ctr " + k; grid.append(d); }
     const box = document.getElementById("outlines");
     box.innerHTML = "";
     for (const o of s.outlines || []) {

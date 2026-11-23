@@ -186,6 +186,22 @@ pub fn note_mode(app: &AppHandle, name: &str, fixed: bool) {
     save(app);
 }
 
+/// 23 Nov: the window mode remembered for a client (true = Fixed Window), if any.
+pub fn fixed_of(app: &AppHandle, name: &str) -> Option<bool> {
+    with(app, |layout| layout.fixed.get(name).copied())
+}
+
+/// 23 Nov: forget a client's spot (Place clients' Reset).
+pub fn forget_one(app: &AppHandle, name: &str) {
+    with(app, |layout| {
+        layout.spots.remove(name);
+        for stack in layout.stacks.values_mut() {
+            stack.remove(name);
+        }
+    });
+    save(app);
+}
+
 fn mode_of_open(name: &str) -> Option<bool> {
     crate::clipboard::open_clients().into_iter().find(|(n, _)| n == name).map(|(_, h)| !win::captioned(h))
 }

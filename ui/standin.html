@@ -5,9 +5,13 @@
 <title>Stand-in</title>
 <style>
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; font: 14px "Segoe UI", system-ui, sans-serif; color: #fff; }
-  #frame { position: fixed; inset: 0; border: 3px solid #adff2f; background: #ff40aa2e; box-sizing: border-box; border-radius: 4px; cursor: move;
+  #frame { position: fixed; inset: 0; border: 3px solid #adff2f; background: #adff2f12; box-sizing: border-box; border-radius: 4px; cursor: move;
            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-shadow: 0 1px 3px #000; }
   #frame b { font-size: 20px; }
+  #frame.small { border-color: #ff5a5a; background: #ff5a5a14; }
+  #warn { color: #ff8a8a; font-weight: 700; display: none; }
+  #frame.small #warn { display: block; }
+  #mode { color: #3ad0ff; font-weight: 600; }
   #frame small { color: #ffd6ec; }
   .edge { position: fixed; z-index: 2; }
   .edge.n { top: 0; left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
@@ -21,7 +25,7 @@
 </style>
 </head>
 <body>
-<div id="frame" data-tauri-drag-region><b id="name" data-tauri-drag-region>…</b><small id="size" data-tauri-drag-region></small><small data-tauri-drag-region>not open: drag this frame where its client goes, then Save this spot</small></div>
+<div id="frame" data-tauri-drag-region><b id="name" data-tauri-drag-region>…</b><span id="mode" data-tauri-drag-region></span><small id="size" data-tauri-drag-region></small><span id="warn" data-tauri-drag-region>Smaller than EVE's recommended 1024 × 768</span><small data-tauri-drag-region>not open: drag this frame where its client goes, then Save this spot</small></div>
 <div class="edge n" data-edge="n"></div><div class="edge s" data-edge="s"></div><div class="edge w" data-edge="w"></div><div class="edge e" data-edge="e"></div>
 <div class="edge nw" data-edge="nw"></div><div class="edge ne" data-edge="ne"></div><div class="edge sw" data-edge="sw"></div><div class="edge se" data-edge="se"></div>
 <script>
@@ -29,8 +33,11 @@
   window.__standin = (name) => { document.getElementById("name").textContent = name; size(); };
   const size = () => {
     const d = window.devicePixelRatio || 1;
-    document.getElementById("size").textContent = `${Math.round(window.innerWidth * d)} × ${Math.round(window.innerHeight * d)}`;
+    const w = Math.round(window.innerWidth * d), h = Math.round(window.innerHeight * d);
+    document.getElementById("size").textContent = `${w} × ${h}`;
+    document.getElementById("frame").classList.toggle("small", w < 1024 || h < 768);
   };
+  window.__standinMode = (fixed) => { document.getElementById("mode").textContent = fixed ? "Fixed Window (no title bar)" : "Window mode (title bar)"; };
   window.addEventListener("resize", size);
   for (const el of document.querySelectorAll(".edge")) {
     el.addEventListener("mousedown", (e) => {

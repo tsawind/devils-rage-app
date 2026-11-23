@@ -119,6 +119,11 @@ fn take(root: &Path, profile: &str, note: &str, auto: bool) -> Result<(String, u
     Ok((id, files))
 }
 
+/// A snapshot the app takes itself before changing a profile's files (Place clients).
+pub(crate) fn auto_snapshot(profile: &str, note: &str) -> Result<String, String> {
+    take(&root()?, profile, note, true).map(|(id, _)| id)
+}
+
 /// Take a snapshot of one profile now, with a note ("before the overview change").
 #[tauri::command]
 pub fn profile_snapshot(profile: String, note: String) -> Result<String, String> {

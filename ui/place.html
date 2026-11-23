@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <title>Place clients</title>
 <style>
-  :root { --line:#2c2c33; --muted:#8a8a92; --red:#a8181f; --red-hi:#d6242c; --pink:#ff40aa; --ok:#adff2f; }
+  :root { --line:#2c2c33; --muted:#8a8a92; --red:#a8181f; --red-hi:#d6242c; --pink:#ff40aa; --ok:#adff2f; --cyan:#3ad0ff; }
   html, body { margin: 0; height: 100%; background: #0d0d10; color: #e6e6ea; font: 13px/1.45 "Segoe UI", system-ui, sans-serif; user-select: none; }
-  main { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; height: 100%; box-sizing: border-box; }
+  main { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; height: 100%; box-sizing: border-box; }
   .top { display: flex; align-items: center; gap: 8px; }
   .top h1 { font-size: 15px; margin: 0; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .top h1 small { color: var(--muted); font-weight: 400; }
-  .btn { border: 1px solid #3a3a42; border-radius: 7px; background: #141418; color: #e6e6ea; padding: 4px 10px; font: inherit; cursor: pointer; }
+  .btn { border: 1px solid #3a3a42; border-radius: 7px; background: #141418; color: #e6e6ea; padding: 3px 9px; font: inherit; cursor: pointer; }
   .btn:hover { border-color: var(--red-hi); }
   .btn.main { border-color: var(--red); background: #1c0d0e; }
   .seg { display: inline-flex; border: 1px solid #3a3a42; border-radius: 7px; overflow: hidden; }
@@ -19,20 +19,30 @@
   .seg button.on { background: #2a1420; color: var(--pink); }
   .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .lab { color: var(--muted); min-width: 52px; }
-  .list { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
-  .list div { padding: 3px 10px; display: flex; gap: 8px; cursor: pointer; }
+  select, input { background: #101014; color: #eee; border: 1px solid #3a3a42; border-radius: 7px; padding: 3px 6px; font: inherit; }
+  .box { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .list { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 8px; min-height: 120px; }
+  .list div { padding: 2px 10px; display: flex; gap: 8px; cursor: pointer; }
   .list div:hover { background: #1b1b21; }
   .list div.cur { background: #1d2412; color: var(--ok); }
   .list div small { color: var(--muted); margin-left: auto; }
+  .list div small.set { color: #7ab8f2; }
   .list div i { width: 8px; height: 8px; border-radius: 50%; background: #3a3a42; align-self: center; flex: none; }
   .list div i.on { background: var(--ok); }
   .list div.login { color: #f0c040; }
-  .list div small.set { color: #7ab8f2; }
-  .nudge { display: grid; grid-template-columns: repeat(3, 28px); gap: 2px; }
-  .nudge button { padding: 2px 0; }
+  .pad { display: grid; grid-template-columns: repeat(3, 26px); gap: 2px; }
+  .pad button { padding: 1px 0; }
+  #map { position: relative; height: 110px; }
+  .mon { position: absolute; border: 1px solid #55555e; background: #141418; box-sizing: border-box; }
+  .mon span { position: absolute; left: 3px; top: 1px; font-size: 11px; color: var(--muted); pointer-events: none; }
+  .cell { position: absolute; border: 1px dashed #3ad0ff55; box-sizing: border-box; cursor: pointer; }
+  .cell:hover { background: #3ad0ff33; }
+  .here { position: absolute; border: 2px solid var(--ok); background: #adff2f22; pointer-events: none; box-sizing: border-box; }
   #said { min-height: 1.4em; color: var(--ok); }
-  #said.bad { color: #f27a7a; font-weight: 600; }
+  #said.bad { color: #ff6b6b; font-weight: 700; font-size: 14px; }
+  .warn { color: #ff8a8a; font-weight: 600; }
   .muted { color: var(--muted); font-size: 12px; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -44,61 +54,132 @@
   </div>
   <div class="row"><span class="lab">Placing</span>
     <span class="seg" id="kind"><button data-k="0">Client windows</button><button data-k="1">Previews</button></span>
-  </div>
-  <div class="row"><span class="lab">Others</span>
+    <span class="lab" style="margin-left:8px">Others</span>
     <span class="seg" id="others">
       <button data-o="outline" title="Leave them be; their frames and names show on top">Outline</button>
-      <button data-o="fade" title="Fade the other clients to 10% (test: if one goes black, pick another option; it's put back as soon as you move on)">Fade 10%</button>
+      <button data-o="fade" title="Fade the other open clients to 10% (test: if one goes black, pick another option)">Fade</button>
       <button data-o="hide" title="Minimise the others while you place this one (put back afterwards)">Hide</button>
       <button data-o="normal" title="Don't touch the others, no frames">Normal</button>
     </span>
   </div>
+
+  <div class="box" id="cw">
+    <div class="row"><span class="lab">Mode</span>
+      <span class="seg" id="mode"><button data-f="0" title="EVE's Window mode: title bar and borders, any size">Window</button><button data-f="1" title="EVE's Fixed Window: no title bar, the size set here">Fixed</button></span>
+      <span class="muted" id="profile"></span>
+    </div>
+    <div class="row"><span class="lab">Size</span>
+      <select id="preset" title="EVE's own window sizes"></select>
+      <span class="muted">W</span><button class="btn" data-dw="-10" title="Narrower (Shift: 1 px)">−</button><button class="btn" data-dw="10" title="Wider (Shift: 1 px)">+</button>
+      <span class="muted">H</span><button class="btn" data-dh="-10" title="Shorter (Shift: 1 px)">−</button><button class="btn" data-dh="10" title="Taller (Shift: 1 px)">+</button>
+      <span id="sizeNow" class="muted"></span>
+    </div>
+    <div class="row"><span class="lab">Zones</span>
+      <select id="zones" title="Split each monitor into zones; click one below to fill it">
+        <option value="1,1">Whole monitor</option><option value="2,1">Halves (side by side)</option><option value="1,2">Halves (top / bottom)</option>
+        <option value="2,2">Quarters</option><option value="3,1">Thirds (across)</option><option value="3,2">Sixths</option><option value="3,3">Ninths</option><option value="4,4">Sixteenths</option>
+      </select>
+      <span class="muted">click a zone below to fill it, or put it:</span>
+      <div class="pad" title="Flush in a corner, against a side, or in the middle (keeps its size)">
+        <button class="btn" data-al="nw">↖</button><button class="btn" data-al="n">↑</button><button class="btn" data-al="ne">↗</button>
+        <button class="btn" data-al="w">←</button><button class="btn" data-al="c">•</button><button class="btn" data-al="e">→</button>
+        <button class="btn" data-al="sw">↙</button><button class="btn" data-al="s">↓</button><button class="btn" data-al="se">↘</button>
+      </div>
+    </div>
+    <div id="map"></div>
+  </div>
+
   <div class="row">
     <button class="btn" data-a="same-prev" title="Put this one exactly where the previous one is">Same spot as previous</button>
     <button class="btn" data-a="snap" id="snapBtn">Snap to grid</button>
     <button class="btn" data-a="stack" title="Everyone in this one's stack (launch group with a pedal key) gets this spot">Set the whole stack</button>
+    <button class="btn" data-a="reset" title="Forget this one's saved spot and start it over">Reset</button>
   </div>
   <div class="row">
-    <div class="nudge" title="Nudge 1 px (hold Shift: 10 px). Arrow keys work too.">
+    <div class="pad" title="Nudge 1 px (Shift: 10 px). Arrow keys work too.">
       <span></span><button class="btn" data-n="up">↑</button><span></span>
       <button class="btn" data-n="left">←</button><button class="btn" data-n="down">↓</button><button class="btn" data-n="right">→</button>
     </div>
     <span class="muted" id="rect"></span>
     <span style="flex:1"></span>
-    <button class="btn main" data-a="save-one" id="saveOne" title="Remember this client's spot: it goes there when it starts">Save this spot</button>
+    <button class="btn main" data-a="save-one" id="saveOne">Save this spot</button>
     <button class="btn" id="done">Done</button>
   </div>
-  <div class="row">
-    <input id="filter" placeholder="Find a client or Login N" style="flex:1;background:#101014;color:#eee;border:1px solid #3a3a42;border-radius:7px;padding:4px 8px;font:inherit">
-    <button class="btn" data-a="save" id="save" title="Remember where every open client is now">Save all open</button>
-  </div>
+  <div class="muted" id="closedNote">Saving a client's window writes its profile, so every EVE client and the EVE launcher (tray icon too) must be closed first.</div>
+  <input id="filter" placeholder="Find a client or Login N">
   <div class="list" id="list"></div>
   <div id="said"></div>
-  <div class="muted" id="tip">Move the client by its bar (✥) or title bar; the others' frames follow. Nothing is clicked inside EVE.</div>
+  <div class="muted" id="tip"></div>
 </main>
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
-  let st = null;
+  let st = null, lastIndex = -1, presetsDrawn = false;
   const say = (t, bad) => { $("said").textContent = t || ""; $("said").className = bad ? "bad" : ""; };
+  const run = async (p) => { try { const t = await p; if (t) say(t, /Smaller than EVE/.test(t)); } catch (e) { say(String(e), true); } load(); };
+
+  function drawMap() {
+    const map = $("map"); map.innerHTML = "";
+    const mons = st.monitors || [];
+    if (!mons.length) return;
+    const minX = Math.min(...mons.map(m => m.x)), minY = Math.min(...mons.map(m => m.y));
+    const maxX = Math.max(...mons.map(m => m.x + m.w)), maxY = Math.max(...mons.map(m => m.y + m.h));
+    const W = map.clientWidth || 500, H = 110;
+    const k = Math.min(W / (maxX - minX), H / (maxY - minY));
+    const px = (v, o) => (v - o) * k;
+    const [zc, zr] = st.zones;
+    mons.forEach((m, i) => {
+      const d = document.createElement("div");
+      d.className = "mon";
+      Object.assign(d.style, { left: px(m.x, minX) + "px", top: px(m.y, minY) + "px", width: m.w * k + "px", height: m.h * k + "px" });
+      for (let r = 0; r < zr; r++) for (let c = 0; c < zc; c++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        Object.assign(cell.style, { left: (c / zc * 100) + "%", top: (r / zr * 100) + "%", width: (100 / zc) + "%", height: (100 / zr) + "%" });
+        cell.title = `Monitor ${i + 1}, zone ${r * zc + c + 1}`;
+        cell.addEventListener("click", () => run(invoke("place_zone", { monitor: i, col: c, row: r })));
+        d.append(cell);
+      }
+      const t = document.createElement("span"); t.textContent = String(i + 1); d.append(t);
+      map.append(d);
+    });
+    if (st.rect) {
+      const h = document.createElement("div"); h.className = "here";
+      Object.assign(h.style, { left: px(st.rect.x, minX) + "px", top: px(st.rect.y, minY) + "px", width: st.rect.w * k + "px", height: st.rect.h * k + "px" });
+      map.append(h);
+    }
+  }
 
   async function load() {
     st = await invoke("place_state").catch(() => null);
     if (!st || !st.open) return;
     const n = st.names.length;
     $("title").innerHTML = "";
-    $("title").append(st.current || "Nothing open");
+    $("title").append(st.current || "Nothing to place");
     const sm = document.createElement("small"); sm.textContent = n ? `  ${st.index + 1} of ${n}` : ""; $("title").append(sm);
     for (const b of $("kind").children) b.classList.toggle("on", (b.dataset.k === "1") === !!st.previews);
     for (const b of $("others").children) b.classList.toggle("on", b.dataset.o === st.others);
+    const clients = !st.previews;
+    $("cw").hidden = !clients; $("closedNote").hidden = !clients;
+    $("snapBtn").hidden = clients;
     $("snapBtn").textContent = `Snap to grid (${st.grid[0]}×${st.grid[1]})`;
-    $("snapBtn").title = "Snap this one to the grid's cells (set the grid in a preview's right-click menu)";
-    $("save").hidden = !!st.previews;
-    $("rect").textContent = st.rect ? `${st.rect.x}, ${st.rect.y} · ${st.rect.w}×${st.rect.h}` : "";
+    $("saveOne").title = clients ? "Save this client's window: its spot in the app, and its window mode and size in its profile (needs every EVE client and the launcher closed)" : "Preview spots save by themselves";
+    for (const b of $("mode").children) b.classList.toggle("on", (b.dataset.f === "1") === !!st.fixed);
+    $("profile").textContent = st.profile ? `Profile settings_${st.profile.name}${st.profile.shared ? ` · shared with ${st.profile.shared} other account${st.profile.shared === 1 ? "" : "s"}` : ""}` : (clients ? "Profile not known on this PC yet" : "");
+    if (!presetsDrawn && st.sizes) {
+      $("preset").innerHTML = `<option value="">EVE sizes…</option>` + st.sizes.map(([w, h]) => `<option value="${w},${h}">${w} × ${h}${w === st.min[0] && h === st.min[1] ? " (smallest recommended)" : ""}</option>`).join("");
+      presetsDrawn = true;
+    }
+    $("zones").value = st.zones.join(",");
+    const r = st.rect;
+    $("rect").textContent = r ? `${r.x}, ${r.y}` : "";
+    const small = r && clients && (r.w < st.min[0] || r.h < st.min[1]);
+    $("sizeNow").innerHTML = r ? `${r.w} × ${r.h}${small ? ` <span class="warn">below EVE's ${st.min[0]} × ${st.min[1]}</span>` : ""}` : "";
     $("tip").textContent = st.standin
-      ? `${st.current} isn't open: drag the green stand-in frame (or nudge it), resize it from its edges, then Save this spot.`
+      ? `${st.current} isn't open: drag the green frame or use the buttons above (its edges stick to the monitor's edges, middle and zones), then Save this spot.`
       : st.previews ? "Previews: drag the green-framed one where it goes; it saves by itself. Not-open clients get an empty preview to place."
       : "Move the client by its bar (✥) or title bar; the others' frames follow. Nothing is clicked inside EVE.";
+    if (clients) drawMap();
     const want = $("filter").value.trim().toLowerCase();
     const list = $("list"); list.innerHTML = "";
     let curEl = null;
@@ -106,7 +187,7 @@
       if (want && !name.toLowerCase().includes(want)) return;
       const d = document.createElement("div");
       d.className = (i === st.index ? "cur " : "") + (/^Login \d+$/.test(name) ? "login" : "");
-      const dot = document.createElement("i"); if (st.open[i]) { dot.className = "on"; dot.title = "Open now"; } else dot.title = "Not open";
+      const dot = document.createElement("i"); if (st.isOpen[i]) { dot.className = "on"; dot.title = "Open now"; } else dot.title = "Not open";
       d.append(dot, name);
       const s2 = document.createElement("small");
       s2.textContent = st.remembered[i] ? "spot saved" : "no spot yet";
@@ -118,26 +199,32 @@
     });
     if (curEl && lastIndex !== st.index) { curEl.scrollIntoView({ block: "nearest" }); lastIndex = st.index; }
   }
-  let lastIndex = -1;
-  $("filter").addEventListener("input", () => load());
   window.__reload = () => { say(""); load(); };
-  const go = (i) => invoke("place_go", { index: i }).then(load).catch(() => {});
-  async function act(action, step) {
-    try { const t = await invoke("place_action", { action, step: step ?? null }); if (t) say(t); }
-    catch (e) { say(String(e), true); }
-    load();
-  }
+  const go = (i) => invoke("place_go", { index: i }).then(() => { say(""); load(); }).catch(() => {});
   $("prev").addEventListener("click", () => go((st?.index ?? 0) - 1));
   $("next").addEventListener("click", () => go((st?.index ?? 0) + 1));
-  for (const b of $("kind").children) b.addEventListener("click", () => invoke("place_kind", { previews: b.dataset.k === "1" }).then(load).catch(() => {}));
-  for (const b of $("others").children) b.addEventListener("click", () => invoke("place_others", { mode: b.dataset.o }).then(load).catch(() => {}));
-  for (const b of document.querySelectorAll("[data-a]")) b.addEventListener("click", () => act(b.dataset.a));
-  for (const b of document.querySelectorAll("[data-n]")) b.addEventListener("click", (e) => act(b.dataset.n, e.shiftKey ? 10 : 1));
+  for (const b of $("kind").children) b.addEventListener("click", () => run(invoke("place_kind", { previews: b.dataset.k === "1" })));
+  for (const b of $("others").children) b.addEventListener("click", () => run(invoke("place_others", { mode: b.dataset.o })));
+  for (const b of $("mode").children) b.addEventListener("click", () => run(invoke("place_mode", { fixed: b.dataset.f === "1" })));
+  for (const b of document.querySelectorAll("[data-a]")) b.addEventListener("click", () => run(invoke("place_action", { action: b.dataset.a, step: null })));
+  for (const b of document.querySelectorAll("[data-n]")) b.addEventListener("click", (e) => run(invoke("place_action", { action: b.dataset.n, step: e.shiftKey ? 10 : 1 })));
+  for (const b of document.querySelectorAll("[data-al]")) b.addEventListener("click", () => run(invoke("place_align", { to: b.dataset.al })));
+  for (const b of document.querySelectorAll("[data-dw]")) b.addEventListener("click", (e) => run(invoke("place_size", { w: null, h: null, dw: e.shiftKey ? Math.sign(+b.dataset.dw) : +b.dataset.dw, dh: null })));
+  for (const b of document.querySelectorAll("[data-dh]")) b.addEventListener("click", (e) => run(invoke("place_size", { w: null, h: null, dw: null, dh: e.shiftKey ? Math.sign(+b.dataset.dh) : +b.dataset.dh })));
+  $("preset").addEventListener("change", (e) => {
+    if (!e.target.value) return;
+    const [w, h] = e.target.value.split(",").map(Number);
+    e.target.value = "";
+    run(invoke("place_size", { w, h, dw: null, dh: null }));
+  });
+  $("zones").addEventListener("change", (e) => { const [cols, rows] = e.target.value.split(",").map(Number); run(invoke("place_zones", { cols, rows })); });
   $("done").addEventListener("click", () => invoke("place_done").catch(() => {}));
+  $("filter").addEventListener("input", () => load());
+  window.addEventListener("resize", () => st && !st.previews && drawMap());
   document.addEventListener("keydown", (e) => {
     if (e.target === $("filter")) return;
     const keys = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
-    if (keys[e.key]) { e.preventDefault(); act(keys[e.key], e.shiftKey ? 10 : 1); }
+    if (keys[e.key]) { e.preventDefault(); run(invoke("place_action", { action: keys[e.key], step: e.shiftKey ? 10 : 1 })); }
     else if (e.key === "PageDown") { e.preventDefault(); go((st?.index ?? 0) + 1); }
     else if (e.key === "PageUp") { e.preventDefault(); go((st?.index ?? 0) - 1); }
   });

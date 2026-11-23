@@ -75,6 +75,12 @@ fn finish(lines: Vec<String>, original: &str) -> String {
 /// A size block in `device:` (`FixedWindowSettings` / `WindowedSettings`) set to `width`×`height`,
 /// keeping its other values (adapter, left, top…). A `[stamp, null]` or missing one becomes a block.
 pub fn set_block_size(text: &str, key: &str, width: i64, height: i64, stamp: u64) -> String {
+    set_block_values(text, key, &[("width", width), ("height", height)], stamp)
+}
+
+/// 23 Nov: a block in `device:` with these values set (width, height, left, top…), keeping its
+/// others. Place clients writes a client's window spot this way.
+pub fn set_block_values(text: &str, key: &str, set: &[(&str, i64)], stamp: u64) -> String {
     let lines: Vec<&str> = text.lines().collect();
     let mut in_device = false;
     let mut found: Option<(usize, usize)> = None; // block lines [start, end)
@@ -106,7 +112,19 @@ pub fn set_block_size(text: &str, key: &str, width: i64, height: i64, stamp: u64
         i += 1;
     }
     let block = |adapter: i64, rest: &str| {
-        vec![format!("  {key}:"), format!("  - {stamp}"), format!("  - {{adapter: {adapter}, height: {height}{rest}, width: {width}}}")]
+        let mut values: Vec<(String, String)> = vec![("adapter".into(), adapter.to_string())];
+        for part in rest.trim_start_matches(", ").split(", ").filter(|p| !p.is_empty()) {
+            if let Some((k, v)) = part.split_once(": ") {
+                values.push((k.into(), v.into()));
+            }
+        }
+        for (k, v) in set {
+            values.retain(|(name, _)| name != k);
+            values.push((k.to_string(), v.to_string()));
+        }
+        values.sort_by(|a, b| a.0.cmp(&b.0));
+        let inner = values.iter().map(|(k, v)| format!("{k}: {v}")).collect::<Vec<_>>().join(", ");
+        vec![format!("  {key}:"), format!("  - {stamp}"), format!("  - {{{inner}}}")]
     };
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
     match (found, single) {
@@ -119,7 +137,7 @@ pub fn set_block_size(text: &str, key: &str, width: i64, height: i64, stamp: u64
                 .split(',')
                 .filter_map(|p| p.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string())))
                 .collect();
-            for (k, v) in [("width", width), ("height", height)] {
+            for (k, v) in set.iter().copied() {
                 match values.iter_mut().find(|(name, _)| name == k) {
                     Some(entry) => entry.1 = v.to_string(),
                     None => values.push((k.to_string(), v.to_string())),
@@ -367,6 +385,13 @@ fn chrono_like_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_spot_values() {
+        let null = "device:\n  WindowMode: [1, 2]\n  WindowedSettings: [1, null]\n";
+        let out = set_block_values(null, "WindowedSettings", &[("width", 1280), ("height", 720), ("left", -7), ("top", 30), ("showState", 0)], 9);
+        assert_eq!(out, "device:\n  WindowMode: [1, 2]\n  WindowedSettings:\n  - 9\n  - {adapter: 0, height: 720, left: -7, presentInterval: 0, showState: 0, top: 30, width: 1280}\n");
+    }
 
     const TSAWIND: &str = "audio:\n  masterVolume: [1, 0.7]\ndevice:\n  DeviceSettings: [1, null]\n  FixedWindow: [1, 0]\n  FixedWindowSettings:\n  - 134394192932409075\n  - {adapter: 0, height: 1056, presentInterval: 0, width: 1920}\n  UIScaleWindowed: [1, 0.9]\n  WindowMode: [134394192932409075, 1]\n  WindowedSettings:\n  - 134394192932409075\n  - {adapter: 0, height: 1024, left: -7, presentInterval: 0, showState: 0, top: 0,\n    width: 1918}\n  antiAliasing: [1, 0]\ngeneric: {}\n";
 

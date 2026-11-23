@@ -97,17 +97,28 @@ fn grid_size(app: &AppHandle) -> (bool, u32, u32) {
 static OUTLINES: Mutex<Vec<(Spot, String, bool)>> = Mutex::new(Vec::new());
 /// Whether the grid lines are drawn (snap mode) and whether the layer is wanted at all.
 static LAYER: Mutex<(bool, bool)> = Mutex::new((false, false));
+/// 23 Nov: Place clients' window zones (columns x rows of each monitor), drawn in their own style.
+static ZONES: Mutex<Option<(u32, u32)>> = Mutex::new(None);
+
+/// Show window zones on the layer (None hides them).
+pub fn set_zones(app: &AppHandle, zones: Option<(u32, u32)>) {
+    *ZONES.lock().unwrap() = zones;
+    let grid = LAYER.lock().unwrap().0;
+    let any = !OUTLINES.lock().unwrap().is_empty() || zones.is_some();
+    *LAYER.lock().unwrap() = (grid, grid || any);
+    sync_layer(app);
+}
 
 /// Show or hide the grid (snap mode while arranging).
 pub fn show_grid(app: &AppHandle, on: bool) {
-    let placing = !OUTLINES.lock().unwrap().is_empty();
+    let placing = !OUTLINES.lock().unwrap().is_empty() || ZONES.lock().unwrap().is_some();
     *LAYER.lock().unwrap() = (on, on || placing);
     sync_layer(app);
 }
 
 /// Place clients: the other clients' outlines (empty clears them).
 pub fn set_outlines(app: &AppHandle, outlines: Vec<(Spot, String, bool)>) {
-    let any = !outlines.is_empty();
+    let any = !outlines.is_empty() || ZONES.lock().unwrap().is_some();
     *OUTLINES.lock().unwrap() = outlines;
     let grid = LAYER.lock().unwrap().0;
     *LAYER.lock().unwrap() = (grid, grid || any);
@@ -130,7 +141,8 @@ fn layer_json(app: &AppHandle, mon: Spot) -> serde_json::Value {
             v
         })
         .collect();
-    serde_json::json!({ "grid": grid, "cols": cols, "rows": rows, "outlines": outlines })
+    let zones = *ZONES.lock().unwrap();
+    serde_json::json!({ "grid": grid, "cols": cols, "rows": rows, "outlines": outlines, "zones": zones.map(|(c, r)| [c, r]) })
 }
 
 fn sync_layer(app: &AppHandle) {
@@ -259,14 +271,14 @@ pub fn set_preview_rect(app: &AppHandle, name: &str, r: Spot) {
 }
 
 #[cfg(windows)]
-fn left_button_down() -> bool {
+pub(crate) fn left_button_down() -> bool {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
     // SAFETY: a plain key-state read.
     unsafe { GetAsyncKeyState(VK_LBUTTON as i32) < 0 }
 }
 
 #[cfg(not(windows))]
-fn left_button_down() -> bool {
+pub(crate) fn left_button_down() -> bool {
     false
 }
 

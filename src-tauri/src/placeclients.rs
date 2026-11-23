@@ -11,8 +11,17 @@
 
 use crate::clientwindows::Spot;
 use crate::previewtools::{cell_target, monitor_of, monitors, preview_rect, set_outlines, set_preview_rect};
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+/// EVE's own window sizes (its Display list), and its recommended smallest.
+pub const EVE_SIZES: &[(i32, i32)] = &[
+    (1024, 768), (1152, 864), (1280, 720), (1280, 768), (1280, 800), (1280, 960), (1280, 1024), (1360, 768), (1366, 768), (1440, 900), (1440, 1080),
+    (1600, 900), (1600, 1024), (1600, 1200), (1680, 1050), (1920, 1080), (1920, 1200), (1920, 1440), (2048, 1536), (2560, 1440), (2560, 1600), (3840, 2160),
+];
+pub const EVE_MIN: (i32, i32) = (1024, 768);
 
 const WINDOW: &str = "place";
 
@@ -30,6 +39,10 @@ struct Placing {
     ghosted: Vec<String>,
     /// We turned arranging on for Place previews (turned off again when done).
     edit_on: bool,
+    /// Window zones across x down each monitor (client windows).
+    zones: (u32, u32),
+    /// Window mode picked here per client (true = Fixed Window), saved with its spot.
+    modes: HashMap<String, bool>,
 }
 
 static PLACING: Mutex<Option<Placing>> = Mutex::new(None);
@@ -87,7 +100,8 @@ fn move_to(app: &AppHandle, previews: bool, name: &str, to: Spot) -> bool {
     match handle_of(name) {
         Some(h) => crate::clientwindows::place_window(h, to),
         None if standin_for().as_deref() == Some(name) => {
-            set_standin(app, name, to);
+            let fixed = STANDIN_FIXED.lock().unwrap().unwrap_or(true);
+            set_standin(app, name, to, fixed);
             true
         }
         None => false,
@@ -98,6 +112,8 @@ fn move_to(app: &AppHandle, previews: bool, name: &str, to: Spot) -> bool {
 
 const STANDIN: &str = "standin";
 static STANDIN_FOR: Mutex<Option<String>> = Mutex::new(None);
+/// The window mode the stand-in shows now.
+static STANDIN_FIXED: Mutex<Option<bool>> = Mutex::new(None);
 
 fn standin_for() -> Option<String> {
     STANDIN_FOR.lock().unwrap().clone()
@@ -108,14 +124,19 @@ fn standin_rect(app: &AppHandle) -> Option<Spot> {
 }
 
 /// Show the stand-in frame for `name` at `at` (built the first time).
-fn set_standin(app: &AppHandle, name: &str, at: Spot) {
+/// (`fixed`: its window mode, shown on the frame.) Never called with PLACING locked by the caller
+/// unless `fixed` comes from that lock.
+fn set_standin(app: &AppHandle, name: &str, at: Spot, fixed: bool) {
     *STANDIN_FOR.lock().unwrap() = Some(name.to_string());
+    *SI_IGNORE.lock().unwrap() = Some(Instant::now() + Duration::from_millis(400));
+    *STANDIN_FIXED.lock().unwrap() = Some(fixed);
     let arg = serde_json::json!(name);
     if let Some(w) = app.get_webview_window(STANDIN) {
         let _ = w.set_position(tauri::PhysicalPosition::new(at.x, at.y));
         let _ = w.set_size(tauri::PhysicalSize::new(at.w.max(200) as u32, at.h.max(120) as u32));
-        let _ = w.eval(format!("window.__standin && window.__standin({arg});"));
+        let _ = w.eval(format!("window.__standin && window.__standin({arg}); window.__standinMode && window.__standinMode({fixed});"));
         let _ = w.show();
+        raise_place(app);
         return;
     }
     let app2 = app.clone();
@@ -137,11 +158,26 @@ fn set_standin(app: &AppHandle, name: &str, at: Spot) {
                 crate::clientbar::tool_window(&w);
                 let _ = w.set_position(tauri::PhysicalPosition::new(at.x, at.y));
                 let _ = w.set_size(tauri::PhysicalSize::new(at.w.max(200) as u32, at.h.max(120) as u32));
+                let _ = w.eval(format!("window.__standinMode && window.__standinMode({fixed});"));
+                w.on_window_event(|event| {
+                    if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_)) {
+                        standin_changed();
+                    }
+                });
                 let _ = w.show();
+                crate::mainthread::run(raise_place);
             }
             Err(e) => log::warn!("couldn't open the stand-in frame: {e}"),
         }
     });
+}
+
+/// Keep the Place clients window above the stand-in and the layer.
+fn raise_place(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(WINDOW) {
+        let _ = w.set_always_on_top(false);
+        let _ = w.set_always_on_top(true);
+    }
 }
 
 fn hide_standin(app: &AppHandle) {
@@ -257,12 +293,24 @@ fn apply(app: &AppHandle, st: &mut Placing) {
         hide_standin(app);
     } else {
         let at = spot_for_closed(app, &list, st.index, &current);
-        set_standin(app, &current, at);
+        let fixed = mode_of(app, st, &current);
+        set_standin(app, &current, at, fixed);
     }
     if st.previews && app.get_webview_window(&crate::previews::label_for(&current)).is_none() {
-        // Its client isn't open: open its preview (empty) so it can be put where it goes.
+        // Its client isn't open: open its preview (empty) so it can be put where it goes; one
+        // never placed goes just right of the previous one (not Windows' default corner).
+        let next_to = if crate::previews::prefs_for(app, &current).x.is_none() && st.index > 0 {
+            rect_of(app, true, &list[st.index - 1]).map(|r| Spot { x: r.x + r.w + 6, ..r })
+        } else {
+            None
+        };
         let (app2, name) = (app.clone(), current.clone());
-        tauri::async_runtime::spawn(async move { crate::previews::build_preview(&app2, &name) });
+        tauri::async_runtime::spawn(async move {
+            crate::previews::build_preview(&app2, &name);
+            if let Some(to) = next_to {
+                crate::mainthread::run(move |app| set_preview_rect(app, &name, to));
+            }
+        });
     }
     if st.previews {
         for name in list.iter().filter(|n| **n != current) {
@@ -302,10 +350,11 @@ fn apply(app: &AppHandle, st: &mut Placing) {
             let _ = w.set_focus();
         }
     }
-    draw_outlines(app, st.previews, &list, &current);
+    draw_outlines(app, st.previews, st.zones, &list, &current);
 }
 
-fn draw_outlines(app: &AppHandle, previews: bool, list: &[String], current: &str) {
+fn draw_outlines(app: &AppHandle, previews: bool, zones: (u32, u32), list: &[String], current: &str) {
+    crate::previewtools::set_zones(app, if previews { None } else { Some(zones) });
     let open = open_map();
     let outlines: Vec<(Spot, String, bool)> = list
         .iter()
@@ -337,7 +386,7 @@ pub fn place_clients_open(app: AppHandle, previews: Option<bool>) {
         if let Some(st) = guard.as_mut() {
             put_back(&app, st, None);
         }
-        *guard = Some(Placing { previews, others: "outline".into(), ..Placing::default() });
+        *guard = Some(Placing { previews, others: "outline".into(), zones: (2, 2), ..Placing::default() });
     }
     if previews && !crate::previews::edit_mode(&app) {
         let _ = crate::previews::set_preview_edit(app.clone(), true);
@@ -391,6 +440,7 @@ fn done(app: &AppHandle) {
         }
     }
     hide_standin(app);
+    crate::previewtools::set_zones(app, None);
     set_outlines(app, Vec::new());
     log::info!("Place clients closed: everything put back");
 }
@@ -404,7 +454,7 @@ pub fn place_state(app: AppHandle) -> serde_json::Value {
     let index = st.index.min(list.len().saturating_sub(1));
     let current = list.get(index).cloned();
     if let Some(c) = &current {
-        draw_outlines(&app, st.previews, &list, c);
+        draw_outlines(&app, st.previews, st.zones, &list, c);
     }
     let remembered: Vec<bool> = list
         .iter()
@@ -418,7 +468,7 @@ pub fn place_state(app: AppHandle) -> serde_json::Value {
         "previews": st.previews,
         "names": list,
         "remembered": remembered,
-        "open": open,
+        "isOpen": open,
         "standin": current.as_deref().is_some_and(|c| standin_for().as_deref() == Some(c)),
         "index": index,
         "current": current,
@@ -426,7 +476,227 @@ pub fn place_state(app: AppHandle) -> serde_json::Value {
         "others": st.others,
         "grid": [cols, rows],
         "snapOn": snap_on,
+        "zones": [st.zones.0, st.zones.1],
+        "fixed": current.as_deref().map(|c| mode_of(&app, st, c)),
+        "sizes": EVE_SIZES,
+        "min": [EVE_MIN.0, EVE_MIN.1],
+        "monitors": monitors(&app),
+        "profile": current.as_deref().filter(|_| !st.previews).and_then(|c| profile_of_client(&app, c)).map(|(p, shared)| serde_json::json!({ "name": p, "shared": shared })),
     })
+}
+
+/// The window mode picked for a client (true = Fixed): picked here, else remembered, else
+/// what it is now, else Fixed.
+fn mode_of(app: &AppHandle, st: &Placing, name: &str) -> bool {
+    st.modes
+        .get(name)
+        .copied()
+        .or_else(|| crate::clientwindows::fixed_of(app, name))
+        .or_else(|| handle_of(name).map(|h| !crate::clientwindows::captioned_window(h)))
+        .unwrap_or(true)
+}
+
+/// The settings profile a client starts with (its account's own, else the one it last started
+/// with, else its number from Your accounts) and how many other EVE accounts use that folder.
+fn profile_of_client(app: &AppHandle, name: &str) -> Option<(String, usize)> {
+    let seat = crate::launch::load_seat(app);
+    let mut accounts: Vec<&crate::launch::SeatAccount> = seat.accounts.iter().collect();
+    accounts.sort_by_key(|a| crate::launch::nickname_key(&a.nickname));
+    let acct = match name.strip_prefix("Login ").and_then(|n| n.parse::<usize>().ok()) {
+        Some(n) => accounts.get(n.checked_sub(1)?).copied(),
+        None => accounts.iter().find(|a| a.characters.iter().any(|c| c.name == name)).copied(),
+    }?;
+    let infos = crate::pcaccounts::infos(app);
+    let info = acct.launcher_user_id.and_then(|u| infos.get(&u));
+    let profile = info
+        .and_then(crate::pcaccounts::own_profile)
+        .or_else(|| info.and_then(|i| i.profile.clone()))
+        .or_else(|| acct.profile.clone().filter(|p| !p.trim().is_empty()))?;
+    let root = crate::profiles::root().ok()?;
+    if !root.join(format!("settings_{profile}")).is_dir() {
+        return None;
+    }
+    let shared = crate::pcaccounts::folders().into_iter().find(|f| f.profile == profile).map(|f| f.users.len().saturating_sub(1)).unwrap_or(0);
+    Some((profile, shared))
+}
+
+/// Write a client's window into its profile's core_public__.yaml: Fixed Window and its size,
+/// or Window mode with its spot. A snapshot of the profile is taken first.
+fn write_window(profile: &str, fixed: bool, spot: Spot) -> Result<String, String> {
+    let root = crate::profiles::root()?;
+    let path = root.join(format!("settings_{profile}")).join("core_public__.yaml");
+    let text = std::fs::read_to_string(&path).map_err(|_| format!("settings_{profile} has no core_public__.yaml yet: start a client with it once."))?;
+    let snap = crate::snapshots::auto_snapshot(profile, "before Place clients set its window")?;
+    let stamp = crate::tuning::file_time_now();
+    let text = crate::windowfix::set_window_mode(&text, if fixed { 2 } else { 1 }, stamp);
+    let text = if fixed {
+        crate::windowfix::set_block_values(&text, "FixedWindowSettings", &[("width", spot.w as i64), ("height", spot.h as i64)], stamp)
+    } else {
+        crate::windowfix::set_block_values(&text, "WindowedSettings", &[("width", spot.w as i64), ("height", spot.h as i64), ("left", spot.x as i64), ("top", spot.y as i64), ("showState", 0)], stamp)
+    };
+    std::fs::write(&path, text).map_err(|e| format!("couldn't write settings_{profile}: {e}"))?;
+    log::info!("Place clients: settings_{profile} set to {} {}x{} (snapshot {snap})", if fixed { "Fixed Window" } else { "Window mode" }, spot.w, spot.h);
+    Ok(snap)
+}
+
+/// The one being placed: its name, whether it's a preview, and its spot.
+fn current(app: &AppHandle) -> Result<(String, bool, Spot), String> {
+    let (previews, index) = {
+        let guard = PLACING.lock().unwrap();
+        let st = guard.as_ref().ok_or("Place clients isn't open.")?;
+        (st.previews, st.index)
+    };
+    let list = names(app, previews);
+    let name = list.get(index).cloned().ok_or("Nothing to place.")?;
+    let here = rect_of(app, previews, &name).ok_or("Can't find that window yet (a moment after opening, try again).")?;
+    Ok((name, previews, here))
+}
+
+fn below_min(s: Spot) -> String {
+    if s.w < EVE_MIN.0 || s.h < EVE_MIN.1 {
+        format!(" Smaller than EVE's recommended {} x {}.", EVE_MIN.0, EVE_MIN.1)
+    } else {
+        String::new()
+    }
+}
+
+/// Resize the one being placed: to `w` x `h`, or by `dw` / `dh`, keeping its top-left.
+#[tauri::command]
+pub fn place_size(app: AppHandle, w: Option<i32>, h: Option<i32>, dw: Option<i32>, dh: Option<i32>) -> Result<String, String> {
+    let (name, previews, here) = current(&app)?;
+    let to = Spot { w: w.unwrap_or(here.w + dw.unwrap_or(0)).max(80), h: h.unwrap_or(here.h + dh.unwrap_or(0)).max(45), ..here };
+    if !move_to(&app, previews, &name, to) {
+        return Err(format!("{name} is open in Fixed Window mode: its size comes from its profile. Close it and size its stand-in instead."));
+    }
+    Ok(format!("{} x {}.{}", to.w, to.h, if previews { String::new() } else { below_min(to) }))
+}
+
+/// Window mode (false) or Fixed Window (true) for the one being placed (saved with its spot).
+#[tauri::command]
+pub fn place_mode(app: AppHandle, fixed: bool) -> Result<String, String> {
+    let (name, _, _) = current(&app)?;
+    if let Some(st) = PLACING.lock().unwrap().as_mut() {
+        st.modes.insert(name.clone(), fixed);
+    }
+    if standin_for().as_deref() == Some(name.as_str()) {
+        *STANDIN_FIXED.lock().unwrap() = Some(fixed);
+    }
+    if let Some(w) = app.get_webview_window(STANDIN) {
+        let _ = w.eval(format!("window.__standinMode && window.__standinMode({fixed});"));
+    }
+    Ok(format!("{name}: {} (saved with its spot).", if fixed { "Fixed Window, no title bar" } else { "Window mode, with a title bar" }))
+}
+
+/// The window zones (columns x rows of each monitor).
+#[tauri::command]
+pub fn place_zones(app: AppHandle, cols: u32, rows: u32) {
+    if let Some(st) = PLACING.lock().unwrap().as_mut() {
+        st.zones = (cols.clamp(1, 6), rows.clamp(1, 6));
+    }
+    let _ = place_state(app);
+}
+
+/// Fill one zone of a monitor with the one being placed (a Fixed Window client keeps its size
+/// and goes to the zone's top-left).
+#[tauri::command]
+pub fn place_zone(app: AppHandle, monitor: usize, col: u32, row: u32) -> Result<String, String> {
+    let (name, previews, here) = current(&app)?;
+    let zones = PLACING.lock().unwrap().as_ref().map(|st| st.zones).unwrap_or((2, 2));
+    let mon = *monitors(&app).get(monitor).ok_or("That monitor isn't there.")?;
+    let (cw, ch) = (mon.w as f64 / zones.0 as f64, mon.h as f64 / zones.1 as f64);
+    let x0 = mon.x + (col as f64 * cw).round() as i32;
+    let y0 = mon.y + (row as f64 * ch).round() as i32;
+    let x1 = mon.x + ((col + 1) as f64 * cw).round() as i32;
+    let y1 = mon.y + ((row + 1) as f64 * ch).round() as i32;
+    let mut to = Spot { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    if !previews && handle_of(&name).is_some_and(|h| !crate::clientwindows::captioned_window(h)) {
+        to.w = here.w;
+        to.h = here.h;
+    }
+    move_to(&app, previews, &name, to);
+    Ok(format!("{name}: {} x {} at {}, {}.{}", to.w, to.h, to.x, to.y, if previews { String::new() } else { below_min(to) }))
+}
+
+/// Put the one being placed flush in a corner, against a side, or in the middle of its monitor
+/// ("nw", "n", "ne", "w", "c", "e", "sw", "s", "se"), keeping its size.
+#[tauri::command]
+pub fn place_align(app: AppHandle, to: String) -> Result<String, String> {
+    let (name, previews, here) = current(&app)?;
+    let mons = monitors(&app);
+    let mon = monitor_of(&mons, here).and_then(|i| mons.get(i).copied()).ok_or("No monitor found.")?;
+    let x = match to.as_str() {
+        "nw" | "w" | "sw" => mon.x,
+        "ne" | "e" | "se" => mon.x + mon.w - here.w,
+        _ => mon.x + (mon.w - here.w) / 2,
+    };
+    let y = match to.as_str() {
+        "nw" | "n" | "ne" => mon.y,
+        "sw" | "s" | "se" => mon.y + mon.h - here.h,
+        _ => mon.y + (mon.h - here.h) / 2,
+    };
+    move_to(&app, previews, &name, Spot { x, y, ..here });
+    Ok(String::new())
+}
+
+/// Edges within this many pixels of a monitor edge, its middle or a zone line stick to it.
+const MAGNET: i32 = 40;
+
+/// Pull a frame's edges onto the nearest monitor edge, middle line or zone line close by.
+fn magnet(app: &AppHandle, r: Spot, zones: (u32, u32)) -> Spot {
+    let mons = monitors(app);
+    let Some(mon) = monitor_of(&mons, r).and_then(|i| mons.get(i).copied()) else { return r };
+    let mut xs = vec![mon.x, mon.x + mon.w, mon.x + mon.w / 2];
+    let mut ys = vec![mon.y, mon.y + mon.h, mon.y + mon.h / 2];
+    for c in 1..zones.0 {
+        xs.push(mon.x + (mon.w as f64 * c as f64 / zones.0 as f64).round() as i32);
+    }
+    for c in 1..zones.1 {
+        ys.push(mon.y + (mon.h as f64 * c as f64 / zones.1 as f64).round() as i32);
+    }
+    let best = |pos: i32, size: i32, lines: &[i32]| -> i32 {
+        let mut pick = (MAGNET + 1, pos);
+        for &l in lines {
+            for cand in [l, l - size] {
+                let d = (cand - pos).abs();
+                if d < pick.0 {
+                    pick = (d, cand);
+                }
+            }
+        }
+        pick.1
+    };
+    Spot { x: best(r.x, r.w, &xs), y: best(r.y, r.h, &ys), ..r }
+}
+
+static SI_LAST: Mutex<Option<Instant>> = Mutex::new(None);
+static SI_IGNORE: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// The stand-in was moved or resized by hand: once let go, its edges stick to close lines.
+fn standin_changed() {
+    if SI_IGNORE.lock().unwrap().is_some_and(|until| Instant::now() < until) {
+        return;
+    }
+    let fresh = SI_LAST.lock().unwrap().replace(Instant::now()).is_none();
+    if fresh {
+        std::thread::spawn(|| loop {
+            std::thread::sleep(Duration::from_millis(120));
+            let last = *SI_LAST.lock().unwrap();
+            let Some(last) = last else { return };
+            if last.elapsed() >= Duration::from_millis(150) && !crate::previewtools::left_button_down() {
+                *SI_LAST.lock().unwrap() = None;
+                crate::mainthread::run(|app| {
+                    let zones = PLACING.lock().unwrap().as_ref().map(|st| st.zones).unwrap_or((2, 2));
+                    let (Some(name), Some(r)) = (standin_for(), standin_rect(app)) else { return };
+                    let to = magnet(app, r, zones);
+                    if to != r {
+                        let fixed = STANDIN_FIXED.lock().unwrap().unwrap_or(true);
+                        set_standin(app, &name, to, fixed);
+                    }
+                });
+                return;
+            }
+        });
+    }
 }
 
 /// Go to client number `index` (wraps round).
@@ -519,13 +789,55 @@ pub fn place_action(app: AppHandle, action: String, step: Option<i32>) -> Result
             if previews {
                 return Ok(format!("{current}'s preview spot is saved ({} x {}).", here.w, here.h));
             }
+            // A client writes its settings when it closes, and the launcher reads profiles when
+            // it starts: saving a client's window needs every EVE client and the launcher closed.
+            crate::pcaccounts::require_eve_closed()?;
+            let fixed = PLACING.lock().unwrap().as_ref().map(|st| mode_of(&app, st, &current)).unwrap_or(true);
             crate::clientwindows::remember_one(&app, &current, here);
-            format!("Saved: {current} goes to {}, {} ({} x {}) when it starts.", here.x, here.y, here.w, here.h)
+            crate::clientwindows::note_mode(&app, &current, fixed);
+            let mode = if fixed { "Fixed Window" } else { "Window mode" };
+            let yaml = match profile_of_client(&app, &current) {
+                Some((profile, shared)) => match write_window(&profile, fixed, here) {
+                    Ok(_) => format!(
+                        " settings_{profile} now opens in {mode} at {} x {}{}.",
+                        here.w,
+                        here.h,
+                        if shared > 0 { format!(" (shared with {shared} other EVE account{}: they get it too)", if shared == 1 { "" } else { "s" }) } else { String::new() }
+                    ),
+                    Err(e) => format!(" Its profile wasn't changed: {e}"),
+                },
+                None => " Its settings profile isn't known on this PC yet, so only the app's spot is saved.".into(),
+            };
+            format!("Saved {current}: {}, {} ({} x {}).{yaml}{}", here.x, here.y, here.w, here.h, below_min(here))
+        }
+        "reset" => {
+            if previews {
+                crate::previews::with_layout(&app, |l| {
+                    if let Some(p) = l.clients.get_mut(&current) {
+                        p.x = None;
+                        p.y = None;
+                        p.w = None;
+                        p.h = None;
+                    }
+                });
+                let m = monitors(&app).first().copied().unwrap_or(Spot { x: 0, y: 0, w: 1920, h: 1080 });
+                set_preview_rect(&app, &current, Spot { x: m.x + m.w / 2 - 160, y: m.y + m.h / 2 - 100, w: 320, h: 200 });
+                format!("{current}'s preview is back to the middle at 320 x 200.")
+            } else {
+                crate::clientwindows::forget_one(&app, &current);
+                if standin_for().as_deref() == Some(current.as_str()) {
+                    let m = monitors(&app).first().copied().unwrap_or(Spot { x: 0, y: 0, w: 1920, h: 1080 });
+                    let fixed = STANDIN_FIXED.lock().unwrap().unwrap_or(true);
+                    set_standin(&app, &current, Spot { x: m.x + (m.w - 1280) / 2, y: m.y + (m.h - 720) / 2, w: 1280, h: 720 }, fixed);
+                }
+                format!("{current}'s saved spot is forgotten (its profile's window settings stay as they are).")
+            }
         }
         "save" => {
             if previews {
                 return Ok("Preview spots save by themselves.".into());
             }
+            crate::pcaccounts::require_eve_closed()?;
             let mut saved = 0;
             for n in &list {
                 if let Some(r) = rect_of(&app, false, n) {
