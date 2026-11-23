@@ -18,7 +18,9 @@ const MANIFESTS: &str = "https://raw.githubusercontent.com/tsawind/devils-rage-a
 /// The app's folders (Tauri's: Roaming for settings, Local for logs, recordings and the browser data).
 const APP_ID: &str = "com.tsawind.devilsrage";
 /// The app's program names (the installer's and the build's), and Client Tools (20 Nov).
-const APP_EXES: [&str; 4] = ["Devils Rage.exe", "devils-rage-app.exe", "devils-rage-client-tools.exe", "Devils Rage Client Tools.exe"];
+const APP_EXES: [&str; 5] = ["Devils Rage.exe", "devils-rage-app.exe", "devils-peepshow.exe", "devils-rage-client-tools.exe", "Devils Rage Client Tools.exe"];
+/// Devil's Peepshow's folders (22 Nov: its own program, installed with the app).
+const PEEPSHOW_ID: &str = "com.tsawind.peepshow";
 
 fn main() {
     if let Some(code) = run_from_temp() {
@@ -31,7 +33,7 @@ fn main() {
         println!("  2  Install the newest stable build (keeps your settings)");
         println!("  3  Clean install: put the app's settings aside (backed up), then install the newest dev build");
         println!("  4  Collect logs for a bug report (zip on your Desktop, sign-in tokens masked)");
-        println!("  5  Close stuck Devil's Rage programs");
+        println!("  5  Close stuck Devil's Rage programs (the app and Devil's Peepshow)");
         println!("  Q  Quit\n");
         let choice = ask("Pick one: ");
         let result = match choice.trim().to_ascii_lowercase().as_str() {
@@ -147,7 +149,7 @@ fn install(channel: &str, quiet_check: bool) -> Result<String, String> {
 
 /// Move the app's settings folders aside (never deleted), then install the newest dev build.
 fn clean_install() -> Result<String, String> {
-    println!("This signs you out of SeAT and the mapper in the app and resets its settings, client spots and layouts.");
+    println!("This signs you out of SeAT and the mapper in the app and resets its settings, and Devil's Peepshow's client bars, spots and previews.");
     println!("Nothing is deleted: the old folders move to a backup folder you can copy back.");
     if ask("Type CLEAN to go ahead: ") != "CLEAN" {
         return Ok("Nothing changed.".into());
@@ -156,13 +158,18 @@ fn clean_install() -> Result<String, String> {
     let backup = backup_root().ok_or("couldn't find your Documents folder")?;
     let stamp = stamp();
     let mut moved = Vec::new();
-    for (name, base) in [("Roaming", env_dir("APPDATA")), ("Local", env_dir("LOCALAPPDATA"))] {
+    for (id, who, name, base) in [
+        (APP_ID, "", "Roaming", env_dir("APPDATA")),
+        (APP_ID, "", "Local", env_dir("LOCALAPPDATA")),
+        (PEEPSHOW_ID, "Peepshow ", "Roaming", env_dir("APPDATA")),
+        (PEEPSHOW_ID, "Peepshow ", "Local", env_dir("LOCALAPPDATA")),
+    ] {
         let Some(base) = base else { continue };
-        let from = base.join(APP_ID);
+        let from = base.join(id);
         if !from.is_dir() {
             continue;
         }
-        let to = backup.join(format!("{stamp} {name}"));
+        let to = backup.join(format!("{stamp} {who}{name}"));
         std::fs::create_dir_all(&backup).map_err(|e| e.to_string())?;
         move_dir(&from, &to)?;
         moved.push(to.display().to_string());
@@ -245,7 +252,10 @@ fn collect_logs() -> Result<String, String> {
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let mut count = 0;
-    if let Ok(entries) = std::fs::read_dir(&logs) {
+    // The app's logs and Devil's Peepshow's (peepshow.log).
+    let peepshow_logs = env_dir("LOCALAPPDATA").map(|d| d.join(PEEPSHOW_ID).join("logs"));
+    for dir in std::iter::once(logs).chain(peepshow_logs) {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
         for entry in entries.flatten() {
             if let Ok(text) = std::fs::read(entry.path()) {
                 let _ = std::fs::write(work.join(entry.file_name()), mask(&String::from_utf8_lossy(&text)));
