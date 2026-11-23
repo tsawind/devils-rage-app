@@ -48,6 +48,10 @@
   .prof .m { color: var(--muted); }
   .prof input, .prof select { background: #101014; border: 1px solid #34343c; border-radius: 6px; padding: 2px 6px; color: inherit; font: inherit; font-size: 12.5px; }
   .prof input { width: 90px; }
+  .profbox { display: flex; flex-direction: column; gap: 5px; }
+  .pnote { font-size: 12px; color: var(--muted); }
+  .pnote.good { color: #7ee08f; }
+  .pnote.bad { color: #ff8a8e; }
   .acts { display: flex; gap: 8px; flex-wrap: wrap; }
   h2 { font-size: 14px; margin: 22px 0 8px; color: #cfcfd5; }
   .note { color: var(--muted); font-size: 12px; }
@@ -140,62 +144,95 @@
     return el;
   }
 
-  // The account's own settings profile (one-time setup; Change / Forget after).
+  // The last answer for each account's profile row; it stays on the card until the next one.
+  const notes = new Map();
+
+  // The account's own settings profile (one-time setup; Change after).
   function profileRow(acct, user) {
+    const box = document.createElement("div");
+    box.className = "profbox";
     const row = document.createElement("div");
     row.className = "prof";
+    box.appendChild(row);
     if (!user) {
       row.innerHTML = `<span class="m">Not started on this PC yet: its EVE login and settings profile show here once one of its characters has run here.</span>`;
-      return row;
+      return box;
+    }
+    const note = notes.get(String(user));
+    if (note) {
+      const n = document.createElement("div");
+      n.className = "pnote " + (note.bad ? "bad" : "good");
+      n.textContent = note.text;
+      box.appendChild(n);
     }
     const info = pc?.info?.[String(user)] || {};
-    const folders = pc?.folders || {};
     const own = info.own;
     if (own) {
       row.innerHTML = `Settings profile: <b>settings_${esc(own)}</b> <span class="m">(its own)</span>`;
-      const forget = document.createElement("button");
-      forget.className = "b small"; forget.textContent = "Change";
-      forget.title = "Pick or make a different profile for this account";
-      forget.addEventListener("click", () => act(user, { forget: true }, "Pick its profile again below."));
-      row.appendChild(forget);
-      return row;
+      const change = document.createElement("button");
+      change.className = "b small"; change.textContent = "Change";
+      change.title = "Pick or make a different profile for this account";
+      change.addEventListener("click", () => act(user, { forget: true }));
+      row.appendChild(change);
+      return box;
     }
     const started = info.profile;
-    const alone = started && (folders[started] || []).length === 1 && String((folders[started] || [])[0]) === String(user);
+    const users = (pc?.folders?.[started] || []).map(String);
+    const times = pc?.folder_times?.[started] || {};
+    const mine = times[String(user)] || 0;
+    // Other EVE accounts with a file in that folder: an old leftover copy, or really in use too.
+    const others = users.filter(u => u !== String(user)).map(u => {
+      const at = times[u] || 0;
+      const who = pc?.info?.[u]?.login || `EVE account ${u}`;
+      const stale = !at || (mine && mine - at > 30 * 86400000) || Date.now() - at > 90 * 86400000;
+      return { who, at, stale };
+    });
     row.innerHTML = `<span class="m">Its own settings profile:</span>`;
-    if (alone) {
+    if (started) {
       const use = document.createElement("button");
       use.className = "b small main"; use.textContent = `Use settings_${started}`;
-      use.title = `settings_${started} only holds this account's files: make it this account's own`;
+      use.title = `It starts with settings_${started} now: make that its own`;
       use.addEventListener("click", () => act(user, { existing: started }));
       row.appendChild(use);
-      const or = document.createElement("span"); or.className = "m"; or.textContent = "or";
+      const or = document.createElement("span"); or.className = "m"; or.textContent = "or make a new one:";
       row.appendChild(or);
-    } else if (started) {
-      const m = document.createElement("span"); m.className = "m";
-      m.textContent = `(last started with settings_${started}${(folders[started] || []).length > 1 ? `, shared with ${(folders[started] || []).length - 1} other account(s)` : ""})`;
-      row.appendChild(m);
     }
+    const taken = new Set(Object.keys(pc?.folders || {}).map(p => p.toLowerCase()));
+    const guess = [info.login, acct.nickname, acct.profile && "acct" + acct.profile].map(safeName).find(n => n && !taken.has(n.toLowerCase())) || "";
     const name = document.createElement("input");
-    name.value = safeName(acct.profile || acct.nickname);
-    name.title = "The new profile's name (settings_<name>)";
+    name.value = guess;
+    name.placeholder = "name";
+    name.title = "The new profile's name (settings_<name>); it can't be one that's already there";
     const from = document.createElement("select");
     const choices = [...new Set([started, "Default"].filter(Boolean))];
     from.innerHTML = choices.map(p => `<option value="${esc(p)}">copy settings_${esc(p)}</option>`).join("") + `<option value="fresh">start empty</option>`;
     const make = document.createElement("button");
-    make.className = "b small"; make.textContent = "Make its own";
+    make.className = "b small"; make.textContent = "Make it";
     make.addEventListener("click", () => {
       const n = safeName(name.value);
-      if (!n) { toast("Give it a name (letters, numbers, - or _)."); return; }
+      if (!n) { notes.set(String(user), { bad: true, text: "Give the new profile a name (letters, numbers, - or _)." }); draw(); return; }
+      if (taken.has(n.toLowerCase())) { notes.set(String(user), { bad: true, text: `settings_${n} is already there: use it with the button, or pick a new name.` }); draw(); return; }
       act(user, { name: n, from: from.value });
     });
     row.append(name, from, make);
-    return row;
+    if (started && others.length) {
+      const m = document.createElement("div");
+      m.className = "pnote";
+      const stale = others.every(o => o.stale);
+      m.textContent = stale
+        ? `settings_${started} also has an old file from ${others.map(o => `${o.who}${o.at ? ` (last written ${when(o.at)})` : ""}`).join(", ")}: a leftover copy, not in use. Using settings_${started} is fine.`
+        : `${others.map(o => o.who).join(", ")} ${others.length === 1 ? "uses" : "use"} settings_${started} too (last ${when(Math.max(...others.map(o => o.at)))}). Fine if that's on purpose; otherwise make this account its own.`;
+      box.appendChild(m);
+    }
+    return box;
   }
 
-  async function act(user, args, after) {
-    try { toast(await invoke("pc_account_profile", { user, ...args })); } catch (e) { toast(String(e)); }
-    if (after) setTimeout(() => toast(after), 4300);
+  async function act(user, args) {
+    try {
+      notes.set(String(user), { bad: false, text: await invoke("pc_account_profile", { user, ...args }) });
+    } catch (e) {
+      notes.set(String(user), { bad: true, text: String(e) });
+    }
     load();
   }
 

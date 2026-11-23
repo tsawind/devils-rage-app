@@ -181,8 +181,12 @@ pub async fn pc_detail(app: &AppHandle) -> serde_json::Value {
         .collect();
     detail["info"] = serde_json::Value::Object(info);
     // Which EVE accounts' files each profile folder holds (one = it's that account's own already).
-    let folders: serde_json::Map<String, serde_json::Value> = crate::pcaccounts::folders().into_iter().map(|f| (f.profile, serde_json::json!(f.users))).collect();
+    let found = crate::pcaccounts::folders();
+    let folders: serde_json::Map<String, serde_json::Value> = found.iter().map(|f| (f.profile.clone(), serde_json::json!(f.users))).collect();
     detail["folders"] = serde_json::Value::Object(folders);
+    // And when each account's file in it was last written (an old stray copy isn't really sharing).
+    let times: serde_json::Map<String, serde_json::Value> = found.into_iter().map(|f| (f.profile, serde_json::json!(f.user_times))).collect();
+    detail["folder_times"] = serde_json::Value::Object(times);
     detail["seen"] = serde_json::Value::Array(seen.iter().map(|(name, user)| serde_json::json!({ "name": name, "user_id": user })).collect());
     // Every other character with settings on this PC that no account list has.
     let placed: std::collections::BTreeSet<u64> = detail["accounts"].as_array().into_iter().flatten().flat_map(|a| a["characters"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_u64())).collect();

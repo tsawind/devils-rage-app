@@ -18,6 +18,9 @@ pub struct Folder {
     pub users: BTreeSet<u64>,
     /// Character id → when its file was last written (ms).
     pub chars: BTreeMap<u64, u64>,
+    /// EVE account number → when its user file here was last written (ms): an old copy left
+    /// from copying folders around looks "shared" but hasn't been used in years.
+    pub user_times: BTreeMap<u64, u64>,
 }
 
 /// How a character was placed.
@@ -118,6 +121,7 @@ pub fn folders() -> Vec<Folder> {
                 }
                 crate::profiles::Kind::User => {
                     folder.users.insert(entry.id);
+                    folder.user_times.insert(entry.id, entry.modified);
                 }
             }
         }
@@ -141,7 +145,7 @@ mod tests {
     }
 
     fn folder(profile: &str, users: &[u64], chars: &[u64]) -> Folder {
-        Folder { profile: profile.into(), users: users.iter().copied().collect(), chars: chars.iter().map(|c| (*c, 1)).collect() }
+        Folder { profile: profile.into(), users: users.iter().copied().collect(), chars: chars.iter().map(|c| (*c, 1)).collect(), ..Folder::default() }
     }
 
     #[test]
