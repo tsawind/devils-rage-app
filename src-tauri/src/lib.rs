@@ -1005,7 +1005,16 @@ fn new_window_handler(
                     if let Some(user) = url.query_pairs().find(|(k, _)| k == "user").and_then(|(_, v)| v.parse::<u64>().ok()) {
                         let arg = |k: &str| url.query_pairs().find(|(q, _)| q == k).map(|(_, v)| v.chars().take(40).collect::<String>());
                         let (name, from) = (arg("name"), arg("from"));
-                        let said = if url.query_pairs().any(|(k, v)| k == "forget" && v == "1") {
+                        let folder_do = arg("folder");
+                        let said = if let (Some(what), Some(profile)) = (folder_do.as_deref(), arg("profile")) {
+                            // 23 Nov: archive / delete a whole profile folder from Your accounts
+                            // (every EVE client and the launcher closed; delete keeps a snapshot).
+                            match what {
+                                "archive" => snapshots::profile_folder_archive(profile),
+                                "delete" => snapshots::profile_folder_delete(profile),
+                                _ => Err("Unknown folder action.".into()),
+                            }
+                        } else if url.query_pairs().any(|(k, v)| k == "forget" && v == "1") {
                             pcaccounts::set_own(&app, user, "")
                         } else if let Some(existing) = arg("use") {
                             pcaccounts::set_own(&app, user, &existing)
