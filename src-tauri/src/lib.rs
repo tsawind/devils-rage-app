@@ -367,7 +367,30 @@ pub fn bar_action(app: &AppHandle, action: &str) {
 /// Devil's Peepshow (peepshow/src/main.rs, with its own config: its own identifier and folders).
 pub fn run_peepshow(context: tauri::Context<tauri::Wry>) {
     clienttools::set_on();
+    own_taskbar_identity("Tsawind.DevilsPeepshow");
     run(context)
+}
+
+/// 23 Nov: Peepshow's own identity on the taskbar, so Windows shows its own (DP) icon and never
+/// files its windows under the Devils app's button or an old cached icon.
+fn own_taskbar_identity(id: &str) {
+    #[cfg(windows)]
+    {
+        #[link(name = "shell32")]
+        extern "system" {
+            fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
+        }
+        let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: a NUL-terminated UTF-16 string that outlives the call.
+        let hr = unsafe { SetCurrentProcessExplicitAppUserModelID(wide.as_ptr()) };
+        if hr < 0 {
+            log::warn!("couldn't set the taskbar identity ({hr:#x})");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+    }
 }
 
 /// The Devils app (src/main.rs), or Peepshow when `run_peepshow` set it.

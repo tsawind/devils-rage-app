@@ -134,7 +134,8 @@ fn set_standin(app: &AppHandle, name: &str, at: Spot, fixed: bool) {
     if let Some(w) = app.get_webview_window(STANDIN) {
         let _ = w.set_position(tauri::PhysicalPosition::new(at.x, at.y));
         let _ = w.set_size(tauri::PhysicalSize::new(at.w.max(200) as u32, at.h.max(120) as u32));
-        let _ = w.eval(format!("window.__standin && window.__standin({arg}); window.__standinMode && window.__standinMode({fixed});"));
+        let frame = serde_json::json!(eve_frame());
+        let _ = w.eval(format!("window.__standin && window.__standin({arg}); window.__standinMode && window.__standinMode({fixed}, {frame});"));
         let _ = w.show();
         raise_place(app);
         return;
@@ -158,7 +159,7 @@ fn set_standin(app: &AppHandle, name: &str, at: Spot, fixed: bool) {
                 crate::clientbar::tool_window(&w);
                 let _ = w.set_position(tauri::PhysicalPosition::new(at.x, at.y));
                 let _ = w.set_size(tauri::PhysicalSize::new(at.w.max(200) as u32, at.h.max(120) as u32));
-                let _ = w.eval(format!("window.__standinMode && window.__standinMode({fixed});"));
+                let _ = w.eval(format!("window.__standinMode && window.__standinMode({fixed}, {});", serde_json::json!(eve_frame())));
                 w.on_window_event(|event| {
                     if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_)) {
                         standin_changed();
@@ -243,6 +244,35 @@ mod win {
         // SAFETY: as above.
         unsafe { ShowWindow(handle as HWND, SW_SHOWNOACTIVATE) };
     }
+
+    /// A window's frame (left, top, right, bottom): outer rectangle minus its inside.
+    pub fn frame_of(handle: isize) -> Option<(i32, i32, i32, i32)> {
+        use windows_sys::Win32::Foundation::{POINT, RECT};
+        use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
+        // SAFETY: rectangle reads on a top-level window handle.
+        unsafe {
+            let hwnd = handle as HWND;
+            let (mut outer, mut inner): (RECT, RECT) = (std::mem::zeroed(), std::mem::zeroed());
+            if GetWindowRect(hwnd, &mut outer) == 0 || GetClientRect(hwnd, &mut inner) == 0 {
+                return None;
+            }
+            let mut origin = POINT { x: 0, y: 0 };
+            ClientToScreen(hwnd, &mut origin);
+            let f = (origin.x - outer.left, origin.y - outer.top, outer.right - (origin.x + inner.right), outer.bottom - (origin.y + inner.bottom));
+            (f.1 > 0).then_some(f)
+        }
+    }
+
+    /// A normal window's frame for this PC's scale (title bar and borders).
+    pub fn frame_default() -> (i32, i32, i32, i32) {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{AdjustWindowRectEx, WS_OVERLAPPEDWINDOW};
+        let mut r = RECT { left: 0, top: 0, right: 1000, bottom: 1000 };
+        // SAFETY: a plain calculation.
+        unsafe { AdjustWindowRectEx(&mut r, WS_OVERLAPPEDWINDOW, 0, 0) };
+        (-r.left, -r.top, r.right - 1000, r.bottom - 1000)
+    }
 }
 
 #[cfg(not(windows))]
@@ -255,6 +285,32 @@ mod win {
         false
     }
     pub fn unminimise(_h: isize) {}
+    pub fn frame_of(_h: isize) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
+    pub fn frame_default() -> (i32, i32, i32, i32) {
+        (8, 31, 8, 8)
+    }
+}
+
+/// 23 Nov: the title bar and borders of an EVE window in Window mode (left, top, right, bottom):
+/// measured on an open one, else what Windows gives a normal window here. EVE's "Window Size"
+/// is the inside; the stand-in and the app's spots are the outside.
+pub fn eve_frame() -> (i32, i32, i32, i32) {
+    crate::clipboard::open_clients()
+        .into_iter()
+        .filter(|(_, h)| crate::clientwindows::captioned_window(*h))
+        .find_map(|(_, h)| win::frame_of(h))
+        .unwrap_or_else(win::frame_default)
+}
+
+/// The size EVE shows for a window spot: the inside in Window mode, all of it in Fixed.
+fn eve_size(spot: Spot, fixed: bool) -> (i32, i32) {
+    if fixed {
+        return (spot.w, spot.h);
+    }
+    let (l, t, r, b) = eve_frame();
+    (spot.w - l - r, spot.h - t - b)
 }
 
 /// Put back everything we faded, minimised or ghosted.
@@ -478,6 +534,8 @@ pub fn place_state(app: AppHandle) -> serde_json::Value {
         "snapOn": snap_on,
         "zones": [st.zones.0, st.zones.1],
         "fixed": current.as_deref().map(|c| mode_of(&app, st, c)),
+        "eveSize": current.as_deref().and_then(|c| rect_of(&app, st.previews, c).map(|r| eve_size(r, mode_of(&app, st, c)))),
+        "frame": eve_frame(),
         "sizes": EVE_SIZES,
         "min": [EVE_MIN.0, EVE_MIN.1],
         "monitors": monitors(&app),
@@ -532,10 +590,13 @@ fn write_window(profile: &str, fixed: bool, spot: Spot) -> Result<String, String
     let text = if fixed {
         crate::windowfix::set_block_values(&text, "FixedWindowSettings", &[("width", spot.w as i64), ("height", spot.h as i64)], stamp)
     } else {
-        crate::windowfix::set_block_values(&text, "WindowedSettings", &[("width", spot.w as i64), ("height", spot.h as i64), ("left", spot.x as i64), ("top", spot.y as i64), ("showState", 0)], stamp)
+        // EVE's WindowedSettings: width / height are the inside, left / top the outside's corner.
+        let (w, h) = eve_size(spot, false);
+        crate::windowfix::set_block_values(&text, "WindowedSettings", &[("width", w as i64), ("height", h as i64), ("left", spot.x as i64), ("top", spot.y as i64), ("showState", 0)], stamp)
     };
     std::fs::write(&path, text).map_err(|e| format!("couldn't write settings_{profile}: {e}"))?;
-    log::info!("Place clients: settings_{profile} set to {} {}x{} (snapshot {snap})", if fixed { "Fixed Window" } else { "Window mode" }, spot.w, spot.h);
+    let (w, h) = eve_size(spot, fixed);
+    log::info!("Place clients: settings_{profile} set to {} {w}x{h} (snapshot {snap})", if fixed { "Fixed Window" } else { "Window mode" });
     Ok(snap)
 }
 
@@ -552,8 +613,9 @@ fn current(app: &AppHandle) -> Result<(String, bool, Spot), String> {
     Ok((name, previews, here))
 }
 
-fn below_min(s: Spot) -> String {
-    if s.w < EVE_MIN.0 || s.h < EVE_MIN.1 {
+fn below_min(s: Spot, fixed: bool) -> String {
+    let (w, h) = eve_size(s, fixed);
+    if w < EVE_MIN.0 || h < EVE_MIN.1 {
         format!(" Smaller than EVE's recommended {} x {}.", EVE_MIN.0, EVE_MIN.1)
     } else {
         String::new()
@@ -564,11 +626,23 @@ fn below_min(s: Spot) -> String {
 #[tauri::command]
 pub fn place_size(app: AppHandle, w: Option<i32>, h: Option<i32>, dw: Option<i32>, dh: Option<i32>) -> Result<String, String> {
     let (name, previews, here) = current(&app)?;
-    let to = Spot { w: w.unwrap_or(here.w + dw.unwrap_or(0)).max(80), h: h.unwrap_or(here.h + dh.unwrap_or(0)).max(45), ..here };
+    let fixed = PLACING.lock().unwrap().as_ref().map(|st| mode_of(&app, st, &name)).unwrap_or(true);
+    // A size picked (EVE's list) is EVE's Window Size: in Window mode its title bar and borders
+    // go round it.
+    let (fl, ft, fr, fb) = if previews || fixed { (0, 0, 0, 0) } else { eve_frame() };
+    let to = Spot {
+        w: w.map(|w| w + fl + fr).unwrap_or(here.w + dw.unwrap_or(0)).max(80),
+        h: h.map(|h| h + ft + fb).unwrap_or(here.h + dh.unwrap_or(0)).max(45),
+        ..here
+    };
     if !move_to(&app, previews, &name, to) {
         return Err(format!("{name} is open in Fixed Window mode: its size comes from its profile. Close it and size its stand-in instead."));
     }
-    Ok(format!("{} x {}.{}", to.w, to.h, if previews { String::new() } else { below_min(to) }))
+    if previews {
+        return Ok(format!("{} x {}.", to.w, to.h));
+    }
+    let (ew, eh) = eve_size(to, fixed);
+    Ok(format!("EVE window size {ew} x {eh}{}.{}", if fixed { String::new() } else { format!(" ({} x {} with its title bar and borders)", to.w, to.h) }, below_min(to, fixed)))
 }
 
 /// Window mode (false) or Fixed Window (true) for the one being placed (saved with its spot).
@@ -582,7 +656,7 @@ pub fn place_mode(app: AppHandle, fixed: bool) -> Result<String, String> {
         *STANDIN_FIXED.lock().unwrap() = Some(fixed);
     }
     if let Some(w) = app.get_webview_window(STANDIN) {
-        let _ = w.eval(format!("window.__standinMode && window.__standinMode({fixed});"));
+        let _ = w.eval(format!("window.__standinMode && window.__standinMode({fixed}, {});", serde_json::json!(eve_frame())));
     }
     Ok(format!("{name}: {} (saved with its spot).", if fixed { "Fixed Window, no title bar" } else { "Window mode, with a title bar" }))
 }
@@ -614,7 +688,7 @@ pub fn place_zone(app: AppHandle, monitor: usize, col: u32, row: u32) -> Result<
         to.h = here.h;
     }
     move_to(&app, previews, &name, to);
-    Ok(format!("{name}: {} x {} at {}, {}.{}", to.w, to.h, to.x, to.y, if previews { String::new() } else { below_min(to) }))
+    Ok(format!("{name}: {} x {} at {}, {}.{}", to.w, to.h, to.x, to.y, if previews { String::new() } else { below_min(to, PLACING.lock().unwrap().as_ref().map(|st| mode_of(&app, st, &name)).unwrap_or(true)) }))
 }
 
 /// Put the one being placed flush in a corner, against a side, or in the middle of its monitor
@@ -800,15 +874,16 @@ pub fn place_action(app: AppHandle, action: String, step: Option<i32>) -> Result
                 Some((profile, shared)) => match write_window(&profile, fixed, here) {
                     Ok(_) => format!(
                         " settings_{profile} now opens in {mode} at {} x {}{}.",
-                        here.w,
-                        here.h,
+                        eve_size(here, fixed).0,
+                        eve_size(here, fixed).1,
                         if shared > 0 { format!(" (shared with {shared} other EVE account{}: they get it too)", if shared == 1 { "" } else { "s" }) } else { String::new() }
                     ),
                     Err(e) => format!(" Its profile wasn't changed: {e}"),
                 },
                 None => " Its settings profile isn't known on this PC yet, so only the app's spot is saved.".into(),
             };
-            format!("Saved {current}: {}, {} ({} x {}).{yaml}{}", here.x, here.y, here.w, here.h, below_min(here))
+            let (ew, eh) = eve_size(here, fixed);
+            format!("Saved {current}: {}, {}, EVE window size {ew} x {eh}.{yaml}{}", here.x, here.y, below_min(here, fixed))
         }
         "reset" => {
             if previews {

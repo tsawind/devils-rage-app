@@ -31,13 +31,22 @@
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   window.__standin = (name) => { document.getElementById("name").textContent = name; size(); };
+  // 23 Nov: EVE's "Window Size" is the inside in Window mode (title bar and borders go round it).
+  let fixed = true, frame = [0, 0, 0, 0];
   const size = () => {
     const d = window.devicePixelRatio || 1;
     const w = Math.round(window.innerWidth * d), h = Math.round(window.innerHeight * d);
-    document.getElementById("size").textContent = `${w} × ${h}`;
-    document.getElementById("frame").classList.toggle("small", w < 1024 || h < 768);
+    const ew = fixed ? w : w - frame[0] - frame[2], eh = fixed ? h : h - frame[1] - frame[3];
+    document.getElementById("size").textContent = fixed
+      ? `EVE window size ${ew} × ${eh}`
+      : `EVE window size ${ew} × ${eh} · with title bar and borders ${w} × ${h} (+${frame[0] + frame[2]} × +${frame[1] + frame[3]})`;
+    document.getElementById("frame").classList.toggle("small", ew < 1024 || eh < 768);
   };
-  window.__standinMode = (fixed) => { document.getElementById("mode").textContent = fixed ? "Fixed Window (no title bar)" : "Window mode (title bar)"; };
+  window.__standinMode = (f, fr) => {
+    fixed = !!f; if (Array.isArray(fr)) frame = fr;
+    document.getElementById("mode").textContent = fixed ? "Fixed Window (no title bar)" : "Window mode (title bar)";
+    size();
+  };
   window.addEventListener("resize", size);
   for (const el of document.querySelectorAll(".edge")) {
     el.addEventListener("mousedown", (e) => {

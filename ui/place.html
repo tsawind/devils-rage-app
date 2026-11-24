@@ -69,7 +69,7 @@
       <span class="muted" id="profile"></span>
     </div>
     <div class="row"><span class="lab">Size</span>
-      <select id="preset" title="EVE's own window sizes"></select>
+      <select id="preset" title="EVE's own window sizes: EVE's Window Size (in Window mode the title bar and borders are added round it)"></select>
       <span class="muted">W</span><button class="btn" data-dw="-10" title="Narrower (Shift: 1 px)">−</button><button class="btn" data-dw="10" title="Wider (Shift: 1 px)">+</button>
       <span class="muted">H</span><button class="btn" data-dh="-10" title="Shorter (Shift: 1 px)">−</button><button class="btn" data-dh="10" title="Taller (Shift: 1 px)">+</button>
       <span id="sizeNow" class="muted"></span>
@@ -173,8 +173,13 @@
     $("zones").value = st.zones.join(",");
     const r = st.rect;
     $("rect").textContent = r ? `${r.x}, ${r.y}` : "";
-    const small = r && clients && (r.w < st.min[0] || r.h < st.min[1]);
-    $("sizeNow").innerHTML = r ? `${r.w} × ${r.h}${small ? ` <span class="warn">below EVE's ${st.min[0]} × ${st.min[1]}</span>` : ""}` : "";
+    const ev = st.eveSize;
+    const small = ev && clients && (ev[0] < st.min[0] || ev[1] < st.min[1]);
+    const fr = st.frame || [0, 0, 0, 0];
+    $("sizeNow").innerHTML = r && ev ? (st.fixed
+      ? `EVE window size <b>${ev[0]} × ${ev[1]}</b>`
+      : `EVE window size <b>${ev[0]} × ${ev[1]}</b> · ${r.w} × ${r.h} with its title bar (+${fr[1] + fr[3]}) and borders (+${fr[0] + fr[2]})`)
+      + (small ? ` <span class="warn">below EVE's ${st.min[0]} × ${st.min[1]}</span>` : "") : (r ? `${r.w} × ${r.h}` : "");
     $("tip").textContent = st.standin
       ? `${st.current} isn't open: drag the green frame or use the buttons above (its edges stick to the monitor's edges, middle and zones), then Save this spot.`
       : st.previews ? "Previews: drag the green-framed one where it goes; it saves by itself. Not-open clients get an empty preview to place."
