@@ -130,7 +130,7 @@ fn set_standin(app: &AppHandle, name: &str, at: Spot, fixed: bool) {
     *STANDIN_FOR.lock().unwrap() = Some(name.to_string());
     *SI_IGNORE.lock().unwrap() = Some(Instant::now() + Duration::from_millis(400));
     *STANDIN_FIXED.lock().unwrap() = Some(fixed);
-    let arg = serde_json::json!(name);
+    let arg = standin_info(app, name);
     if let Some(w) = app.get_webview_window(STANDIN) {
         let _ = w.set_position(tauri::PhysicalPosition::new(at.x, at.y));
         let _ = w.set_size(tauri::PhysicalSize::new(at.w.max(200) as u32, at.h.max(120) as u32));
@@ -171,6 +171,31 @@ fn set_standin(app: &AppHandle, name: &str, at: Spot, fixed: bool) {
             Err(e) => log::warn!("couldn't open the stand-in frame: {e}"),
         }
     });
+}
+
+/// 23 Nov: what the stand-in draws, so it looks like that EVE client: a login screen names its
+/// account and shows its characters; a character shows its name and portrait.
+fn standin_info(app: &AppHandle, name: &str) -> serde_json::Value {
+    let seat = crate::launch::load_seat(app);
+    let mut accounts: Vec<&crate::launch::SeatAccount> = seat.accounts.iter().collect();
+    accounts.sort_by_key(|a| crate::launch::nickname_key(&a.nickname));
+    let login_no = name.strip_prefix("Login ").and_then(|n| n.parse::<usize>().ok());
+    let acct = match login_no {
+        Some(n) => n.checked_sub(1).and_then(|i| accounts.get(i).copied()),
+        None => accounts.iter().find(|a| a.characters.iter().any(|c| c.name == name)).copied(),
+    };
+    let infos = crate::pcaccounts::infos(app);
+    let login = acct.and_then(|a| a.launcher_user_id).and_then(|u| infos.get(&u)).and_then(|i| i.login.clone());
+    let chars: Vec<serde_json::Value> = acct.map(|a| a.characters.iter().map(|c| serde_json::json!({ "id": c.id, "name": c.name })).collect()).unwrap_or_default();
+    let id = acct.and_then(|a| a.characters.iter().find(|c| c.name == name)).map(|c| c.id);
+    serde_json::json!({
+        "name": name,
+        "login": login_no.is_some(),
+        "account": acct.map(|a| a.nickname.clone()),
+        "eveLogin": login,
+        "chars": chars,
+        "id": id,
+    })
 }
 
 /// Keep the Place clients window above the stand-in and the layer.
@@ -451,6 +476,7 @@ pub fn place_clients_open(app: AppHandle, previews: Option<bool>) {
         }
     }
     if let Some(w) = app.get_webview_window(WINDOW) {
+        let _ = w.set_title(if previews { "Preview setup" } else { "Client setup" });
         let _ = w.eval("window.__reload && window.__reload();");
         let _ = w.show();
         let _ = w.set_focus();
@@ -460,7 +486,7 @@ pub fn place_clients_open(app: AppHandle, previews: Option<bool>) {
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
         let built = WebviewWindowBuilder::new(&app2, WINDOW, WebviewUrl::App("place.html".into()))
-            .title("Place clients")
+            .title(if previews { "Preview setup" } else { "Client setup" })
             .inner_size(560.0, 760.0)
             .min_inner_size(420.0, 420.0)
             .always_on_top(true)

@@ -60,7 +60,7 @@
 </head>
 <body>
 <header>
-  <span class="logo">DR</span>
+  <span class="logo" id="logo">DR</span>
   <h1>Setups</h1>
   <span class="badge">look only · changes nothing</span>
   <span class="grow"></span>
@@ -104,6 +104,8 @@
 
 <script src="presets.js"></script>
 <script>
+  // 23 Nov: Peepshow's own mark when this page is shown in Peepshow.
+  if (window.__PEEPSHOW__) { const l = document.getElementById("logo"); l.textContent = "DP"; l.style.borderColor = "#ff40aa"; l.style.color = "#ff40aa"; }
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -187,7 +189,9 @@
     if (s.mode === 2) return `Fixed window ${s.fixed_width ?? "?"}×${s.fixed_height ?? "?"}`;
     if (s.mode === 0) return "Fullscreen";
     if (s.left == null) return "Window, no spot saved yet";
-    return `Window ${s.width}×${s.height} at ${s.left}, ${s.top}`;
+    // 23 Nov: EVE stores the window's corner with Windows' invisible 7 px border, so a window
+    // flush with a screen's left edge reads -7. Show where it really sits.
+    return `Window ${s.width}×${s.height} at ${s.left + 7}, ${s.top}`;
   }
 
   function renderSpots() {
@@ -204,7 +208,7 @@
       const s = g.seat;
       if (!s) return null;
       if (s.mode === 2 && s.fixed_width) return { i, x: 0, y: 0, w: s.fixed_width, h: s.fixed_height, g };
-      if (s.mode === 1 && s.left != null) return { i, x: s.left, y: s.top, w: s.width, h: s.height, g };
+      if (s.mode === 1 && s.left != null) return { i, x: s.left + 7, y: s.top, w: s.width, h: s.height, g };
       return null;
     }).filter(Boolean);
     if (rects.length) {

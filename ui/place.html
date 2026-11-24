@@ -52,9 +52,7 @@
     <h1 id="title">…</h1>
     <button class="btn" id="next" title="Next (Page Down)">▶</button>
   </div>
-  <div class="row"><span class="lab">Placing</span>
-    <span class="seg" id="kind"><button data-k="0">Client windows</button><button data-k="1">Previews</button></span>
-    <span class="lab" style="margin-left:8px">Others</span>
+  <div class="row"><span class="lab">Others</span>
     <span class="seg" id="others">
       <button data-o="outline" title="Leave them be; their frames and names show on top">Outline</button>
       <button data-o="fade" title="Fade the other open clients to 10% (test: if one goes black, pick another option)">Fade</button>
@@ -157,7 +155,7 @@
     $("title").innerHTML = "";
     $("title").append(st.current || "Nothing to place");
     const sm = document.createElement("small"); sm.textContent = n ? `  ${st.index + 1} of ${n}` : ""; $("title").append(sm);
-    for (const b of $("kind").children) b.classList.toggle("on", (b.dataset.k === "1") === !!st.previews);
+    document.title = st.previews ? "Preview setup" : "Client setup";
     for (const b of $("others").children) b.classList.toggle("on", b.dataset.o === st.others);
     const clients = !st.previews;
     $("cw").hidden = !clients; $("closedNote").hidden = !clients;
@@ -208,7 +206,6 @@
   const go = (i) => invoke("place_go", { index: i }).then(() => { say(""); load(); }).catch(() => {});
   $("prev").addEventListener("click", () => go((st?.index ?? 0) - 1));
   $("next").addEventListener("click", () => go((st?.index ?? 0) + 1));
-  for (const b of $("kind").children) b.addEventListener("click", () => run(invoke("place_kind", { previews: b.dataset.k === "1" })));
   for (const b of $("others").children) b.addEventListener("click", () => run(invoke("place_others", { mode: b.dataset.o })));
   for (const b of $("mode").children) b.addEventListener("click", () => run(invoke("place_mode", { fixed: b.dataset.f === "1" })));
   for (const b of document.querySelectorAll("[data-a]")) b.addEventListener("click", () => run(invoke("place_action", { action: b.dataset.a, step: null })));

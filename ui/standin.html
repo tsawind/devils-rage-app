@@ -4,20 +4,56 @@
 <meta charset="utf-8">
 <title>Stand-in</title>
 <style>
-  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; font: 14px "Segoe UI", system-ui, sans-serif; color: #fff; }
-  #frame { position: fixed; inset: 0; border: 3px solid #adff2f; background: #adff2f12; box-sizing: border-box; border-radius: 4px; cursor: move;
-           display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-shadow: 0 1px 3px #000; }
-  #frame b { font-size: 20px; }
-  #frame.small { border-color: #ff5a5a; background: #ff5a5a14; }
-  #warn { color: #ff8a8a; font-weight: 700; display: none; }
-  #frame.small #warn { display: block; }
-  #mode { color: #3ad0ff; font-weight: 600; }
-  #frame small { color: #ffd6ec; }
-  .edge { position: fixed; z-index: 2; }
-  .edge.n { top: 0; left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
-  .edge.s { bottom: 0; left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
-  .edge.w { left: 0; top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
-  .edge.e { right: 0; top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
+  /* 23 Nov: a stand-in that looks like the EVE client it stands for: a login screen (its account,
+     its characters) or a logged-in character (its name and portrait), in Window mode (a Windows
+     title bar) or Fixed Window (no title bar, our client bar on top). */
+  html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; font: 13px "Segoe UI", system-ui, sans-serif; color: #e6e6ea; background: transparent; }
+  #win { position: fixed; inset: 0; display: flex; flex-direction: column; border: 2px solid #adff2f; box-sizing: border-box; background: #05070a; }
+  #title { display: none; align-items: center; gap: 8px; background: #f3f3f3; color: #111; font-size: 12px; padding: 0 0 0 10px; flex: none; }
+  #win.windowed #title { display: flex; }
+  #title .ic { width: 14px; height: 14px; background: #111; border-radius: 2px; }
+  #title .tx { flex: 1; }
+  #title .wb { width: 44px; text-align: center; font-size: 14px; color: #333; }
+  #scene { position: relative; flex: 1; overflow: hidden;
+           background: radial-gradient(ellipse at 70% 30%, #23324a 0%, #0c121c 45%, #05070a 80%); }
+  /* Our client bar (Fixed Window clients have no title bar). */
+  #bar { position: absolute; top: 0; right: 120px; display: none; gap: 10px; align-items: center; background: #1b1b21ee; border: 1px solid #3a3a42;
+         border-top: 0; border-radius: 0 0 8px 8px; padding: 3px 10px; font-size: 13px; color: #c9c9d0; }
+  #win.fixed #bar { display: flex; }
+  #bar .mv { color: #adff2f; } #bar .cam { color: #b388ff; }
+  /* Logged in: Neocom on the left, the character's box top right. */
+  #neo { position: absolute; left: 0; top: 0; bottom: 0; width: 34px; background: #0b0e13cc; border-right: 1px solid #1d2430; display: none; flex-direction: column; gap: 8px; padding-top: 10px; align-items: center; }
+  #neo i { width: 18px; height: 18px; border: 1px solid #3a4658; border-radius: 3px; }
+  #who { position: absolute; top: 12px; right: 14px; display: none; gap: 10px; align-items: center; background: #0b0e13d9; border: 1px solid #2a3444; padding: 6px 10px 6px 6px; }
+  #who img { width: 56px; height: 56px; background: #1b2230; }
+  #who b { display: block; font-size: 15px; letter-spacing: .5px; }
+  #who small { color: #8fa3bf; }
+  #scene.char #neo, #scene.char #who { display: flex; }
+  #win.fixed #who { top: 34px; }
+  /* Login screen: EVE wordmark, the account, its characters. */
+  #login { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  #scene.login #login { display: flex; }
+  #login .logo { font-size: 34px; font-weight: 800; letter-spacing: 14px; color: #f2f2f2; }
+  #login .acct { color: #f0c040; font-size: 15px; letter-spacing: .5px; }
+  #cards { display: flex; gap: 12px; }
+  .card { width: 120px; background: #0b0e13e6; border: 1px solid #2a3444; text-align: center; padding-bottom: 6px; }
+  .card img { width: 120px; height: 120px; display: block; background: #1b2230; }
+  .card span { display: block; padding-top: 5px; font-size: 12px; letter-spacing: .5px; }
+  .card.empty { opacity: .35; height: 150px; }
+  /* What's being placed, its size, and how to move it. */
+  #info { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: #000c; border: 1px solid #adff2f; border-radius: 8px;
+          padding: 6px 12px; text-align: center; white-space: nowrap; }
+  #info b { color: #adff2f; font-size: 15px; }
+  #info .mode { color: #3ad0ff; }
+  #info .warn { color: #ff7a7a; font-weight: 700; display: none; }
+  #win.small { border-color: #ff5a5a; }
+  #win.small #info .warn { display: block; }
+  #drag { position: fixed; inset: 0; z-index: 3; cursor: move; }
+  .edge { position: fixed; z-index: 4; }
+  .edge.n { top: 0; left: 14px; right: 14px; height: 7px; cursor: ns-resize; }
+  .edge.s { bottom: 0; left: 14px; right: 14px; height: 7px; cursor: ns-resize; }
+  .edge.w { left: 0; top: 14px; bottom: 14px; width: 7px; cursor: ew-resize; }
+  .edge.e { right: 0; top: 14px; bottom: 14px; width: 7px; cursor: ew-resize; }
   .edge.nw { left: 0; top: 0; width: 14px; height: 14px; cursor: nwse-resize; }
   .edge.ne { right: 0; top: 0; width: 14px; height: 14px; cursor: nesw-resize; }
   .edge.sw { left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; }
@@ -25,26 +61,65 @@
 </style>
 </head>
 <body>
-<div id="frame" data-tauri-drag-region><b id="name" data-tauri-drag-region>…</b><span id="mode" data-tauri-drag-region></span><small id="size" data-tauri-drag-region></small><span id="warn" data-tauri-drag-region>Smaller than EVE's recommended 1024 × 768</span><small data-tauri-drag-region>not open: drag this frame where its client goes, then Save this spot</small></div>
+<div id="win" class="fixed">
+  <div id="title"><span class="ic"></span><span class="tx" id="titleText">EVE</span><span class="wb">—</span><span class="wb">☐</span><span class="wb">✕</span></div>
+  <div id="scene">
+    <div id="bar"><span>›</span><span>🔒</span><span class="mv">✥</span><span class="cam">▣</span><span>⧉</span><span>⚙</span><span>—</span><span>✕</span></div>
+    <div id="neo"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div id="who"><img id="pic" alt=""><div><b id="whoName"></b><small>Docked</small></div></div>
+    <div id="login"><div class="logo">EVE</div><div class="acct" id="acct"></div><div id="cards"></div></div>
+    <div id="info"><b id="name">…</b> · <span class="mode" id="mode"></span><br><span id="size"></span><span class="warn">Smaller than EVE's recommended 1024 × 768</span><small style="color:#9a9aa2">drag anywhere to move it · pull an edge to resize · then Save this spot</small></div>
+  </div>
+</div>
+<div id="drag" data-tauri-drag-region></div>
 <div class="edge n" data-edge="n"></div><div class="edge s" data-edge="s"></div><div class="edge w" data-edge="w"></div><div class="edge e" data-edge="e"></div>
 <div class="edge nw" data-edge="nw"></div><div class="edge ne" data-edge="ne"></div><div class="edge sw" data-edge="sw"></div><div class="edge se" data-edge="se"></div>
 <script>
   const invoke = (cmd, args) => window.__TAURI_INTERNALS__.invoke(cmd, args);
-  window.__standin = (name) => { document.getElementById("name").textContent = name; size(); };
-  // 23 Nov: EVE's "Window Size" is the inside in Window mode (title bar and borders go round it).
+  const $ = (id) => document.getElementById(id);
+  const portrait = (id, size) => `https://images.evetech.net/characters/${id}/portrait?size=${size}`;
   let fixed = true, frame = [0, 0, 0, 0];
-  const size = () => {
+
+  window.__standin = (info) => {
+    if (typeof info === "string") info = { name: info, login: /^Login \d+$/.test(info), chars: [] };
+    $("name").textContent = info.name;
+    $("scene").className = info.login ? "login" : "char";
+    $("titleText").textContent = info.login ? "EVE" : `EVE - ${info.name}`;
+    if (info.login) {
+      $("acct").textContent = [info.account ? `Account ${info.account}` : info.name, info.eveLogin ? `EVE login ${info.eveLogin}` : ""].filter(Boolean).join(" · ");
+      const cards = $("cards"); cards.innerHTML = "";
+      const chars = (info.chars || []).slice(0, 3);
+      while (chars.length < 3) chars.push(null);
+      for (const c of chars) {
+        const d = document.createElement("div");
+        d.className = "card" + (c ? "" : " empty");
+        if (c) { const img = document.createElement("img"); img.src = portrait(c.id, 128); img.alt = ""; d.append(img); }
+        const s = document.createElement("span"); s.textContent = c ? c.name : "Empty slot"; d.append(s);
+        cards.append(d);
+      }
+    } else {
+      $("whoName").textContent = info.name;
+      if (info.id) $("pic").src = portrait(info.id, 64); else $("pic").removeAttribute("src");
+    }
+    size();
+  };
+
+  // EVE's "Window Size" is the inside in Window mode (the title bar and borders go round it).
+  function size() {
     const d = window.devicePixelRatio || 1;
     const w = Math.round(window.innerWidth * d), h = Math.round(window.innerHeight * d);
     const ew = fixed ? w : w - frame[0] - frame[2], eh = fixed ? h : h - frame[1] - frame[3];
-    document.getElementById("size").textContent = fixed
+    $("size").textContent = fixed
       ? `EVE window size ${ew} × ${eh}`
-      : `EVE window size ${ew} × ${eh} · with title bar and borders ${w} × ${h} (+${frame[0] + frame[2]} × +${frame[1] + frame[3]})`;
-    document.getElementById("frame").classList.toggle("small", ew < 1024 || eh < 768);
-  };
+      : `EVE window size ${ew} × ${eh} · ${w} × ${h} with its title bar and borders`;
+    $("win").classList.toggle("small", ew < 1024 || eh < 768);
+    $("title").style.height = (frame[1] / d) + "px";
+  }
   window.__standinMode = (f, fr) => {
     fixed = !!f; if (Array.isArray(fr)) frame = fr;
-    document.getElementById("mode").textContent = fixed ? "Fixed Window (no title bar)" : "Window mode (title bar)";
+    $("win").classList.toggle("fixed", fixed);
+    $("win").classList.toggle("windowed", !fixed);
+    $("mode").textContent = fixed ? "Fixed Window: no title bar, our client bar on top" : "Window mode: Windows title bar and borders";
     size();
   };
   window.addEventListener("resize", size);

@@ -121,7 +121,7 @@
     </button>
     <button class="site" data-hub="peep">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.2"/><rect x="13" y="4" width="8" height="7" rx="1.2"/><rect x="3" y="13" width="8" height="7" rx="1.2"/><rect x="13" y="13" width="8" height="7" rx="1.2"/></svg>
-      <b>Devil's Peepshow</b><span>Previews, stacks, window arrangement, EVE-O</span>
+      <b>Devil's Peepshow</b><span id="psTileSub">Previews, stacks, window arrangement, EVE-O</span>
     </button>
     <button class="site" data-page="settings.html">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
@@ -235,7 +235,12 @@
     if (h2) h2.textContent = hub === "peep" ? "Devil's Peepshow" : hub === "pi" ? "PI" : "Launch Groups";
     try { history.replaceState(null, "", hub ? "#" + hub : "#"); } catch (e) {}
   }
-  document.querySelectorAll("button.site[data-hub]").forEach(btn => btn.addEventListener("click", () => showHub(document.body.dataset.hub === btn.dataset.hub ? null : btn.dataset.hub)));
+  document.querySelectorAll("button.site[data-hub]").forEach(btn => btn.addEventListener("click", () => {
+    // 23 Nov: Devil's Peepshow is its own program: its tile opens it (its settings live there;
+    // how this app works with it is in Settings).
+    if (btn.dataset.hub === "peep" && document.body.classList.contains("peepshow")) { psOpen(null); return; }
+    showHub(document.body.dataset.hub === btn.dataset.hub ? null : btn.dataset.hub);
+  }));
   document.querySelectorAll("button.site[data-page]").forEach(btn => btn.addEventListener("click", () => { location.href = btn.dataset.page; }));
   if (["#groups", "#peep", "#pi"].includes(location.hash)) showHub(location.hash.slice(1));
   document.querySelectorAll("button.site[data-site]").forEach(btn => {
@@ -274,8 +279,10 @@
   const psShow = () => invoke("peepshow_status").then(st => {
     if (!st || !st.installed) return;
     document.body.classList.add("peepshow");
-    psCard.hidden = false;
     psState.textContent = st.running ? "Running." : "Not running: Open starts it.";
+    const sub = document.getElementById("psTileSub");
+    if (sub) sub.textContent = st.running ? "Its own program: opens Peepshow" : "Its own program: starts Peepshow";
+    if (document.body.dataset.hub === "peep") showHub(null);
   }).catch(() => {});
   psShow();
   const psOpen = async (page) => { try { soon.textContent = await invoke("open_peepshow", { page }); } catch (e) { soon.textContent = String(e); } setTimeout(psShow, 1500); };

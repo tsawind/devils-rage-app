@@ -86,6 +86,18 @@
                   padding: 8px 14px; cursor: pointer; }
   .quick button:hover { border-color: var(--red-hi); }
   .ver { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+  .big { display: grid; grid-template-columns: repeat(2, 300px); gap: 14px; margin: 6px 0 12px; }
+  .bigbtn { background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: var(--text); font: inherit; cursor: pointer;
+            padding: 22px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+  .bigbtn:hover { border-color: #ff40aa; transform: translateY(-1px); }
+  .bigbtn svg { width: 36px; height: 36px; stroke: #ff40aa; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .bigbtn b { font-size: 19px; font-weight: 600; margin-top: 4px; }
+  .bigbtn span { color: var(--muted); font-size: 13px; }
+  .switches { width: 614px; margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; }
+  details.more { width: 614px; margin-top: 12px; }
+  details.more > summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
+  details.more > summary:hover { color: var(--text); }
+  details.more .pcards { margin-top: 8px; }
 </style>
 </head>
 <body data-hub="peep">
@@ -93,54 +105,61 @@
   <div class="logo">DP</div>
   <h1>Devil's Peepshow</h1>
   <p class="ver" id="ver">Previews, client bars, window spots and hotkeys for your EVE clients. Everything stays on this PC.</p>
+  <!-- 23 Nov: two big setups first, the everyday switches, everything else under More options. -->
+  <div class="big">
+    <button class="bigbtn" id="pPlace" title="Step through every preview (open clients and the rest): size, spot, snap and line-up">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="6" rx="1"/><rect x="13" y="4" width="8" height="6" rx="1"/><rect x="3" y="14" width="8" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1"/></svg>
+      <b>Preview setup</b><span>Every preview, one at a time: size, spot, snap, line up</span></button>
+    <button class="bigbtn" id="cwPlaceOne" title="Step through every client (every login and character): Window or Fixed, EVE's size, where it opens; saved into its profile">
+      <svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="14" rx="1.5"/><path d="M2.5 7.5h19M8 21h8"/></svg>
+      <b>Client setup</b><span>Each client's window: Window or Fixed, size and spot, saved into its profile</span></button>
+  </div>
   <div class="quick">
     <button id="qOpen" title="A live preview for each EVE client: click one to bring it to the front">Open previews</button>
-    <button id="qSetups" title="Where each client opens, its keys and overview, compared">Setups</button>
+    <button id="pClose" title="Close every preview (they open again with the next client, or Open previews)">Close previews</button>
+    <button id="qSetups" title="Where each client opens, its keys and overview, compared (look only)">Setups overview</button>
     <button id="qApp" title="The corp's Devils Rage app (mapper, SeAT, cameras)" hidden>Devils Rage app</button>
   </div>
+  <div class="pcard switches">
+    <label title="Open the previews by themselves when EVE clients start"><input type="checkbox" id="pAuto"> Open previews by themselves</label>
+    <label title="Previews for clients still at the login / character-select screen"><input type="checkbox" id="pLogins"> Previews for login screens too</label>
+    <label title="A slim bar on each client: move it, camera, pop-out, minimise, close, its profile in ⚙"><input type="checkbox" id="cbEvery"> A client bar on every client</label>
+    <label title="A client goes back to its spot when it starts or logs in"><input type="checkbox" id="cwAuto"> Put clients back on their spots</label>
+    <label title="Start Peepshow (in the tray, no window) when Windows starts"><input type="checkbox" id="psAuto"> Start Peepshow with Windows</label>
+  </div>
+  <details class="more"><summary>More options</summary>
   <div class="pcards">
     <div class="pcard">
       <h3>Previews</h3>
-      <label title="Open the previews by themselves when EVE clients start"><input type="checkbox" id="pAuto"> Open by themselves</label>
-      <label title="Previews for clients still at the login / character-select screen"><input type="checkbox" id="pLogins"> Login screens too</label>
       <label title="Hide the preview of the client you're looking at; the rest stay"><input type="checkbox" id="pHide"> Hide the one in front</label>
       <label title="A square on every preview: ticked = that client is in the pedal / hotkey cycle. Click the square to take it in or out."><input type="checkbox" id="pGroup"> Hotkey group squares</label>
       <label title="See-through-ness of every preview at once (each client's own opacity still applies)">Opacity <input type="range" id="pOpacity" min="10" max="100" step="5" value="100"> <span id="pOpacityVal">100%</span></label>
       <div class="line" title="Width × height in pixels for every preview">Size <input type="number" id="pW" min="80" max="4000" step="10"> × <input type="number" id="pH" min="45" max="4000" step="10">
         <button id="pSame" title="Make every preview this size (open ones and the saved spots of the rest)">Set</button>
         <button id="pSmaller" title="Every preview 10% smaller">−</button><button id="pBigger" title="Every preview 10% bigger">+</button></div>
+      <label title="While arranging, each monitor shows a grid and a dropped preview fills the cells it's over (grid size: right-click a preview)"><input type="checkbox" id="pSnap"> Snap to a grid while arranging</label>
       <div class="acts">
         <button id="pEdit" title="Arrange previews: drag anywhere, resize from any edge, right-click for settings. Lock when done.">Edit preview layout</button>
         <button id="pSettings" title="Every preview's settings in one place: shown, click-through, opacity, and its exact spot and size">Preview settings…</button>
-        <button id="pClose">Close previews</button>
-        <button id="pPlace" title="Step through the previews one at a time: the others fade, so you can line them up">Place previews…</button>
       </div>
-      <label title="While arranging, each monitor shows a grid and a dropped preview fills the cells it's over (grid size: right-click a preview)"><input type="checkbox" id="pSnap"> Snap mode (a grid while arranging)</label>
-      <div style="font-size:12px;color:#8a8a92">Right-click a preview for its settings, size, snap and line-up.</div>
+      <span>Right-click a preview for its own settings, size, snap and line-up.</span>
     </div>
     <div class="pcard">
       <h3>EVE windows</h3>
-      <label title="A client goes back to where it was when it starts or logs in"><input type="checkbox" id="cwAuto"> Put back by themselves</label>
-      <label title="A client moved off its spot goes straight back (Window mode). Use Arrange windows or the client bar to change spots."><input type="checkbox" id="cwLock"> Lock windows</label>
+      <label title="A client moved off its spot goes straight back (Window mode). Use Client setup or the client bar to change spots."><input type="checkbox" id="cwLock"> Lock windows on their spots</label>
       <div class="acts">
-        <button id="cwArrange" title="For Fixed Window clients: a handle over each client; drag to move its window, pull the corner to resize. Done remembers them.">Arrange windows</button>
-        <button id="cwPlaceOne" title="Step through every client one at a time: the others show as frames (or fade / hide), so a stack lines up exactly on top of each other">Place clients…</button>
-        <details><summary>More</summary>
-          <button id="cwRemember" title="Remember where every logged-in client's window is now">Remember where they are now</button>
-          <button id="cwPlace" title="Move every open client back to its remembered spot">Put them all back now</button>
-        </details>
+        <button id="cwArrange" title="For Fixed Window clients: a handle over each client; drag to move its window, pull the corner to resize. Done remembers them.">Arrange open windows</button>
+        <button id="cwRemember" title="Remember where every logged-in client's window is now">Remember where they are now</button>
+        <button id="cwPlace" title="Move every open client back to its remembered spot">Put them all back now</button>
       </div>
     </div>
     <div class="pcard" id="cbRow">
       <h3 title="A slim bar on each client: move it (snaps to corners, edges and middle lines), camera, pop-out, minimise, close, its profile in ⚙.">Client bars</h3>
-      <label title="A bar on every client, login screens too"><input type="checkbox" id="cbEvery"> On every client</label>
       <div class="line" id="cbList"></div>
       <select id="cbAdd"></select>
     </div>
-  </div>
     <div class="pcard">
       <h3>Devil's Peepshow</h3>
-      <label title="Start Peepshow (in the tray, no window) when Windows starts"><input type="checkbox" id="psAuto"> Start with Windows</label>
       <div class="acts">
         <button id="psUpdates">Check for updates</button>
         <button id="psEveo" title="Bring in EVE-O Preview's settings file: preview spots, sizes and hotkey groups">Import EVE-O Preview…</button>
@@ -148,6 +167,7 @@
       <span>Close this window and Peepshow keeps running in the tray (bottom right). Quit it from there.</span>
     </div>
   </div>
+  </details>
   <p class="soon" id="soon"></p>
 </main>
 
@@ -290,7 +310,7 @@
     try {
       await invoke("set_preview_edit", { on });
       showEdit(on);
-      soon.textContent = on ? "Editing: drag previews, resize from the yellow corner. Small ones: use Preview settings… for their settings. Lock when done." : "Previews locked in place.";
+      soon.textContent = on ? "Editing: drag previews, resize from any edge, right-click one for its settings. Lock when done." : "Previews locked in place.";
     } catch (e) { soon.textContent = String(e); }
   });
   document.getElementById("pClose").addEventListener("click", async () => { await invoke("close_previews").catch(() => {}); showEdit(false); soon.textContent = "Previews closed."; });
