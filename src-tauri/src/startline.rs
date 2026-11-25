@@ -163,8 +163,69 @@ pub fn option_names(line: &str) -> Vec<String> {
     args(line).iter().skip(1).filter_map(|a| key_of(a).map(|(k, _)| k)).filter(|k| k.len() <= 40).collect()
 }
 
+/// A client's start-up line, read straight from Windows (a few milliseconds); PowerShell only
+/// when that fails. 25 Nov: with a dozen clients starting at once, one PowerShell each took 15 s
+/// or more, so their login screens were numbered before we knew their accounts (Login 34+).
 #[cfg(windows)]
 fn read_line(pid: u32) -> Option<String> {
+    native_line(pid).or_else(|| powershell_line(pid))
+}
+
+/// The command line via NtQueryInformationProcess (ProcessCommandLineInformation, Windows 8.1+).
+#[cfg(windows)]
+fn native_line(pid: u32) -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtQueryInformationProcess(process: windows_sys::Win32::Foundation::HANDLE, class: u32, info: *mut core::ffi::c_void, len: u32, ret: *mut u32) -> i32;
+    }
+    const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
+    #[repr(C)]
+    struct UnicodeString {
+        length: u16,
+        _maximum_length: u16,
+        buffer: *const u16,
+    }
+    // SAFETY: opens the process for limited queries only, and closes it below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return None;
+    }
+    let mut out = None;
+    let mut need = 0u32;
+    // SAFETY: a size query with no buffer; Windows writes only `need`.
+    unsafe { NtQueryInformationProcess(process, PROCESS_COMMAND_LINE_INFORMATION, std::ptr::null_mut(), 0, &mut need) };
+    if need >= std::mem::size_of::<UnicodeString>() as u32 && need < 1 << 20 {
+        // u64s keep the buffer aligned for the pointer at its start.
+        let mut buf = vec![0u64; (need as usize).div_ceil(8)];
+        let len = (buf.len() * 8) as u32;
+        // SAFETY: `buf` is `len` bytes; on success it starts with a UNICODE_STRING whose text
+        // lies inside the same buffer.
+        let status = unsafe { NtQueryInformationProcess(process, PROCESS_COMMAND_LINE_INFORMATION, buf.as_mut_ptr().cast(), len, &mut need) };
+        if status >= 0 {
+            // SAFETY: as above; the length is checked against the buffer before reading.
+            let us = unsafe { &*(buf.as_ptr() as *const UnicodeString) };
+            let start = buf.as_ptr() as usize;
+            let text = us.buffer as usize;
+            let chars = us.length as usize / 2;
+            if !us.buffer.is_null() && text >= start && text + chars * 2 <= start + buf.len() * 8 {
+                // SAFETY: the range was just checked to lie inside `buf`.
+                let wide = unsafe { std::slice::from_raw_parts(us.buffer, chars) };
+                let line = String::from_utf16_lossy(wide).trim().to_string();
+                if !line.is_empty() {
+                    out = Some(line);
+                }
+            }
+        }
+    }
+    // SAFETY: the handle opened above.
+    unsafe { CloseHandle(process) };
+    out
+}
+
+#[cfg(windows)]
+fn powershell_line(pid: u32) -> Option<String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let out = std::process::Command::new("powershell.exe")
@@ -256,6 +317,11 @@ pub fn settings_folder_of_window(handle: isize) -> Option<String> {
 
 /// Processes whose start-up line is being read in the background right now.
 static READING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Whether this window's start-up line is still being read in the background.
+pub fn still_reading(handle: isize) -> bool {
+    pid_of(handle).is_some_and(|pid| READING.lock().unwrap().contains(&pid))
+}
 
 /// Like `profile_of_window`, but never waits: `None` while the line is still being read (a
 /// background thread reads it), `Some(profile)` once known. For the 150 ms window loops.

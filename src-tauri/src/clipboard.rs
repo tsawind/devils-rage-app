@@ -401,43 +401,57 @@ fn pick_login_number(user: Option<u64>, profile: Option<&str>, accounts: &[(Opti
     (accounts.len()..).find(|n| !used.contains(n)).unwrap_or(accounts.len())
 }
 
-/// Numbers for these login windows; `None` for one whose account we're still finding out
-/// (left out of the list for up to five seconds, so it doesn't change name a moment later).
+/// Numbers for these login windows; `None` for one whose account we're still finding out (left
+/// out of the list for up to five seconds, so it doesn't change name a moment later). One still
+/// unknown after that gets a stand-in number above the accounts' for now, kept only until its
+/// account is known (25 Nov: those stand-in numbers used to stick, so a dozen clients started at
+/// once came up as Login 34 to 42 on a PC with 33 accounts).
 fn login_numbers(handles: &[isize]) -> Vec<Option<usize>> {
     let accounts = ACCOUNT_LOGINS.lock().unwrap().clone();
     let mut known = LOGIN_NUMBERS.lock().unwrap();
     known.retain(|(handle, _)| handles.contains(handle));
     let mut waiting = WAITING_SINCE.lock().unwrap();
     waiting.retain(|(handle, _)| handles.contains(handle));
-    handles
-        .iter()
-        .map(|handle| {
-            if let Some((_, n)) = known.iter().find(|(h, _)| h == handle) {
-                return Some(*n);
-            }
-            let profile = match crate::startline::known_profile_of_window(*handle) {
-                Some(profile) => profile,
-                None => {
-                    let since = match waiting.iter().find(|(h, _)| h == handle) {
-                        Some((_, t)) => *t,
-                        None => {
-                            waiting.push((*handle, std::time::Instant::now()));
-                            return None;
-                        }
-                    };
-                    if since.elapsed() < PROFILE_WAIT {
-                        return None;
-                    }
-                    None
+    // Settled ones first, so a stand-in number never takes an account's own.
+    let mut out: Vec<Option<usize>> = vec![None; handles.len()];
+    let mut unsettled = Vec::new();
+    for (i, handle) in handles.iter().enumerate() {
+        if let Some((_, n)) = known.iter().find(|(h, _)| h == handle) {
+            out[i] = Some(*n);
+            continue;
+        }
+        match crate::startline::known_profile_of_window(*handle) {
+            Some(profile) => {
+                let used: Vec<usize> = known.iter().map(|(_, n)| *n).collect();
+                let user = crate::startline::known_account_of_window(*handle);
+                let n = pick_login_number(user, profile.as_deref(), &accounts, &used);
+                if n >= accounts.len() {
+                    log::info!("login screen {}: no account of ours ({})", n + 1, if user.is_some() { "its EVE account isn't in Your accounts" } else { "no account in its start-up line" });
                 }
-            };
-            let used: Vec<usize> = known.iter().map(|(_, n)| *n).collect();
-            let user = crate::startline::known_account_of_window(*handle);
-            let n = pick_login_number(user, profile.as_deref(), &accounts, &used);
-            known.push((*handle, n));
-            Some(n)
-        })
-        .collect()
+                known.push((*handle, n));
+                out[i] = Some(n);
+            }
+            None => unsettled.push(i),
+        }
+    }
+    let mut used: Vec<usize> = known.iter().map(|(_, n)| *n).collect();
+    for i in unsettled {
+        let handle = handles[i];
+        let since = match waiting.iter().find(|(h, _)| *h == handle) {
+            Some((_, t)) => *t,
+            None => {
+                waiting.push((handle, std::time::Instant::now()));
+                continue;
+            }
+        };
+        if since.elapsed() < PROFILE_WAIT {
+            continue;
+        }
+        let n = (accounts.len()..).find(|n| !used.contains(n)).unwrap_or(accounts.len());
+        used.push(n);
+        out[i] = Some(n);
+    }
+    out
 }
 
 /// Whether this is an account's own login screen ("Login 1" … up to the number of accounts):
