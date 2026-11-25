@@ -223,6 +223,8 @@ pub fn note_running(app: &tauri::AppHandle) {
             }
             let _ = std::fs::write(path, text);
         }
+        // A character just told us its EVE account: login screens of that account get its number.
+        crate::launch::load_account_logins(app);
     }
 }
 

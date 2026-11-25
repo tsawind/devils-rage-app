@@ -266,6 +266,18 @@ pub fn profile_of_window(handle: isize) -> Option<String> {
     let line = read_line(pid);
     if line.is_some() {
         READABLE.lock().unwrap().get_or_insert_with(std::collections::HashSet::new).insert(pid);
+        RETRIES.lock().unwrap().retain(|(p, _, _)| *p != pid);
+    } else {
+        // 25 Nov: a client that has only just started sometimes can't be read yet; try again a
+        // few times before settling on "no line" (it used to settle at once).
+        let mut retries = RETRIES.lock().unwrap();
+        let tries = retries.iter().find(|(p, _, _)| *p == pid).map_or(0, |(_, _, n)| *n);
+        if tries < READ_TRIES {
+            retries.retain(|(p, _, _)| *p != pid);
+            retries.push((pid, std::time::Instant::now(), tries + 1));
+            return None;
+        }
+        log::info!("EVE client {pid}: start-up line couldn't be read");
     }
     let profile = line.and_then(|line| {
         log::info!("EVE client {pid} start-up options (names only): {}", option_names(&line).join(" "));
@@ -315,6 +327,11 @@ pub fn settings_folder_of_window(handle: isize) -> Option<String> {
     }
 }
 
+/// Processes whose start-up line couldn't be read yet: when it was last tried, and how often.
+static RETRIES: Mutex<Vec<(u32, std::time::Instant, u32)>> = Mutex::new(Vec::new());
+const READ_TRIES: u32 = 8;
+const READ_AGAIN: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Processes whose start-up line is being read in the background right now.
 static READING: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
@@ -329,6 +346,9 @@ pub fn known_profile_of_window(handle: isize) -> Option<Option<String>> {
     let Some(pid) = pid_of(handle) else { return Some(None) };
     if let Some(hit) = CACHE.lock().unwrap().as_ref().and_then(|c| c.get(&pid).cloned()) {
         return Some(hit);
+    }
+    if RETRIES.lock().unwrap().iter().any(|(p, at, _)| *p == pid && at.elapsed() < READ_AGAIN) {
+        return None;
     }
     let mut reading = READING.lock().unwrap();
     if !reading.contains(&pid) {

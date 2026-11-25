@@ -376,9 +376,35 @@ static WAITING_SINCE: Mutex<Vec<(isize, std::time::Instant)>> = Mutex::new(Vec::
 /// How long a new login screen may stay out of the list while we find out its account.
 const PROFILE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The SeAT account id of each entry in `ACCOUNT_LOGINS` (same order).
+static ACCOUNT_IDS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+
 /// Set the accounts' profiles in Your accounts order (on start-up and after every SeAT sync).
-pub fn set_account_logins(accounts: Vec<(Option<String>, Option<u64>)>) {
+pub fn set_account_logins(accounts: Vec<(Option<String>, Option<u64>)>, ids: Vec<u64>) {
     *ACCOUNT_LOGINS.lock().unwrap() = accounts;
+    *ACCOUNT_IDS.lock().unwrap() = ids;
+}
+
+/// 25 Nov: EVE accounts this PC tied to one of Your accounts by itself (EVE account number →
+/// SeAT account id), for accounts SeAT has no EVE account number for. Tsa's Alphas all start with
+/// settings_Alphas, so their profile can't tell them apart: the first time one shows up it takes
+/// a free account's number and keeps it; a character logging in from it later corrects that.
+pub const LEARNED_FILE: &str = "login-accounts.json";
+
+pub fn learned_logins() -> std::collections::BTreeMap<u64, u64> {
+    crate::shared::app_config_plain(LEARNED_FILE).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn learn_login(user: u64, account: u64) {
+    let mut all = learned_logins();
+    all.retain(|u, a| *u != user && *a != account);
+    all.insert(user, account);
+    if let Some(path) = crate::shared::app_config_plain(LEARNED_FILE) {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, serde_json::to_string_pretty(&all).unwrap_or_default());
+    }
 }
 
 /// The login number (0-based) for a login screen signed in to EVE account `user` and started with
@@ -398,6 +424,13 @@ fn pick_login_number(user: Option<u64>, profile: Option<&str>, accounts: &[(Opti
             return n;
         }
     }
+    // A real EVE account none of ours is tied to yet: the first free account that isn't tied to
+    // an EVE account either (it's then tied to it: see `login_numbers`).
+    if user.is_some() && by_user.is_none() {
+        if let Some(n) = (0..accounts.len()).find(|n| accounts[*n].1.is_none() && !used.contains(n)) {
+            return n;
+        }
+    }
     (accounts.len()..).find(|n| !used.contains(n)).unwrap_or(accounts.len())
 }
 
@@ -407,9 +440,11 @@ fn pick_login_number(user: Option<u64>, profile: Option<&str>, accounts: &[(Opti
 /// account is known (25 Nov: those stand-in numbers used to stick, so a dozen clients started at
 /// once came up as Login 34 to 42 on a PC with 33 accounts).
 fn login_numbers(handles: &[isize]) -> Vec<Option<usize>> {
-    let accounts = ACCOUNT_LOGINS.lock().unwrap().clone();
+    let mut accounts = ACCOUNT_LOGINS.lock().unwrap().clone();
     let mut known = LOGIN_NUMBERS.lock().unwrap();
-    known.retain(|(handle, _)| handles.contains(handle));
+    // Kept while the window exists, even when it drops out of the list for a moment (25 Nov:
+    // a client starting up hid its window briefly, lost its number and got a new one each time).
+    known.retain(|(handle, _)| handles.contains(handle) || window_exists(*handle));
     let mut waiting = WAITING_SINCE.lock().unwrap();
     waiting.retain(|(handle, _)| handles.contains(handle));
     // Settled ones first, so a stand-in number never takes an account's own.
@@ -425,6 +460,18 @@ fn login_numbers(handles: &[isize]) -> Vec<Option<usize>> {
                 let used: Vec<usize> = known.iter().map(|(_, n)| *n).collect();
                 let user = crate::startline::known_account_of_window(*handle);
                 let n = pick_login_number(user, profile.as_deref(), &accounts, &used);
+                if let Some(u) = user {
+                    if n < accounts.len() && accounts[n].1.is_none() {
+                        accounts[n].1 = Some(u);
+                        if let Some(entry) = ACCOUNT_LOGINS.lock().unwrap().get_mut(n) {
+                            entry.1 = Some(u);
+                        }
+                        if let Some(id) = ACCOUNT_IDS.lock().unwrap().get(n).copied() {
+                            learn_login(u, id);
+                        }
+                        log::info!("Login {}: an EVE account not tied to one of Your accounts yet; it now has this number (a character logging in from it corrects that)", n + 1);
+                    }
+                }
                 if n >= accounts.len() {
                     log::info!("login screen {}: no account of ours ({})", n + 1, if user.is_some() { "its EVE account isn't in Your accounts" } else { "no account in its start-up line" });
                 }
@@ -452,6 +499,17 @@ fn login_numbers(handles: &[isize]) -> Vec<Option<usize>> {
         out[i] = Some(n);
     }
     out
+}
+
+#[cfg(windows)]
+fn window_exists(handle: isize) -> bool {
+    // SAFETY: only asks whether the handle still names a window.
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(handle as windows_sys::Win32::Foundation::HWND) != 0 }
+}
+
+#[cfg(not(windows))]
+fn window_exists(_handle: isize) -> bool {
+    false
 }
 
 /// Whether this is an account's own login screen ("Login 1" … up to the number of accounts):
@@ -551,8 +609,13 @@ mod tests {
         assert_eq!(pick_login_number(None, Some("1"), &[], &[0, 2]), 1);
         // The sign-in token wins over the profile: account 03 started with settings_1 is Login 3.
         assert_eq!(pick_login_number(Some(555), Some("1"), &accounts, &[]), 2);
-        // A token naming an EVE account we don't have: not taken for account 01 by its profile.
-        assert_eq!(pick_login_number(Some(999), Some("1"), &accounts, &[]), 3);
+        // A token naming an EVE account we don't have: not taken for account 01 by its profile,
+        // but given the free account no EVE account is tied to (account 02).
+        assert_eq!(pick_login_number(Some(999), Some("1"), &accounts, &[]), 1);
+        // …unless that one is open already: after every account's number.
+        assert_eq!(pick_login_number(Some(999), Some("Alphas"), &accounts, &[1]), 3);
+        // No token: never guessed onto an untied account.
+        assert_eq!(pick_login_number(None, Some("Alphas"), &accounts, &[]), 3);
     }
 
     #[test]

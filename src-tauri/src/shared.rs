@@ -20,6 +20,12 @@ pub fn app_config(app: &AppHandle, name: &str) -> Option<PathBuf> {
     app.path().config_dir().ok().map(|dir| dir.join(APP_ID).join(name))
 }
 
+/// A file in the Devils app's settings folder, for code with no AppHandle at hand (the same
+/// folder as `app_config`).
+pub fn app_config_plain(name: &str) -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join(APP_ID).join(name))
+}
+
 /// The Devils app's local data folder (%LOCALAPPDATA%\com.tsawind.devilsrage).
 pub fn app_local(name: &str) -> Option<PathBuf> {
     dirs::data_local_dir().map(|dir| dir.join(APP_ID).join(name))

@@ -243,15 +243,42 @@ pub(crate) fn nickname_key(nickname: &str) -> (u8, u64, String) {
 }
 
 /// Patch 74: tie login screens to accounts. Account N in Your accounts order owns "Login N".
-pub fn set_account_logins(seat: &SeatData) {
+/// 25 Nov: accounts SeAT has no EVE account number for get one from this PC: a character of theirs
+/// seen logged in here (its sign-in token named the EVE account), else the EVE account this PC
+/// tied to it the first time that login screen showed up (clipboard.rs).
+pub fn set_account_logins(app: &AppHandle, seat: &SeatData) {
     let mut accounts: Vec<&SeatAccount> = seat.accounts.iter().collect();
     accounts.sort_by_key(|a| nickname_key(&a.nickname));
-    crate::clipboard::set_account_logins(accounts.iter().map(|a| (a.profile.clone().filter(|p| !p.trim().is_empty()), a.launcher_user_id)).collect());
+    let mut users: Vec<Option<u64>> = accounts.iter().map(|a| a.launcher_user_id).collect();
+    let seen = crate::pcaccounts::seen(app);
+    for (i, account) in accounts.iter().enumerate() {
+        if users[i].is_some() {
+            continue;
+        }
+        let found = account.characters.iter().find_map(|c| seen.get(&c.name).copied());
+        if let Some(user) = found.filter(|u| !users.contains(&Some(*u))) {
+            users[i] = Some(user);
+        }
+    }
+    for (user, id) in crate::clipboard::learned_logins() {
+        if users.contains(&Some(user)) {
+            continue;
+        }
+        if let Some(i) = accounts.iter().position(|a| a.id == id) {
+            if users[i].is_none() {
+                users[i] = Some(user);
+            }
+        }
+    }
+    crate::clipboard::set_account_logins(
+        accounts.iter().zip(&users).map(|(a, u)| (a.profile.clone().filter(|p| !p.trim().is_empty()), *u)).collect(),
+        accounts.iter().map(|a| a.id).collect(),
+    );
 }
 
 /// Read the saved accounts once on start-up so login screens get their account's number.
 pub fn load_account_logins(app: &AppHandle) {
-    set_account_logins(&load_seat(app));
+    set_account_logins(app, &load_seat(app));
 }
 
 /// This PC's pedal keys and switches for one SeAT group (defaults when none saved).
@@ -263,7 +290,7 @@ pub(crate) fn seat_group_prefs(app: &AppHandle, id: u64) -> GroupPrefs {
 pub fn store_seat(app: &AppHandle, data: &SeatData) -> Result<(), String> {
     write_json(config_file(app, "seat-groups.json").ok_or("no config folder")?, data)?;
     log::info!("launch groups from SeAT: {} accounts, {} groups", data.accounts.len(), data.groups.len());
-    set_account_logins(data);
+    set_account_logins(app, data);
     crate::incognito::load(app);
     #[cfg(desktop)]
     register_cycle_hotkeys(app);
