@@ -1,15 +1,15 @@
 {
-  "version": "0.1.8-dev.272",
+  "version": "0.1.8-dev.273",
   "notes": "Devil's Peepshow",
-  "pub_date": "2026-11-25T01:35:07Z",
+  "pub_date": "2026-11-25T02:05:06Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGNQLy90Rzc1ZG44dFpSMi8wcHZ2dE5Cb3RIRFRVTGZsQzlBaG5wZ1RXMEVSaWJBbjJTWTkzT3FGcXpGTysreG1xWlhKOS82R0xHdFp1b0NwWEpoYXc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTcwMjY2CWZpbGU6RGV2aWxzIFBlZXBzaG93XzAuMS44LWRldi4yNzJfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS44LWRldi4yNzIKUWwzb1RyNDY3emtBNzZyN3FaVW13LzdZTHFVS0paN1dZS3cyem1JaVBSK2FDVjVnSG5mSE5nWkZ6QXQvdXpKYW9NeFQ5L2JQMm81Sm5EY3NTRE9rQ2c9PQo=",
-      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.272/devils-peepshow_0.1.8-dev.272_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGRWMUhrL3ZSaWZ4Mk9hWGdZc0dheUhJNlNMc1lKcUlXRWhGTURBQ2Z5QUQ4alE2MWxtRW5MS0tFYjRlTzNIVWo4UzZOVXhkWXpVUmN1VWo0VWhONmdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTcyMTAzCWZpbGU6RGV2aWxzIFBlZXBzaG93XzAuMS44LWRldi4yNzNfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS44LWRldi4yNzMKQUxRR2lwZUxaSmJaOTRjQzVuT1A1aXY2K3Z3czFLckxOZlV0a3VwakxRNEhrRWxnbWRNalBwZGRHWkgwTktXcW9xOTE2eVZlQkhOM0dFbXVRNmhnQWc9PQo=",
+      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.273/devils-peepshow_0.1.8-dev.273_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGNQLy90Rzc1ZG44dFpSMi8wcHZ2dE5Cb3RIRFRVTGZsQzlBaG5wZ1RXMEVSaWJBbjJTWTkzT3FGcXpGTysreG1xWlhKOS82R0xHdFp1b0NwWEpoYXc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTcwMjY2CWZpbGU6RGV2aWxzIFBlZXBzaG93XzAuMS44LWRldi4yNzJfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS44LWRldi4yNzIKUWwzb1RyNDY3emtBNzZyN3FaVW13LzdZTHFVS0paN1dZS3cyem1JaVBSK2FDVjVnSG5mSE5nWkZ6QXQvdXpKYW9NeFQ5L2JQMm81Sm5EY3NTRE9rQ2c9PQo=",
-      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.272/devils-peepshow_0.1.8-dev.272_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGRWMUhrL3ZSaWZ4Mk9hWGdZc0dheUhJNlNMc1lKcUlXRWhGTURBQ2Z5QUQ4alE2MWxtRW5MS0tFYjRlTzNIVWo4UzZOVXhkWXpVUmN1VWo0VWhONmdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTcyMTAzCWZpbGU6RGV2aWxzIFBlZXBzaG93XzAuMS44LWRldi4yNzNfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuMS44LWRldi4yNzMKQUxRR2lwZUxaSmJaOTRjQzVuT1A1aXY2K3Z3czFLckxOZlV0a3VwakxRNEhrRWxnbWRNalBwZGRHWkgwTktXcW9xOTE2eVZlQkhOM0dFbXVRNmhnQWc9PQo=",
+      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.273/devils-peepshow_0.1.8-dev.273_x64-setup.exe"
     }
   }
 }
