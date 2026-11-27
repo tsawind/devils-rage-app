@@ -1,27 +1,27 @@
 {
-  "version": "0.1.8-dev.281",
+  "version": "0.1.8-dev.282",
   "notes": "dev build. Windows: download the -setup.exe below.",
-  "pub_date": "2026-11-27T18:24:34.377Z",
+  "pub_date": "2026-11-27T19:05:13.158Z",
   "platforms": {
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGZxYmVQblV4SnV1VGFlbnllVzR6aVpTQ25KS1ZhbjJMT01KbDdIbFpWVHNESWsxclhzYUtrMXQySlYxUGFNMStaMzlGajR4OU9HTGF3aFVoVzNnQ0F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODAzNTU5CWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4MV9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjAuMS44LWRldi4yODEKTm92L2wvaVFHQTFtR2dJaDB4NEdiTlJVbWoxTG92U2VvZmRUWkNodWZUWjJmSmVHcWtFUkx2WllpVVRZVC90anphQzN0bFNsd0Y0YmlpMDlOR1FRQWc9PQo=",
-      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.281/Devils.Rage_0.1.8-dev.281_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aFhHRnRVbS9zWGZBL0ZNOTQweVQvenJSeWpKMzk3TDNTNExadVdGSGhvUk81bFFZSEpCKzkwcTd0ZEdaNHR2ZXVEUUFMUlZuYzZ1NkpSWVJ4c1ZxQWd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODA2MDgxCWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4Ml9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjAuMS44LWRldi4yODIKMHVGcWZNZm9yUGliclJ3SUp2My9aalBvcldYQUM0cGpIN3libVZ1QXBNNlNmbXhvYXYvdnVxdzdJYitPL0ZLNHh1N3BKanFGaFRvanZPbXdwNitjQXc9PQo=",
+      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.282/Devils.Rage_0.1.8-dev.282_amd64.AppImage"
     },
     "linux-x86_64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGZxYmVQblV4SnV1VGFlbnllVzR6aVpTQ25KS1ZhbjJMT01KbDdIbFpWVHNESWsxclhzYUtrMXQySlYxUGFNMStaMzlGajR4OU9HTGF3aFVoVzNnQ0F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODAzNTU5CWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4MV9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjAuMS44LWRldi4yODEKTm92L2wvaVFHQTFtR2dJaDB4NEdiTlJVbWoxTG92U2VvZmRUWkNodWZUWjJmSmVHcWtFUkx2WllpVVRZVC90anphQzN0bFNsd0Y0YmlpMDlOR1FRQWc9PQo=",
-      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.281/Devils.Rage_0.1.8-dev.281_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aFhHRnRVbS9zWGZBL0ZNOTQweVQvenJSeWpKMzk3TDNTNExadVdGSGhvUk81bFFZSEpCKzkwcTd0ZEdaNHR2ZXVEUUFMUlZuYzZ1NkpSWVJ4c1ZxQWd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODA2MDgxCWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4Ml9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjAuMS44LWRldi4yODIKMHVGcWZNZm9yUGliclJ3SUp2My9aalBvcldYQUM0cGpIN3libVZ1QXBNNlNmbXhvYXYvdnVxdzdJYitPL0ZLNHh1N3BKanFGaFRvanZPbXdwNitjQXc9PQo=",
+      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.282/Devils.Rage_0.1.8-dev.282_amd64.AppImage"
     },
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aFJuSnQxWjhjNXhNbDF2YUk2c3I5bGU0K1ZVSHpSYmx4bURvZ2VhaFNYeS8rZVc5bnAzekRPdk96bHNKakp1aXZvZlNHTnBVZVJGN0o3Zk91QXJDM2dJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODAzNTU5CWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4MV9hbWQ2NC5kZWIJdmVyc2lvbjowLjEuOC1kZXYuMjgxCi9ZZXhSTXYyOXhyVzZOSTNnOHd3L25kQjRYTE5YajgxYmV4cW9jUlgyQmpoS1ExYjFRRVJ0VHN3L3ZUT0FBSGZyL0hMZ1hIa25Vb0xKM3FrOVBWYUJnPT0K",
-      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.281/Devils.Rage_0.1.8-dev.281_amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aFZCS0o5dUxBUWxLQjVVVzIvMi9mRHFCZG92U1piYk5JL1U4WUNKK1ByL1lVeFVwTjJQK1BEdUNHUmtRTjdtd2UyVTZ3RkI2NzF3SnJNczQwUmxuR2dRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODA2MDgxCWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4Ml9hbWQ2NC5kZWIJdmVyc2lvbjowLjEuOC1kZXYuMjgyCkdMWDBkc0Vmc3pLVDdvbmsya0tDRlNRL0c2OFpGYzFib1hKRUQxbUlWbUFhS25WRlZlam9HaW9lcWozMi9Yb2xIdDNsTE4wZzA1SlEwdzY0N1ErTUFBPT0K",
+      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.282/Devils.Rage_0.1.8-dev.282_amd64.deb"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGJLZXZSd01LdWMyWW8zZGtBdlU1cTQ0bkdhSVdETmlhY3FwZ2lsaGVYZ0Z0VnlNT1hlZmhRcGQ1VUg2SDVWSWdmcW5DUUFoUXA0WGZ6V214c0VoRVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODAzODcxCWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgtZGV2LjI4MQowaUJ0ektVQXA5ZVlpZVlBck43TEdRT0x3MGFvM3FoYVF3a2M2Vmdya3NpejB0TEpGNURvdE5uT1Q1S0NSd0pzYlNadGdoMzdBd09PN2lLbXhidmhDZz09Cg==",
-      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.281/Devils.Rage_0.1.8-dev.281_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGQwRlBBMWpTem14SUd2Y3lJZmxvMWpzQ0ZQdktLMFIwNEFlN1VuM3F4V1QzcGN4MEhQUWcrZnlyT0dKWjgzWVk5MFJIM3N6Ymc5RjNXcFpzdTl3Z0FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODA2MzExCWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgtZGV2LjI4Mgo0S3Zya09KaVdiOGNHOS9IRTZlREprVTFQeXppbWg5ZG1lckNOU01BTFJYZldXSWJ0bGc3NkJzY040NmV1dTl1YzRIMDFrQjRWYlRVUEdCd0dESGZDdz09Cg==",
+      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.282/Devils.Rage_0.1.8-dev.282_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGJLZXZSd01LdWMyWW8zZGtBdlU1cTQ0bkdhSVdETmlhY3FwZ2lsaGVYZ0Z0VnlNT1hlZmhRcGQ1VUg2SDVWSWdmcW5DUUFoUXA0WGZ6V214c0VoRVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODAzODcxCWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4MV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgtZGV2LjI4MQowaUJ0ektVQXA5ZVlpZVlBck43TEdRT0x3MGFvM3FoYVF3a2M2Vmdya3NpejB0TEpGNURvdE5uT1Q1S0NSd0pzYlNadGdoMzdBd09PN2lLbXhidmhDZz09Cg==",
-      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.281/Devils.Rage_0.1.8-dev.281_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSOFFNZU15T2p5aGQwRlBBMWpTem14SUd2Y3lJZmxvMWpzQ0ZQdktLMFIwNEFlN1VuM3F4V1QzcGN4MEhQUWcrZnlyT0dKWjgzWVk5MFJIM3N6Ymc5RjNXcFpzdTl3Z0FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODA2MzExCWZpbGU6RGV2aWxzIFJhZ2VfMC4xLjgtZGV2LjI4Ml94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjgtZGV2LjI4Mgo0S3Zya09KaVdiOGNHOS9IRTZlREprVTFQeXppbWg5ZG1lckNOU01BTFJYZldXSWJ0bGc3NkJzY040NmV1dTl1YzRIMDFrQjRWYlRVUEdCd0dESGZDdz09Cg==",
+      "url": "https://github.com/tsawind/devils-rage-app/releases/download/v0.1.8-dev.282/Devils.Rage_0.1.8-dev.282_x64-setup.exe"
     }
   }
 }
