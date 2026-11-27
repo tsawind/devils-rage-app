@@ -490,6 +490,52 @@ fn stack_ids(app: &AppHandle, name: &str) -> Vec<String> {
     crate::launch::stacks_for(app, name).iter().filter(|s| s["state"] != "out").filter_map(|s| s["id"].as_str().map(str::to_string).or_else(|| s["id"].as_u64().map(|n| n.to_string()))).collect()
 }
 
+/// 27 Nov: our own resize from a preview's edges. Windows' resize kept a minimum width of
+/// about two cells of a 64×64 grid however we asked; this follows the mouse ourselves.
+static RESIZING: Mutex<Option<(String, String, Spot, (i32, i32))>> = Mutex::new(None);
+
+fn cursor(app: &AppHandle) -> Option<(i32, i32)> {
+    app.cursor_position().ok().map(|p| (p.x.round() as i32, p.y.round() as i32))
+}
+
+#[tauri::command]
+pub fn preview_resize_begin(app: AppHandle, window: WebviewWindow, edge: String) {
+    let (Some(r), Some(at)) = (preview_rect(&window), cursor(&app)) else { return };
+    *RESIZING.lock().unwrap() = Some((window.label().to_string(), edge, r, at));
+}
+
+#[tauri::command]
+pub fn preview_resize_step(app: AppHandle, window: WebviewWindow) {
+    let Some((label, edge, r, at)) = RESIZING.lock().unwrap().clone() else { return };
+    if label != window.label() {
+        return;
+    }
+    let Some(now) = cursor(&app) else { return };
+    let (dx, dy) = (now.0 - at.0, now.1 - at.1);
+    let (mut x, mut y, mut w, mut h) = (r.x, r.y, r.w, r.h);
+    if edge.contains('e') {
+        w = (r.w + dx).max(MIN_W);
+    }
+    if edge.contains('s') {
+        h = (r.h + dy).max(MIN_H);
+    }
+    if edge.contains('w') {
+        w = (r.w - dx).max(MIN_W);
+        x = r.x + r.w - w;
+    }
+    if edge.contains('n') {
+        h = (r.h - dy).max(MIN_H);
+        y = r.y + r.h - h;
+    }
+    let _ = window.set_position(PhysicalPosition::new(x, y));
+    let _ = window.set_size(PhysicalSize::new(w as u32, h as u32));
+}
+
+#[tauri::command]
+pub fn preview_resize_end() {
+    *RESIZING.lock().unwrap() = None;
+}
+
 /// 27 Nov: the smallest preview the menu's size boxes and − button allow (physical px), so one
 /// cell of a 96×96 grid fits (they still said "at least 80 x 45").
 const MIN_W: i32 = 12;
@@ -506,17 +552,24 @@ pub fn preview_action(app: AppHandle, name: String, action: String, value: Optio
     let mut moves: Vec<(String, Spot)> = Vec::new();
     let said = match action.as_str() {
         "size-xs" | "size-s" | "size-m" | "size-l" => {
-            // 23 Nov: parts of the monitor's width (S was an eighth: too big on 4K).
-            let part = match action.as_str() {
-                "size-xs" => 16.0,
-                "size-s" => 12.0,
-                "size-m" => 8.0,
-                _ => 6.0,
+            // 27 Nov: 16:9, in cells of a 64×64 grid on this monitor: XS one cell, S two across,
+            // M four, L eight (on a 16:9 monitor they fill exactly that many cells each way).
+            let cells = match action.as_str() {
+                "size-xs" => 1.0,
+                "size-s" => 2.0,
+                "size-m" => 4.0,
+                _ => 8.0,
             };
-            let w = (mon.w as f64 / part) as i32;
-            let h = (w as f64 * me.h as f64 / me.w.max(1) as f64) as i32;
-            moves.push((name.clone(), Spot { w, h, ..me }));
-            format!("{w} x {h}.")
+            let total_w = mon.w as f64 * cells / 64.0;
+            let total_h = total_w * 9.0 / 16.0;
+            let w = (total_w.round() as i32 - 2 * GAP).max(MIN_W);
+            let h = (total_h.round() as i32 - 2 * GAP).max(MIN_H);
+            let mut to = Spot { w, h, ..me };
+            if grid_size(&app).0 {
+                to = cell_target(mon, cols, rows, to);
+            }
+            moves.push((name.clone(), to));
+            format!("{} x {}.", to.w, to.h)
         }
         "smaller" | "bigger" => {
             let f = if action == "smaller" { 0.9 } else { 1.1 };

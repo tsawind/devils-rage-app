@@ -201,12 +201,29 @@
     document.getElementById("name").style.paddingRight = (8 + 18 * groupsBox.children.length + (mode.edit ? 24 : 0)) + "px";
   }
 
-  // Resize from any edge or corner with Windows' own resize (edit mode).
+  // Resize from any edge or corner (edit mode). 27 Nov: we follow the mouse ourselves; Windows'
+  // own resize wouldn't go narrower than about two cells of a 64×64 grid.
   for (const el of document.querySelectorAll(".edge, #grip")) {
-    el.addEventListener("mousedown", (e) => {
+    el.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault(); e.stopPropagation();
-      invoke("preview_start_resize", { edge: el.dataset.edge || "se" }).catch(() => {});
+      el.setPointerCapture(e.pointerId);
+      invoke("preview_resize_begin", { edge: el.dataset.edge || "se" }).catch(() => {});
+      let busy = false, again = false;
+      const step = () => {
+        if (busy) { again = true; return; }
+        busy = true;
+        invoke("preview_resize_step").catch(() => {}).finally(() => { busy = false; if (again) { again = false; step(); } });
+      };
+      const end = () => {
+        el.removeEventListener("pointermove", step);
+        el.removeEventListener("pointerup", end);
+        el.removeEventListener("pointercancel", end);
+        invoke("preview_resize_end").catch(() => {});
+      };
+      el.addEventListener("pointermove", step);
+      el.addEventListener("pointerup", end);
+      el.addEventListener("pointercancel", end);
     });
   }
 
