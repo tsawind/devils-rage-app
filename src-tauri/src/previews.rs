@@ -600,6 +600,8 @@ struct WatchState {
     known: std::collections::BTreeSet<String>,
     last_open: std::collections::BTreeSet<String>,
     tick: u32,
+    /// The first look at the clients has been taken (the ones open then were already running).
+    primed: bool,
 }
 
 fn watch_tick(app: &AppHandle, st: &mut WatchState) {
@@ -658,7 +660,13 @@ fn watch_tick(app: &AppHandle, st: &mut WatchState) {
         if !new_names.is_empty() {
             log::info!("new clients: {}", new_names.join(", "));
         }
-        if fresh {
+        // 27 Nov: clients already running when the app (or Peepshow) starts aren't new: they stay
+        // where they are (restarting Peepshow moved LuigiSquirrel to an old spot).
+        let first = !st.primed;
+        st.primed = true;
+        if fresh && first {
+            log::info!("clients open at start-up stay where they are");
+        } else if fresh {
             // A new client (or one that just logged in) goes to its remembered spot.
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(2));
