@@ -25,7 +25,7 @@ use tauri::{
 pub(crate) const PREFIX: &str = "preview-";
 const DEFAULT_SIZE: (f64, f64) = (320.0, 200.0);
 /// 27 Nov: small enough for one cell of a fine grid (was 80 × 45: two cells at least on 64×64; 27 Nov: the snap also had 80 × 45 written in).
-pub(crate) const MIN_SIZE: (f64, f64) = (24.0, 14.0);
+pub(crate) const MIN_SIZE: (f64, f64) = (12.0, 8.0);
 
 pub(crate) fn label_for(name: &str) -> String {
     // Keep it to a safe window label (letters and digits); the page gets the real name.

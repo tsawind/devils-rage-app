@@ -490,6 +490,11 @@ fn stack_ids(app: &AppHandle, name: &str) -> Vec<String> {
     crate::launch::stacks_for(app, name).iter().filter(|s| s["state"] != "out").filter_map(|s| s["id"].as_str().map(str::to_string).or_else(|| s["id"].as_u64().map(|n| n.to_string()))).collect()
 }
 
+/// 27 Nov: the smallest preview the menu's size boxes and − button allow (physical px), so one
+/// cell of a 96×96 grid fits (they still said "at least 80 x 45").
+const MIN_W: i32 = 12;
+const MIN_H: i32 = 8;
+
 /// One of the menu's arranging actions on preview `name`.
 #[tauri::command]
 pub fn preview_action(app: AppHandle, name: String, action: String, value: Option<i64>) -> Result<String, String> {
@@ -516,7 +521,7 @@ pub fn preview_action(app: AppHandle, name: String, action: String, value: Optio
         "smaller" | "bigger" => {
             let f = if action == "smaller" { 0.9 } else { 1.1 };
             let (w, h) = (((me.w as f64) * f) as i32, ((me.h as f64) * f) as i32);
-            if w < 80 || h < 45 {
+            if w < MIN_W || h < MIN_H {
                 return Err("That's as small as a preview goes.".into());
             }
             moves.push((name.clone(), Spot { w, h, ..me }));
@@ -525,8 +530,8 @@ pub fn preview_action(app: AppHandle, name: String, action: String, value: Optio
         "size-set" => {
             let v = value.unwrap_or(0);
             let (w, h) = ((v / 100_000) as i32, (v % 100_000) as i32);
-            if w < 80 || h < 45 {
-                return Err("At least 80 x 45.".into());
+            if w < MIN_W || h < MIN_H {
+                return Err(format!("At least {MIN_W} x {MIN_H}."));
             }
             moves.push((name.clone(), Spot { w, h, ..me }));
             format!("{w} x {h}.")

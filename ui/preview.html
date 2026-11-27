@@ -55,6 +55,14 @@
   #grip { position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; z-index: 8; cursor: nwse-resize; display: none;
           background: linear-gradient(135deg, transparent 50%, #f0c040 50%); }
   body.edit #grip { display: block; }
+  /* 27 Nov: a preview one grid cell big: thin edges, so there's still room in the middle to drag it. */
+  @media (max-width: 90px), (max-height: 50px) {
+    .edge.n, .edge.s { height: 3px; left: 5px; right: 5px; }
+    .edge.w, .edge.e { width: 3px; top: 5px; bottom: 5px; }
+    .edge.nw, .edge.ne, .edge.sw { width: 5px; height: 5px; }
+    #grip { width: 7px; height: 7px; }
+    #name { padding: 0 2px; font-size: 10px; }
+  }
   #close { position: fixed; top: 2px; right: 4px; width: 18px; height: 18px; line-height: 16px; text-align: center; z-index: 7;
            border-radius: 4px; background: #0008; color: #ccc; opacity: 0; transition: opacity .1s; cursor: pointer; }
   /* Patch 114: the ✕ only while arranging (edit preview layout). */
