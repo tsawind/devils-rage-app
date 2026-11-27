@@ -145,6 +145,9 @@ fn layer_json(app: &AppHandle, mon: Spot) -> serde_json::Value {
     serde_json::json!({ "grid": grid, "cols": cols, "rows": rows, "outlines": outlines, "zones": zones.map(|(c, r)| [c, r]) })
 }
 
+/// Layers (by monitor) being built right now.
+static LAYER_BUILDING: Mutex<std::collections::BTreeSet<usize>> = Mutex::new(std::collections::BTreeSet::new());
+
 fn sync_layer(app: &AppHandle) {
     let (_, wanted) = *LAYER.lock().unwrap();
     let mons = if wanted { monitors(app) } else { Vec::new() };
@@ -169,6 +172,11 @@ fn sync_layer(app: &AppHandle) {
             let _ = w.eval(format!("window.__layer && window.__layer({state});"));
             continue;
         }
+        // 27 Nov: one build per layer at a time (opening and closing Client setup quickly asked
+        // twice, and the second build failed).
+        if !LAYER_BUILDING.lock().unwrap().insert(i) {
+            continue;
+        }
         let app2 = app.clone();
         tauri::async_runtime::spawn(async move {
             let built = WebviewWindowBuilder::new(&app2, &label, WebviewUrl::App("snapgrid.html".into()))
@@ -183,8 +191,18 @@ fn sync_layer(app: &AppHandle) {
                 .focused(false)
                 .visible(false)
                 .build();
+            LAYER_BUILDING.lock().unwrap().remove(&i);
             match built {
                 Ok(w) => {
+                    // 27 Nov: the layer was put away while this one was being built (Client setup
+                    // opened and closed in a moment): it stayed on screen with nothing to close it.
+                    if !LAYER.lock().unwrap().1 {
+                        let _ = app2.run_on_main_thread(move || {
+                            let _ = w.destroy();
+                        });
+                        return;
+                    }
+                    let _ = w.eval(format!("window.__layer && window.__layer({});", layer_json(&app2, mon)));
                     crate::clientbar::tool_window(&w);
                     let _ = w.set_position(PhysicalPosition::new(mon.x, mon.y));
                     let _ = w.set_size(PhysicalSize::new(mon.w as u32, mon.h as u32));
