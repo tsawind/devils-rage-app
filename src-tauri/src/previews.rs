@@ -29,8 +29,7 @@ pub(crate) const MIN_SIZE: (f64, f64) = (12.0, 8.0);
 
 pub(crate) fn label_for(name: &str) -> String {
     // Keep it to a safe window label (letters and digits); the page gets the real name.
-    let slug: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    format!("{PREFIX}{slug}")
+    format!("{PREFIX}{}", crate::shared::window_slug(name))
 }
 
 // ---- Saved layout --------------------------------------------------------------------------
@@ -1370,8 +1369,9 @@ mod tests {
 
     #[test]
     fn labels_are_safe_and_stable() {
-        assert_eq!(label_for("Luigi Squirrel"), "preview-LuigiSquirrel");
-        assert_eq!(label_for("Déjà'Vu 2"), "preview-DjVu2");
+        assert_eq!(label_for("Luigi Squirrel"), "preview-Luigi_20_Squirrel");
+        assert_eq!(label_for("Déjà'Vu 2"), "preview-D_e9_j_e0__27_Vu_20_2");
+        assert_ne!(label_for("MyThai"), label_for("My-Thai"));
     }
 
     #[test]

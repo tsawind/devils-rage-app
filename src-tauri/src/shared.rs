@@ -113,3 +113,28 @@ pub fn followed_stamps(app: &AppHandle) -> Vec<Option<std::time::SystemTime>> {
         .map(|name| app_config(app, name).and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok()))
         .collect()
 }
+
+/// 27 Nov: a window label for a character name: letters and digits as they are, anything else as
+/// `_<hex code>_`, so names that differ only in a dash or a space ("MyThai", "My-Thai")
+/// get windows of their own (they shared one preview before).
+pub fn window_slug(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else {
+            out.push_str(&format!("_{:x}_", c as u32));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod slug_tests {
+    #[test]
+    fn names_that_differ_in_a_dash_get_their_own_window() {
+        assert_eq!(super::window_slug("MyThai"), "MyThai");
+        assert_eq!(super::window_slug("My-Thai"), "My_2d_Thai");
+        assert_eq!(super::window_slug("Login 1"), "Login_20_1");
+    }
+}

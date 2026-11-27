@@ -153,8 +153,7 @@ fn locked(name: &str) -> bool {
 }
 
 pub fn label_for(name: &str) -> String {
-    let slug: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    format!("{PREFIX}{slug}")
+    format!("{PREFIX}{}", crate::shared::window_slug(name))
 }
 
 fn handle_of(name: &str) -> Option<isize> {
@@ -1705,7 +1704,9 @@ mod tests {
 
     #[test]
     fn names_make_safe_labels() {
-        assert_eq!(label_for("Darkness Holder"), "clientbar-DarknessHolder");
+        assert_eq!(label_for("Darkness Holder"), "clientbar-Darkness_20_Holder");
+        // 27 Nov: "MyThai" and "My-Thai" are two characters, so two windows.
+        assert_ne!(label_for("MyThai"), label_for("My-Thai"));
         assert_eq!(label_for("Tsawind"), "clientbar-Tsawind");
     }
 }

@@ -19,8 +19,7 @@ pub fn arranging() -> bool {
 }
 
 fn label_for(name: &str) -> String {
-    let slug: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-    format!("{PREFIX}{slug}")
+    format!("{PREFIX}{}", crate::shared::window_slug(name))
 }
 
 /// The handle's rectangle (it has no frame, so outer = the whole thing).
