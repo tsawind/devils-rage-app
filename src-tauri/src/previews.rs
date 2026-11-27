@@ -357,6 +357,9 @@ pub(crate) fn build_preview(app: &AppHandle, name: &str) {
         }
     };
     crate::clientbar::tool_window(&window);
+    if let Some(hwnd) = crate::clientbar::our_hwnd(&window) {
+        let _ = app.run_on_main_thread(move || tiny::allow(hwnd));
+    }
     if let (Some(w), Some(h)) = (prefs.w, prefs.h) {
         let _ = window.set_size(PhysicalSize::new(
             w.max(MIN_SIZE.0 as u32),
@@ -399,6 +402,62 @@ pub(crate) fn build_preview(app: &AppHandle, name: &str) {
             _ => {}
         }
     });
+}
+
+/// 27 Nov: Windows wouldn't let a preview be dragged smaller than 136 × 39 (its default smallest
+/// window, which Tauri's minimum size didn't lower): a preview couldn't be resized by hand to one
+/// cell of a 64×64 grid. The preview's window now answers that question itself.
+mod tiny {
+    #[cfg(windows)]
+    mod imp {
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+        use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{CallWindowProcW, SetWindowLongPtrW, GWLP_WNDPROC, MINMAXINFO, WM_GETMINMAXINFO, WM_NCDESTROY, WNDPROC};
+
+        /// Each preview window's own handler from before, to pass everything else on to.
+        static BEFORE: Mutex<Option<HashMap<isize, isize>>> = Mutex::new(None);
+
+        unsafe extern "system" fn handler(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+            let before = BEFORE.lock().unwrap().as_ref().and_then(|m| m.get(&(hwnd as isize)).copied()).unwrap_or(0);
+            // SAFETY: `before` is the window's previous handler, saved when we replaced it.
+            let proc_: WNDPROC = unsafe { std::mem::transmute::<isize, WNDPROC>(before) };
+            // SAFETY: passing the message on to that handler, as Windows would have.
+            let result = unsafe { CallWindowProcW(proc_, hwnd, msg, w, l) };
+            if msg == WM_GETMINMAXINFO && l != 0 {
+                // SAFETY: Windows passes a MINMAXINFO for this message.
+                let info = unsafe { &mut *(l as *mut MINMAXINFO) };
+                info.ptMinTrackSize = POINT { x: 8, y: 6 };
+            }
+            if msg == WM_NCDESTROY {
+                if let Some(map) = BEFORE.lock().unwrap().as_mut() {
+                    map.remove(&(hwnd as isize));
+                }
+            }
+            result
+        }
+
+        pub fn allow(hwnd: isize) {
+            let mut guard = BEFORE.lock().unwrap();
+            let map = guard.get_or_insert_with(HashMap::new);
+            if map.contains_key(&hwnd) {
+                return;
+            }
+            // SAFETY: our own window, on the thread that owns it (called on the main thread).
+            let before = unsafe { SetWindowLongPtrW(hwnd as HWND, GWLP_WNDPROC, handler as usize as isize) };
+            if before != 0 {
+                map.insert(hwnd, before);
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    pub fn allow(hwnd: isize) {
+        imp::allow(hwnd);
+    }
+
+    #[cfg(not(windows))]
+    pub fn allow(_hwnd: isize) {}
 }
 
 /// Edit mode on / off for every preview. On: every open client gets a preview (hidden ones
