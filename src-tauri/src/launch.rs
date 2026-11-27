@@ -249,6 +249,16 @@ pub(crate) fn nickname_key(nickname: &str) -> (u8, u64, String) {
 pub fn set_account_logins(app: &AppHandle, seat: &SeatData) {
     let mut accounts: Vec<&SeatAccount> = seat.accounts.iter().collect();
     accounts.sort_by_key(|a| nickname_key(&a.nickname));
+    let users = account_users(app, &accounts);
+    crate::clipboard::set_account_logins(
+        accounts.iter().zip(&users).map(|(a, u)| (a.profile.clone().filter(|p| !p.trim().is_empty()), *u)).collect(),
+        accounts.iter().map(|a| a.id).collect(),
+    );
+}
+
+/// The EVE account number of each account (same order): SeAT's, else from a character of theirs
+/// seen logged in on this PC, else the one this PC tied to it (clipboard.rs).
+pub fn account_users(app: &AppHandle, accounts: &[&SeatAccount]) -> Vec<Option<u64>> {
     let mut users: Vec<Option<u64>> = accounts.iter().map(|a| a.launcher_user_id).collect();
     let seen = crate::pcaccounts::seen(app);
     for (i, account) in accounts.iter().enumerate() {
@@ -270,10 +280,7 @@ pub fn set_account_logins(app: &AppHandle, seat: &SeatData) {
             }
         }
     }
-    crate::clipboard::set_account_logins(
-        accounts.iter().zip(&users).map(|(a, u)| (a.profile.clone().filter(|p| !p.trim().is_empty()), *u)).collect(),
-        accounts.iter().map(|a| a.id).collect(),
-    );
+    users
 }
 
 /// Read the saved accounts once on start-up so login screens get their account's number.

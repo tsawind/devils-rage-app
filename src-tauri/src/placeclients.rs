@@ -611,19 +611,50 @@ fn write_window(profile: &str, fixed: bool, spot: Spot) -> Result<String, String
     let path = root.join(format!("settings_{profile}")).join("core_public__.yaml");
     let text = std::fs::read_to_string(&path).map_err(|_| format!("settings_{profile} has no core_public__.yaml yet: start a client with it once."))?;
     let snap = crate::snapshots::auto_snapshot(profile, "before Place clients set its window")?;
-    let stamp = crate::tuning::file_time_now();
-    let text = crate::windowfix::set_window_mode(&text, if fixed { 2 } else { 1 }, stamp);
-    let text = if fixed {
-        crate::windowfix::set_block_values(&text, "FixedWindowSettings", &[("width", spot.w as i64), ("height", spot.h as i64)], stamp)
-    } else {
-        // EVE's WindowedSettings: width / height are the inside, left / top the outside's corner.
-        let (w, h) = eve_size(spot, false);
-        crate::windowfix::set_block_values(&text, "WindowedSettings", &[("width", w as i64), ("height", h as i64), ("left", spot.x as i64), ("top", spot.y as i64), ("showState", 0)], stamp)
-    };
+    let (w, h) = eve_size(spot, fixed);
+    let text = yaml_window(&text, fixed, spot.x, spot.y, w, h, crate::tuning::file_time_now());
     std::fs::write(&path, text).map_err(|e| format!("couldn't write settings_{profile}: {e}"))?;
     let (w, h) = eve_size(spot, fixed);
     log::info!("Place clients: settings_{profile} set to {} {w}x{h} (snapshot {snap})", if fixed { "Fixed Window" } else { "Window mode" });
     Ok(snap)
+}
+
+/// A core_public__.yaml with its window set: Fixed Window and its size, or Window mode with the
+/// inside size `w`×`h` and the outside's corner at `left`, `top` (as EVE keeps them).
+pub(crate) fn yaml_window(text: &str, fixed: bool, left: i32, top: i32, w: i32, h: i32, stamp: u64) -> String {
+    let text = crate::windowfix::set_window_mode(text, if fixed { 2 } else { 1 }, stamp);
+    if fixed {
+        crate::windowfix::set_block_values(&text, "FixedWindowSettings", &[("width", w as i64), ("height", h as i64)], stamp)
+    } else {
+        crate::windowfix::set_block_values(&text, "WindowedSettings", &[("width", w as i64), ("height", h as i64), ("left", left as i64), ("top", top as i64), ("showState", 0)], stamp)
+    }
+}
+
+/// 27 Nov: New launch group's window step: the stand-in on its own (no Place clients session),
+/// to pick one spot for every client of a group. `width` × `height` is EVE's size (the inside in
+/// Window mode); `left`, `top` the outside's corner.
+#[tauri::command]
+pub fn spot_standin_show(app: AppHandle, name: String, left: i32, top: i32, width: i32, height: i32, fixed: bool) {
+    let (l, t, r, b) = if fixed { (0, 0, 0, 0) } else { eve_frame() };
+    set_standin(&app, &name, Spot { x: left, y: top, w: width + l + r, h: height + t + b }, fixed);
+}
+
+/// Where the stand-in is now, in the same terms (None while it's hidden).
+#[tauri::command]
+pub fn spot_standin_get(app: AppHandle) -> Option<serde_json::Value> {
+    let window = app.get_webview_window(STANDIN)?;
+    if !window.is_visible().unwrap_or(false) {
+        return None;
+    }
+    let r = standin_rect(&app)?;
+    let fixed = STANDIN_FIXED.lock().unwrap().unwrap_or(false);
+    let (w, h) = eve_size(r, fixed);
+    Some(serde_json::json!({ "left": r.x, "top": r.y, "width": w, "height": h, "fixed": fixed }))
+}
+
+#[tauri::command]
+pub fn spot_standin_hide(app: AppHandle) {
+    hide_standin(&app);
 }
 
 /// The one being placed: its name, whether it's a preview, and its spot.

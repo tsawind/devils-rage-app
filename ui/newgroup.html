@@ -51,6 +51,33 @@
   .made { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid #23232a; }
   .made:first-child { border-top: 0; }
   .made .grow { flex: 1; }
+  /* 27 Nov: one step at a time. */
+  .steps { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 12px; }
+  .steps button { border: 1px solid var(--line); background: #121216; color: var(--muted); border-radius: 999px; padding: 3px 11px; font-size: 12px; }
+  .steps button.on { border-color: var(--red-hi); color: var(--text); background: #1f0b0e; }
+  .steps button.done { color: var(--ok); }
+  .steps button:disabled { opacity: .45; cursor: default; }
+  .page { display: none; } .page.on { display: block; }
+  .page h2 { font-size: 16px; margin: 0 0 4px; }
+  .page .lead { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .nav { display: flex; gap: 8px; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid #23232a; }
+  .nav .grow { flex: 1; }
+  .kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+  .kind { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: #121216; text-align: left; color: var(--text); }
+  .kind:hover { border-color: var(--red-hi); }
+  .kind b { display: block; font-size: 15px; margin-bottom: 4px; }
+  .kind span { color: var(--muted); font-size: 12px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; background: #0d0d10; color: var(--text); padding: 1px 9px; font-size: 12px; margin: 2px 4px 2px 0; }
+  .chip.on { border-color: var(--red-hi); background: #3a0f14; }
+  .chip.login { color: var(--warn); }
+  .chip.login.on { background: #3a2a08; border-color: var(--warn); }
+  .acct.login { border-color: var(--warn); background: #1d1708; }
+  .seg button { border: 1px solid var(--line); background: #121216; color: var(--muted); padding: 4px 12px; }
+  .seg button:first-child { border-radius: 8px 0 0 8px; } .seg button:last-child { border-radius: 0 8px 8px 0; }
+  .seg button.on { color: var(--text); border-color: var(--red-hi); background: #1f0b0e; }
+  input[type=number] { background: #0d0d10; border: 1px solid var(--line); border-radius: 7px; color: var(--text); padding: 5px 8px; font: inherit; width: 90px; }
+  .review li { margin: 3px 0; }
+  .warnbox { color: var(--warn); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -61,60 +88,92 @@
   <button class="back" id="home">← Home</button>
 </header>
 <main>
-  <p class="note">Everything on one page. The group gets a <b>client profile folder of its own</b>, built from a copy of your settings,
-     so the profiles you already have stay exactly as they are.</p>
-
+  <div class="steps" id="steps"></div>
   <div class="card done" id="result" hidden></div>
-
   <div class="card">
-    <div class="step"><div class="n">1</div><div>
-      <h3>Name</h3>
-      <input type="text" id="name" maxlength="30" placeholder="e.g. Roll Fleet" style="width: 260px">
-      <span class="muted" id="folderHint"></span>
-    </div></div>
 
-    <div class="step"><div class="n">2</div><div>
-      <h3>Characters <span class="muted" id="pickedCount"></span></h3>
-      <div class="row" style="margin-bottom: 6px"><input type="text" id="filter" placeholder="Find a character…" style="width: 220px">
-        <span class="muted">One per account: the EVE launcher starts one character per account.</span></div>
-      <div class="accounts" id="accounts"></div>
-    </div></div>
+  <section class="page" data-step="start">
+    <h2>What kind of group?</h2>
+    <p class="lead">Every launch group gets a <b>client profile folder of its own</b>, built from a copy of your settings, so the profiles you already have stay exactly as they are. You go through it one step at a time.</p>
+    <div class="kinds">
+      <button class="kind" id="kindDaily"><b>📅 Daily login</b><span>Every account, sitting at the login screen. Daily-login sound &amp; graphics (all off), and every client in one spot at EVE's smallest window (1024×768).</span></button>
+      <button class="kind" id="kindBlank"><b>＋ Blank</b><span>Pick the characters or login screens, settings and window yourself.</span></button>
+    </div>
+    <div id="madeCard" hidden style="margin-top: 14px">
+      <h3 style="margin: 0 0 6px; font-size: 14px">Groups made here</h3>
+      <div id="made"></div>
+    </div>
+  </section>
 
-    <div class="step"><div class="n">3</div><div>
-      <h3>Settings to start from</h3>
-      <div class="row">Copy sound, graphics and keys from <select id="baseline"></select></div>
-      <label class="choice"><input type="radio" name="chars" value="own" checked><div>Each character keeps its own windows, overview and module placement
-        <span>Safest: the new profile starts with each character's current layout.</span></div></label>
-      <label class="choice"><input type="radio" name="chars" value="baseline"><div>Everyone gets the baseline's windows and overview
-        <span>Identical clients. Module placement on ships comes from the baseline too.</span></div></label>
-    </div></div>
+  <section class="page" data-step="name">
+    <h2>Name</h2>
+    <p class="lead">What the group is called here, in Your accounts and in the EVE launcher.</p>
+    <input type="text" id="name" maxlength="30" placeholder="e.g. Daily Login" style="width: 260px">
+    <div class="muted" id="folderHint" style="margin-top: 6px"></div>
+  </section>
 
-    <div class="step"><div class="n">4</div><div>
-      <h3>Sound &amp; graphics</h3>
-      <select id="preset"></select>
-      <div class="muted" id="presetWhy" style="font-size: 12px; margin-top: 4px"></div>
-      <details id="fine" style="margin-top: 8px"><summary style="cursor: pointer" class="muted">Fine-tune: every setting the preset sets, and more</summary>
-        <table id="levers" style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px"></table>
-      </details>
-    </div></div>
+  <section class="page" data-step="who">
+    <h2>Who's in it <span class="muted" id="pickedCount" style="font-size: 13px; font-weight: 400"></span></h2>
+    <p class="lead">For each account pick one character, or <span style="color: var(--warn)">Login screen</span> to have it start at the login screen with no character (Character “None” in the launcher). Click again to take it out.</p>
+    <div class="row" style="margin-bottom: 8px">
+      <input type="text" id="filter" placeholder="Find a character…" style="width: 220px">
+      <button class="btn small" id="allLogins">Every account at the login screen</button>
+      <button class="btn small" id="clearAll">Clear</button>
+    </div>
+    <div class="accounts" id="accounts" style="max-height: 420px"></div>
+  </section>
 
-    <div class="step"><div class="n">5</div><div>
-      <h3>Pedal / hotkeys</h3>
-      <div class="row"><span id="keys"></span>
-        <label><input type="checkbox" id="logins"> also cycle clients at the login screen</label></div>
-    </div></div>
+  <section class="page" data-step="base">
+    <h2>Settings to start from</h2>
+    <p class="lead">Keys, shortcuts and the sound &amp; graphics the next step changes are copied from this character's profile.</p>
+    <div class="row">Copy from <select id="baseline"></select></div>
+    <label class="choice" style="margin-top: 8px"><input type="radio" name="chars" value="own" checked><div>Each character keeps its own windows, overview and module placement<span>Safest: the new profile starts with each character's current layout.</span></div></label>
+    <label class="choice"><input type="radio" name="chars" value="baseline"><div>Everyone gets the baseline's windows and overview<span>Identical clients. Module placement on ships comes from the baseline too.</span></div></label>
+  </section>
 
-    <div class="step"><div class="n">6</div><div>
+  <section class="page" data-step="sound">
+    <h2>Sound &amp; graphics</h2>
+    <select id="preset"></select>
+    <div class="muted" id="presetWhy" style="font-size: 12px; margin-top: 4px"></div>
+    <details id="fine" style="margin-top: 8px"><summary style="cursor: pointer" class="muted">Fine-tune: every setting the preset sets, and more</summary>
+      <table id="levers" style="width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px"></table>
+    </details>
+  </section>
+
+  <section class="page" data-step="window">
+    <h2>Window</h2>
+    <p class="lead">One window for every client of the group: they all open in the same spot and size (they share this profile). Peepshow's previews show which client is which.</p>
+    <label class="choice"><input type="checkbox" id="winOn"><div>Set the window for this group<span>Untick to keep whatever the baseline's profile has.</span></div></label>
+    <div id="winBox">
+      <div class="row" style="margin: 8px 0">Mode <span class="seg"><button id="modeWindow">Window</button><button id="modeFixed">Fixed</button></span>
+        <span class="muted" style="font-size: 12px" id="modeWhy"></span></div>
+      <div class="row" style="margin: 8px 0">Size <select id="size"></select> <span class="warnbox" id="sizeWarn"></span></div>
+      <div class="row" style="margin: 8px 0" id="spotRow">Spot: left <input type="number" id="left"> top <input type="number" id="top">
+        <button class="btn red small" id="showSpot">Show it on screen</button>
+        <button class="btn small" id="hideSpot" hidden>Done placing</button></div>
+      <div class="muted" style="font-size: 12px" id="spotHint">“Show it on screen” puts a stand-in EVE window there: drag it where the clients should open (its edges stick to the screen's sides and middle). The numbers follow it.</div>
+    </div>
+  </section>
+
+  <section class="page" data-step="keys">
+    <h2>Pedal / hotkeys</h2>
+    <p class="lead">Keys that bring the group's next or previous client to the front (optional).</p>
+    <div class="row"><span id="keys"></span></div>
+    <label class="choice" style="margin-top: 8px"><input type="checkbox" id="logins"><div>Also cycle clients at the login screen<span>Always on when the group has login screens in it.</span></div></label>
+  </section>
+
+  <section class="page" data-step="review">
+    <h2 id="reviewTitle">Check and create</h2>
+    <ul class="review" id="review"></ul>
+    <div class="muted small" id="editNote" hidden style="font-size: 12px; margin-top: 6px">Editing keeps everything the clients saved in this group's folder (windows, overview, modules). Members you add get settings as step 4 says; characters no member needs leave the folder. Only the sound &amp; graphics settings ticked in step 5, and the window if it's ticked in step 6, are written. Close the EVE clients first.</div>
+    <div class="row" style="margin-top: 10px">
       <button class="btn red" id="create" disabled>Create the group</button>
       <button class="btn" id="cancelEdit" hidden>Stop editing</button>
-      <div class="muted small" id="editNote" hidden style="font-size: 12px; margin-top: 6px">Editing keeps everything the clients saved in this group's folder (windows, overview, modules). Characters you add get settings as step 3 says; characters you untick leave the folder. Only the sound &amp; graphics settings ticked in step 4 are written; untick them all to leave those alone. Close the EVE clients first.</div>
-      <div class="status" id="status"></div>
-    </div></div>
-  </div>
+    </div>
+    <div class="status" id="status"></div>
+  </section>
 
-  <div class="card" id="madeCard" hidden>
-    <h3 style="margin: 0 0 6px; font-size: 14px">Groups made here</h3>
-    <div id="made"></div>
+  <div class="nav"><button class="btn" id="back">← Back</button><span class="grow"></span><span class="muted" id="needs" style="font-size: 12px"></span><button class="btn red" id="next">Next →</button></div>
   </div>
 </main>
 
@@ -124,10 +183,18 @@
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   const PRESETS = [...window.DR_PRESETS, { id: "keep", name: "Keep the baseline's sound & graphics", why: "Copies them as they are; nothing changed.", values: {}, prefs: {} }];
+  // EVE's window sizes (the smallest it recommends first).
+  const SIZES = [[1024, 768], [1152, 864], [1280, 720], [1280, 768], [1280, 800], [1280, 960], [1280, 1024], [1360, 768], [1366, 768], [1440, 900], [1440, 1080],
+    [1600, 900], [1600, 1024], [1600, 1200], [1680, 1050], [1920, 1080], [1920, 1200], [1920, 1440], [2048, 1536], [2560, 1440], [2560, 1600], [3840, 2160]];
+  const STEPS = [["start", "Start"], ["name", "Name"], ["who", "Who's in it"], ["base", "Settings from"], ["sound", "Sound & graphics"], ["window", "Window"], ["keys", "Pedal keys"], ["review", "Create"]];
 
   let accounts = [], pick = {}, keys = { forward: null, backward: null };
   let editing = null; // { profile, name } while changing a group made here
   let levers = [], prefsList = [], values = {}, prefs = {};
+  let step = 0, reached = 0;
+  let win = { on: false, fixed: false, w: 1024, h: 768, left: 0, top: 0 };
+  let placing = false, placingTimer = null;
+
   function usePreset(id) {
     const p = PRESETS.find(x => x.id === id) || PRESETS[0];
     values = { ...p.values }; prefs = { ...p.prefs };
@@ -174,43 +241,160 @@
     t.append(Object.assign(el("tr"), { innerHTML: '<td colspan="3" class="muted" style="font-size: 12px; padding-top: 8px">Ticked = written into the new profile; unticked = kept as the baseline has it.</td>' }));
   }
 
+
   const folder = (name) => name.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 30);
   function status(t, c) { $("status").textContent = t || ""; $("status").className = "status" + (c ? " " + c : ""); }
-  const picked = () => Object.values(pick).filter(Boolean);
+  // pick[nickname] = character id, "login" (the login screen only), or nothing.
+  const pickedChars = () => Object.values(pick).filter(v => typeof v === "number");
+  const loginAccounts = () => Object.keys(pick).filter(k => pick[k] === "login");
+  const memberCount = () => Object.values(pick).filter(Boolean).length;
+  const allChars = () => accounts.flatMap(a => a.characters);
+  const nameOf = (id) => allChars().find(c => c.id === id)?.name || String(id);
+  const natural = (a, b) => { const n = (s) => { const m = String(s).match(/\d+/); return m ? Number(m[0]) : 1e9; }; return n(a) - n(b) || String(a).localeCompare(String(b)); };
+  const loginLabel = (nick) => "Login " + ([...accounts].sort((a, b) => natural(a.nickname, b.nickname)).findIndex(a => a.nickname === nick) + 1);
 
+  // ---- Steps ----
+  function valid(i) {
+    switch (STEPS[i][0]) {
+      case "name": return folder($("name").value) ? "" : "Give it a name";
+      case "who": return memberCount() ? "" : "Pick at least one character or login screen";
+      case "base": return $("baseline").value ? "" : "Pick the settings to start from";
+      default: return "";
+    }
+  }
+  function go(i) {
+    if (placing && STEPS[i][0] !== "window") stopPlacing();
+    step = Math.max(0, Math.min(STEPS.length - 1, i));
+    reached = Math.max(reached, step);
+    document.querySelectorAll(".page").forEach(p => p.classList.toggle("on", p.dataset.step === STEPS[step][0]));
+    if (STEPS[step][0] === "review") renderReview();
+    render();
+    document.querySelector("main").scrollTop = 0;
+  }
+  function renderSteps() {
+    const host = $("steps"); host.innerHTML = "";
+    STEPS.forEach(([, label], i) => {
+      const b = el("button", (i === step ? "on" : "") + (i < reached && !valid(i) && i !== step ? " done" : ""), `${i + 1} · ${label}`);
+      b.disabled = i > reached;
+      b.addEventListener("click", () => go(i));
+      host.append(b);
+    });
+  }
+
+  // ---- Who's in it ----
   function renderAccounts() {
     const q = $("filter").value.trim().toLowerCase();
     const host = $("accounts"); host.innerHTML = "";
     accounts.forEach(a => {
-      if (q && !a.characters.some(c => c.name.toLowerCase().includes(q))) return;
-      const box = el("div", "acct" + (pick[a.nickname] ? " on" : ""));
+      if (q && !a.characters.some(c => c.name.toLowerCase().includes(q)) && !a.nickname.toLowerCase().includes(q)) return;
+      const cur = pick[a.nickname];
+      const box = el("div", "acct" + (cur === "login" ? " login" : cur ? " on" : ""));
       box.append(el("b", null, a.nickname));
-      a.characters.forEach(c => {
-        const l = el("label");
-        const r = el("input"); r.type = "checkbox"; r.checked = pick[a.nickname] === c.id;
-        r.addEventListener("change", () => { pick[a.nickname] = r.checked ? c.id : null; render(); });
-        l.append(r, document.createTextNode(c.name));
-        box.append(l);
-      });
+      const chip = (text, value, cls) => {
+        const c = el("button", "chip" + (cls ? " " + cls : "") + (cur === value ? " on" : ""), text);
+        c.addEventListener("click", () => { pick[a.nickname] = cur === value ? null : value; render(); });
+        box.append(c);
+      };
+      chip("Login screen", "login", "login");
+      a.characters.forEach(c => chip(c.name, c.id));
       host.append(box);
     });
   }
 
-  function render() {
-    renderAccounts();
-    const ids = picked();
-    $("pickedCount").textContent = ids.length ? `· ${ids.length} picked` : "";
-    const nameOf = (id) => accounts.flatMap(a => a.characters).find(c => c.id === id)?.name || id;
+  function renderBaseline() {
     const b = $("baseline"), keep = b.value;
     b.innerHTML = "";
-    ids.forEach(id => b.append(new Option(nameOf(id), String(id))));
-    if (keep && ids.includes(Number(keep))) b.value = keep;
+    const first = pickedChars();
+    const loginChars = loginAccounts().flatMap(n => (accounts.find(a => a.nickname === n)?.characters || []).map(c => c.id));
+    const rest = allChars().map(c => c.id).filter(id => !first.includes(id) && !loginChars.includes(id));
+    const group = (label, ids) => { if (!ids.length) return; const g = document.createElement("optgroup"); g.label = label; ids.forEach(id => g.append(new Option(nameOf(id), String(id)))); b.append(g); };
+    group("Picked characters", first);
+    group("On the login-screen accounts", loginChars);
+    group("Everyone else", rest);
+    if (keep && [...b.options].some(o => o.value === keep)) b.value = keep;
+  }
+
+  function render() {
+    renderSteps();
+    renderAccounts();
+    renderBaseline();
+    const n = memberCount(), logins = loginAccounts().length;
+    $("pickedCount").textContent = n ? `· ${n} account${n === 1 ? "" : "s"}${logins ? ` (${logins} at the login screen)` : ""}` : "";
     const f = folder($("name").value);
     $("folderHint").textContent = f ? `→ client profile “${f}” (settings_${f})` : "";
-    $("create").disabled = !f || !ids.length;
+    $("name").disabled = !!editing;
+    const why = valid(step);
+    $("needs").textContent = why;
+    $("next").disabled = !!why;
+    $("next").hidden = step === STEPS.length - 1 || step === 0;
+    $("back").hidden = step === 0;
+    $("create").disabled = [1, 2, 3].some(i => valid(i));
     $("create").textContent = editing ? `Update “${editing.name}”` : "Create the group";
     $("cancelEdit").hidden = !editing;
-    $("name").disabled = !!editing;
+    $("reviewTitle").textContent = editing ? `Check and update “${editing.name}”` : "Check and create";
+    renderWindow();
+  }
+
+  // ---- Window ----
+  function renderWindow() {
+    $("winOn").checked = win.on;
+    $("winBox").style.opacity = win.on ? "1" : ".45";
+    $("winBox").style.pointerEvents = win.on ? "" : "none";
+    $("modeWindow").classList.toggle("on", !win.fixed);
+    $("modeFixed").classList.toggle("on", win.fixed);
+    $("modeWhy").textContent = win.fixed ? "Fixed: no Windows title bar; EVE picks where it goes (the spot isn't saved)." : "Window: a normal window with a title bar, opened at the spot below.";
+    $("spotRow").style.display = win.fixed ? "none" : "";
+    $("spotHint").style.display = win.fixed ? "none" : "";
+    const key = `${win.w}x${win.h}`;
+    if (![...$("size").options].some(o => o.value === key)) $("size").append(new Option(`${win.w} × ${win.h}`, key));
+    $("size").value = key;
+    $("sizeWarn").textContent = win.w < 1024 || win.h < 768 ? "Below EVE's recommended 1024×768: some windows won't fit." : "";
+    if (document.activeElement !== $("left")) $("left").value = win.left;
+    if (document.activeElement !== $("top")) $("top").value = win.top;
+    $("showSpot").hidden = placing; $("hideSpot").hidden = !placing;
+  }
+  function standinName() {
+    const l = loginAccounts().sort(natural)[0];
+    if (l) return loginLabel(l);
+    const c = pickedChars()[0];
+    return c ? nameOf(c) : ($("name").value || "EVE");
+  }
+  async function showStandin() {
+    await invoke("spot_standin_show", { name: standinName(), left: win.left, top: win.top, width: win.w, height: win.h, fixed: win.fixed }).catch(e => status(String(e), "bad"));
+  }
+  function startPlacing() {
+    placing = true; showStandin(); renderWindow();
+    clearInterval(placingTimer);
+    placingTimer = setInterval(async () => {
+      const r = await invoke("spot_standin_get").catch(() => null);
+      if (!r) return;
+      win.left = r.left; win.top = r.top;
+      if (r.width !== win.w || r.height !== win.h) { win.w = r.width; win.h = r.height; }
+      renderWindow();
+    }, 400);
+  }
+  function stopPlacing() {
+    placing = false; clearInterval(placingTimer);
+    invoke("spot_standin_hide").catch(() => {});
+    renderWindow();
+  }
+
+  // ---- Review ----
+  function renderReview() {
+    const ul = $("review"); ul.innerHTML = "";
+    const li = (html) => { const l = el("li"); l.innerHTML = html; ul.append(l); return l; };
+    const esc = (t) => String(t).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    li(`<b>Name:</b> ${esc($("name").value.trim())} → client profile <code>settings_${esc(folder($("name").value))}</code>`);
+    const chars = Object.entries(pick).filter(([, v]) => typeof v === "number").map(([n, id]) => `${esc(n)}: ${esc(nameOf(id))}`);
+    const logins = loginAccounts().sort(natural);
+    if (chars.length) li(`<b>${chars.length} character${chars.length === 1 ? "" : "s"}:</b> ${chars.join(", ")}`);
+    if (logins.length) li(`<b>${logins.length} account${logins.length === 1 ? "" : "s"} at the login screen:</b> ${logins.map(esc).join(", ")}`);
+    const b = $("baseline");
+    li(`<b>Settings from:</b> ${esc(b.options[b.selectedIndex]?.text || "—")}; ${document.querySelector("input[name=chars]:checked").value === "own" ? "each character keeps its own windows" : "everyone gets the baseline's windows"}`);
+    const p = PRESETS.find(x => x.id === $("preset").value);
+    li(`<b>Sound &amp; graphics:</b> ${esc(p ? p.name : "—")}${Object.keys(values).length || Object.keys(prefs).length ? ` (${Object.keys(values).length + Object.keys(prefs).length} settings written)` : ""}`);
+    li(win.on ? `<b>Window:</b> ${win.fixed ? "Fixed" : "Window mode"} ${win.w} × ${win.h}${win.fixed ? "" : ` at ${win.left}, ${win.top}`}, the same for every client` : `<b>Window:</b> as the baseline's profile has it`);
+    li(`<b>Pedal keys:</b> ${esc(keys.forward || "—")} / ${esc(keys.backward || "—")}${$("logins").checked || logins.length ? "; login screens cycle too" : ""}`);
   }
 
   function keyButton(label, onSet) {
@@ -241,7 +425,8 @@
     const host = $("made"); host.innerHTML = "";
     made.forEach(m => {
       const row = el("div", "made");
-      row.append(el("b", null, m.name), el("span", "muted", `client profile “${m.profile}” · ${m.characters.length} characters`), el("span", "grow"));
+      const who = [m.characters.length && !(m.logins || []).length ? `${m.characters.length} characters` : "", (m.logins || []).length ? `${m.logins.length} login screens` : ""].filter(Boolean).join(" · ");
+      row.append(el("b", null, m.name), el("span", "muted", `client profile “${m.profile}”${who ? " · " + who : ""}`), el("span", "grow"));
       const edit = el("button", "btn small", "Edit");
       edit.addEventListener("click", () => startEdit(m));
       row.append(edit);
@@ -260,7 +445,7 @@
     const box = $("result"); box.hidden = false; box.innerHTML = "";
     box.append(el("h3", null, `✓ “${name}” is ready`));
     box.lastChild.style.margin = "0";
-    const ol = el("ol"); ol.start = 7;
+    const ol = el("ol");
     const li0 = el("li"); li0.innerHTML = `<b>Close the EVE launcher</b> if it's open (File → Exit, or right-click its tray icon → Exit), then start it again so it sees the new client profile <code></code>.`;
     li0.querySelector("code").textContent = r.profile; ol.append(li0);
     const open = el("button", "btn red small", "▶ Open the EVE launcher");
@@ -269,58 +454,69 @@
     li0.append(open);
     const li1 = el("li"); li1.innerHTML = `In the launcher: <b>⚙ Settings → EVE Online → Launch Groups</b>, type <code></code> and <b>Create</b>.`;
     li1.querySelector("code").textContent = name; ol.append(li1);
-    r.accounts.forEach(a => {
+    const logins = r.accounts.filter(a => a.login), chars = r.accounts.filter(a => !a.login);
+    chars.forEach(a => {
       const li = el("li"); li.innerHTML = `Add account <b></b> (<span></span>) and set its <b>Client profile</b> to <code></code>.`;
       li.querySelectorAll("b")[0].textContent = a.account; li.querySelector("span").textContent = a.characters.join(", "); li.querySelector("code").textContent = r.profile;
       ol.append(li);
     });
-    const last = el("li"); last.textContent = "Launch the group. Previews open by themselves when the clients start; cycle with your pedal keys."; ol.append(last);
+    if (logins.length) {
+      const li = el("li"); li.innerHTML = `Add these accounts with <b>Client profile</b> <code></code> and <b>Character: None</b> (they stay at the login screen): <span></span>.`;
+      li.querySelector("code").textContent = r.profile; li.querySelector("span").textContent = logins.map(a => a.account).join(", ");
+      ol.append(li);
+    }
+    const last = el("li"); last.textContent = "Launch the group. " + (r.window ? "Every client opens in the spot you picked. " : "") + "Previews open by themselves when the clients start; cycle with your pedal keys."; ol.append(last);
     box.append(ol);
     box.scrollIntoView({ behavior: "smooth" });
   }
 
+  function reset() {
+    editing = null; pick = {}; keys = { forward: null, backward: null };
+    $("name").value = ""; $("editNote").hidden = true; $("logins").checked = false;
+    win = { on: false, fixed: false, w: 1024, h: 768, left: 0, top: 0 };
+    $("preset").value = "alt"; usePreset("alt");
+    status("");
+  }
+
   async function startEdit(m) {
+    reset();
     editing = { profile: m.profile, name: m.name };
     $("name").value = m.name;
-    pick = {};
-    m.characters.forEach((id) => { const a = accounts.find((x) => x.characters.some((c) => c.id === id)); if (a) pick[a.nickname] = id; });
-    // Start from what the group's profile has now, with nothing ticked (so nothing is changed unless you tick it).
-    const t = await invoke("tuning_read").catch(() => null);
-    const now = t && t.profiles && t.profiles[m.profile];
+    (m.logins || []).forEach(n => { pick[n] = "login"; });
+    m.characters.forEach((id) => { const a = accounts.find((x) => x.characters.some((c) => c.id === id)); if (a && pick[a.nickname] !== "login") pick[a.nickname] = id; });
     $("preset").value = "keep"; usePreset("keep");
-    if (now && now.values) { $("presetWhy").textContent = "Showing nothing ticked: pick a preset or tick settings to change them in this group."; }
+    $("presetWhy").textContent = "Showing nothing ticked: pick a preset or tick settings to change them in this group.";
     $("editNote").hidden = false;
     status(`Editing “${m.name}” (client profile ${m.profile}).`);
-    render();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    reached = STEPS.length - 1;
+    go(1);
   }
-  $("cancelEdit").addEventListener("click", () => { editing = null; $("editNote").hidden = true; $("name").value = ""; pick = {}; usePreset("alt"); $("preset").value = "alt"; status(""); render(); });
+  $("cancelEdit").addEventListener("click", () => { reset(); reached = 0; go(0); });
+
+  function setupObject(name) {
+    return {
+      name, character_ids: pickedChars(), login_accounts: loginAccounts(), baseline_id: Number($("baseline").value),
+      characters_from: document.querySelector("input[name=chars]:checked").value,
+      values, prefs, forward_hotkey: keys.forward, backward_hotkey: keys.backward,
+      login_screens: $("logins").checked || loginAccounts().length > 0,
+      window: win.on ? { fixed: win.fixed, left: win.left, top: win.top, width: win.w, height: win.h } : null,
+    };
+  }
 
   $("create").addEventListener("click", async () => {
+    if (placing) stopPlacing();
+    $("create").disabled = true;
     if (editing) {
-      const setup = {
-        name: editing.name, character_ids: picked(), baseline_id: Number($("baseline").value),
-        characters_from: document.querySelector("input[name=chars]:checked").value,
-        values, prefs, forward_hotkey: keys.forward, backward_hotkey: keys.backward, login_screens: $("logins").checked,
-      };
-      $("create").disabled = true;
       status("Updating the group…");
-      try { status(await invoke("group_setup_update", { profile: editing.profile, setup }), "ok"); editing = null; $("editNote").hidden = true; loadMade(); }
+      try { status(await invoke("group_setup_update", { profile: editing.profile, setup: setupObject(editing.name) }), "ok"); editing = null; $("editNote").hidden = true; loadMade(); }
       catch (e) { status(String(e), "bad"); }
       render();
       return;
     }
     const name = $("name").value.trim();
-    const setup = {
-      name, character_ids: picked(), baseline_id: Number($("baseline").value),
-      characters_from: document.querySelector("input[name=chars]:checked").value,
-      values, prefs,
-      forward_hotkey: keys.forward, backward_hotkey: keys.backward, login_screens: $("logins").checked,
-    };
-    $("create").disabled = true;
     status("Making the group, its profile folder and settings…");
     try {
-      const r = await invoke("group_setup_create", { setup });
+      const r = await invoke("group_setup_create", { setup: setupObject(name) });
       status("");
       showResult(r, name);
       loadMade();
@@ -328,13 +524,39 @@
     render();
   });
 
+  // ---- Start ----
+  $("kindDaily").addEventListener("click", () => {
+    reset();
+    $("name").value = "Daily Login";
+    accounts.forEach(a => { pick[a.nickname] = "login"; });
+    if (PRESETS.some(p => p.id === "daily")) { $("preset").value = "daily"; usePreset("daily"); }
+    win = { on: true, fixed: false, w: 1024, h: 768, left: 0, top: 0 };
+    $("logins").checked = true;
+    reached = 1; go(1);
+  });
+  $("kindBlank").addEventListener("click", () => { reset(); reached = 1; go(1); });
+  $("back").addEventListener("click", () => go(step - 1));
+  $("next").addEventListener("click", () => { if (!valid(step)) go(step + 1); });
+
   $("name").addEventListener("input", render);
   $("filter").addEventListener("input", renderAccounts);
+  $("allLogins").addEventListener("click", () => { accounts.forEach(a => { pick[a.nickname] = "login"; }); render(); });
+  $("clearAll").addEventListener("click", () => { pick = {}; render(); });
+  $("baseline").addEventListener("change", render);
   $("preset").addEventListener("change", () => usePreset($("preset").value));
-  $("home").addEventListener("click", () => { location.href = "index.html#groups"; });
+  $("winOn").addEventListener("change", () => { win.on = $("winOn").checked; if (!win.on && placing) stopPlacing(); renderWindow(); });
+  $("modeWindow").addEventListener("click", () => { win.fixed = false; if (placing) showStandin(); renderWindow(); });
+  $("modeFixed").addEventListener("click", () => { win.fixed = true; if (placing) stopPlacing(); renderWindow(); });
+  $("size").addEventListener("change", () => { const [w, h] = $("size").value.split("x").map(Number); win.w = w; win.h = h; if (placing) showStandin(); renderWindow(); });
+  ["left", "top"].forEach(k => $(k).addEventListener("change", () => { win[k] = Math.round(Number($(k).value) || 0); if (placing) showStandin(); renderWindow(); }));
+  $("showSpot").addEventListener("click", startPlacing);
+  $("hideSpot").addEventListener("click", stopPlacing);
+  window.addEventListener("beforeunload", () => { if (placing) invoke("spot_standin_hide").catch(() => {}); });
+  $("home").addEventListener("click", () => { if (placing) stopPlacing(); location.href = "index.html#groups"; });
 
   (async () => {
     PRESETS.forEach(p => $("preset").append(new Option(p.name, p.id)));
+    SIZES.forEach(([w, h]) => $("size").append(new Option(`${w} × ${h}${w === 1024 ? " (smallest EVE recommends)" : ""}`, `${w}x${h}`)));
     $("preset").value = "alt";
     const t = await invoke("tuning_read").catch(() => null);
     if (t) { levers = t.levers; prefsList = t.prefs; }
@@ -342,7 +564,8 @@
     $("keys").append(keyButton("Next", (k) => { keys.forward = k; }), keyButton("Prev", (k) => { keys.backward = k; }));
     try { await invoke("seat_refresh"); } catch (e) { status("Your accounts: " + e, "bad"); }
     accounts = (await invoke("seat_launch_groups").catch(() => ({ accounts: [] }))).accounts || [];
-    render();
+    accounts.sort((a, b) => natural(a.nickname, b.nickname));
+    go(0);
     loadMade();
   })();
 </script>
