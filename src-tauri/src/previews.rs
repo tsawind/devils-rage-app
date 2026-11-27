@@ -24,7 +24,8 @@ use tauri::{
 /// Label every preview window shares a prefix, so we can find and close them together.
 pub(crate) const PREFIX: &str = "preview-";
 const DEFAULT_SIZE: (f64, f64) = (320.0, 200.0);
-const MIN_SIZE: (f64, f64) = (80.0, 45.0);
+/// 27 Nov: small enough for one cell of a fine grid (was 80 × 45: two cells at least on 64×64).
+const MIN_SIZE: (f64, f64) = (32.0, 18.0);
 
 pub(crate) fn label_for(name: &str) -> String {
     // Keep it to a safe window label (letters and digits); the page gets the real name.
