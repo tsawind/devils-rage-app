@@ -688,8 +688,8 @@ pub fn place_size(app: AppHandle, w: Option<i32>, h: Option<i32>, dw: Option<i32
     // go round it.
     let (fl, ft, fr, fb) = if previews || fixed { (0, 0, 0, 0) } else { eve_frame() };
     let to = Spot {
-        w: w.map(|w| w + fl + fr).unwrap_or(here.w + dw.unwrap_or(0)).max(80),
-        h: h.map(|h| h + ft + fb).unwrap_or(here.h + dh.unwrap_or(0)).max(45),
+        w: w.map(|w| w + fl + fr).unwrap_or(here.w + dw.unwrap_or(0)).max(if previews { crate::previews::MIN_SIZE.0 as i32 } else { 80 }),
+        h: h.map(|h| h + ft + fb).unwrap_or(here.h + dh.unwrap_or(0)).max(if previews { crate::previews::MIN_SIZE.1 as i32 } else { 45 }),
         ..here
     };
     if !move_to(&app, previews, &name, to) {

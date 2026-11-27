@@ -274,8 +274,8 @@ fn all_previews(app: &AppHandle) -> Vec<(String, WebviewWindow, Spot)> {
 pub fn set_preview_rect(app: &AppHandle, name: &str, r: Spot) {
     let Some(window) = preview_window(app, name) else { return };
     IGNORE.lock().unwrap().get_or_insert_with(HashMap::new).insert(name.to_string(), Instant::now() + Duration::from_millis(500));
-    let w = r.w.max(80) as u32;
-    let h = r.h.max(45) as u32;
+    let w = r.w.max(crate::previews::MIN_SIZE.0 as i32) as u32;
+    let h = r.h.max(crate::previews::MIN_SIZE.1 as i32) as u32;
     let _ = window.set_position(PhysicalPosition::new(r.x, r.y));
     let _ = window.set_size(PhysicalSize::new(w, h));
     with_layout(app, |layout| {
