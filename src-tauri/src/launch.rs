@@ -285,7 +285,59 @@ pub fn account_users(app: &AppHandle, accounts: &[&SeatAccount]) -> Vec<Option<u
 
 /// Read the saved accounts once on start-up so login screens get their account's number.
 pub fn load_account_logins(app: &AppHandle) {
-    set_account_logins(app, &load_seat(app));
+    let seat = load_seat(app);
+    set_account_logins(app, &seat);
+    tell_seat_users(app, &seat);
+}
+
+/// 27 Nov: accounts SeAT has no EVE account number for, whose number this PC knows for sure (a
+/// character of theirs logged in here and its sign-in named the account): tell SeAT, so every
+/// PC numbers their login screens right and Your accounts can show it. Guesses (a login screen
+/// that took a free number) are never sent. Quietly does nothing without a SeAT session
+/// (Peepshow).
+fn tell_seat_users(app: &AppHandle, seat: &SeatData) {
+    let seen = crate::pcaccounts::seen(app);
+    let mut pairs: Vec<serde_json::Value> = Vec::new();
+    let known: Vec<u64> = seat.accounts.iter().filter_map(|a| a.launcher_user_id).collect();
+    for account in seat.accounts.iter().filter(|a| a.launcher_user_id.is_none()) {
+        let Some(user) = account.characters.iter().find_map(|c| seen.get(&c.name).copied()) else { continue };
+        if known.contains(&user) || pairs.iter().any(|p| p["launcher_user_id"] == user) {
+            continue;
+        }
+        pairs.push(serde_json::json!({ "account_id": account.id, "launcher_user_id": user }));
+    }
+    if pairs.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    // Off the main thread: reading the page's cookies there can hang on Windows.
+    tauri::async_runtime::spawn(async move {
+        let Ok((cookies, Some(xsrf))) = seat_session(&app) else { return };
+        let sent = crate::http_client()
+            .post(format!("{}/devilsrage/accounts/launcher-ids", crate::SEAT_URL))
+            .header("Accept", "application/json")
+            .header("Cookie", cookies)
+            .header("X-XSRF-TOKEN", xsrf)
+            .header("X-Requested-With", "XMLHttpRequest")
+            .json(&serde_json::json!({ "ids": pairs }))
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await;
+        match sent {
+            Ok(r) if r.status().is_success() => {
+                let body: serde_json::Value = r.json().await.unwrap_or_default();
+                let saved = body["saved"].as_u64().unwrap_or(0);
+                log::info!("told SeAT {saved} EVE account numbers it didn't have");
+                if saved > 0 {
+                    if let Ok(data) = fetch_seat(&app).await {
+                        let _ = store_seat(&app, &data);
+                    }
+                }
+            }
+            Ok(r) => log::info!("SeAT didn't take the EVE account numbers ({})", r.status()),
+            Err(e) => log::info!("couldn't tell SeAT the EVE account numbers ({e})"),
+        }
+    });
 }
 
 /// This PC's pedal keys and switches for one SeAT group (defaults when none saved).
