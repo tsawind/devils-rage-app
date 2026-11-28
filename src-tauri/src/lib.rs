@@ -679,6 +679,8 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             launch::launcher_ready,
         ])
         .setup(move |app| {
+            // 27 Nov: a daily backup of every settings profile (Devils app and Peepshow alike).
+            snapshots::start_daily();
             let handle = app.handle().clone();
             mainthread::init(&handle);
             if tools {

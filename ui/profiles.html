@@ -338,7 +338,7 @@
     d.append(el("summary", null, mine.length ? `Snapshots (${mine.length})` : "No snapshots yet"));
     mine.forEach(x => {
       const row = el("div", "s");
-      const t = el("span"); t.append(document.createTextNode(stampOf(x.at) + (x.note ? " · " + x.note : "")), el("small", null, ` ${x.files} files${x.auto ? " · taken by the app" : ""}`));
+      const t = el("span"); t.append(document.createTextNode(stampOf(x.at) + (x.note ? " · " + x.note : "")), el("small", null, ` ${x.files} files${x.daily ? " · daily backup" : x.auto ? " · taken by the app" : ""}`));
       const back = el("button", "btn small", "Put back"); back.title = "Make this profile exactly this snapshot (what's there now is snapshotted first). Every EVE client and the launcher closed.";
       back.addEventListener("click", () => twice(row, `Put settings_${profile} back to ${stampOf(x.at)}?`, "What's there now gets its own snapshot first. Go ahead?", () => run(key, "profile_snapshot_restore", { profile, id: x.id })));
       const del = el("button", "btn small", "Delete");
