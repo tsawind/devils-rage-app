@@ -165,6 +165,28 @@ pub struct SeatGroup {
     pub kind: String,
     #[serde(default)]
     pub members: Vec<SeatMember>,
+    /// 28 Nov: accounts in the group at their login screen (no character).
+    #[serde(default)]
+    pub logins: Vec<SeatLogin>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeatLogin {
+    pub account: String,
+    #[serde(default)]
+    pub account_id: u64,
+}
+
+/// "Login N" for each account (N: its place in Your accounts' order, as login screens are named).
+pub(crate) fn login_labels(seat: &SeatData) -> std::collections::HashMap<String, String> {
+    let mut accounts: Vec<&SeatAccount> = seat.accounts.iter().collect();
+    accounts.sort_by_key(|a| nickname_key(&a.nickname));
+    accounts.iter().enumerate().map(|(i, a)| (a.nickname.clone(), format!("Login {}", i + 1))).collect()
+}
+
+/// The number in "Login 12" (for putting login screens in order).
+pub(crate) fn login_number(name: &str) -> Option<u32> {
+    name.strip_prefix("Login ")?.trim().parse().ok()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -400,13 +422,22 @@ pub fn retire_local(app: &AppHandle) -> Result<(), String> {
 /// Every group the pedal can cycle: SeAT's (with this PC's keys and switches), then the PC's own.
 pub fn all_groups(app: &AppHandle) -> Vec<Group> {
     let prefs = load_prefs(app).groups;
-    let mut out: Vec<Group> = load_seat(app)
+    let seat = load_seat(app);
+    let labels = login_labels(&seat);
+    let mut out: Vec<Group> = seat
         .groups
         .into_iter()
         .map(|g| {
             let p = prefs.get(&g.id.to_string()).cloned().unwrap_or_default();
             let mut members: Vec<String> = in_order(g.members.into_iter().map(|m| m.name).collect(), &p.order);
-            if p.login_screens {
+            // 28 Nov: its own login screens ("Login N"), in Login order; then only those cycle,
+            // not every login screen on the PC.
+            let mut own: Vec<String> = g.logins.iter().filter_map(|l| labels.get(&l.account).cloned()).collect();
+            own.sort_by_key(|n| login_number(n).unwrap_or(u32::MAX));
+            own.dedup();
+            if !own.is_empty() {
+                members.extend(own);
+            } else if p.login_screens {
                 members.push(crate::cycle::LOGIN_SCREENS.to_string());
             }
             Group { id: format!("seat-{}", g.id), name: g.name, members, skipped: p.skipped, forward_hotkey: p.forward_hotkey, backward_hotkey: p.backward_hotkey, color: p.color, remember_windows: p.remember_windows, hidden: p.hidden }
@@ -968,16 +999,21 @@ mod hotkeys {
         let Some((group_id, forward)) = hit else { return };
         let group: Option<Group> = all_groups(app).into_iter().find(|g| g.id == group_id);
         let Some(group) = group else { return };
-        let logins = crate::clipboard::open_login_windows();
+        // Every open client by name, login screens as "Login N" too (28 Nov).
+        let clients = crate::clipboard::open_clients();
+        let number_of = |h: isize| clients.iter().find(|(_, c)| *c == h).and_then(|(n, _)| super::login_number(n)).unwrap_or(u32::MAX);
+        let mut logins = crate::clipboard::open_login_windows();
+        // 28 Nov: "Login screens" go Login 1, 2, 3… (they went by window age).
+        logins.sort_by_key(|h| number_of(*h));
         let active: Vec<String> = group.members.iter().filter(|m| !group.skipped.contains(m) && !group.hidden.contains(m)).cloned().collect();
         let order = crate::cycle::expand_login(&active, &logins);
-        let mut open: HashSet<String> = crate::clipboard::open_eve_windows().into_iter().map(|(name, _)| name).collect();
+        let mut open: HashSet<String> = clients.iter().map(|(name, _)| name.clone()).collect();
         open.extend(logins.iter().map(|h| format!("login:{h}")));
         // Step from the client in front now (a login window counts by its handle).
         let front = crate::clipboard::foreground_handle();
         let focused = if logins.contains(&front) { Some(format!("login:{front}")) } else { crate::clipboard::foreground_client() };
         if let Some(next) = crate::cycle::advance(&group_id, &order, &open, focused.as_deref(), forward) {
-            match crate::cycle::login_handle(&next) {
+            match crate::cycle::login_handle(&next).or_else(|| super::login_number(&next).and_then(|_| clients.iter().find(|(n, _)| *n == next).map(|(_, h)| *h))) {
                 Some(handle) => crate::capture::focus_handle(handle),
                 None => crate::capture::focus_client(&next),
             };

@@ -174,6 +174,11 @@ fn write_spot(dir: &Path, spot: WindowSpot) -> Result<(), String> {
     std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
+/// 28 Nov: the SeAT ids of the accounts in the group at their login screen (kept in SeAT now).
+fn login_ids(seat: &crate::launch::SeatData, setup: &NewGroup) -> Vec<u64> {
+    seat.accounts.iter().filter(|a| setup.login_accounts.contains(&a.nickname)).map(|a| a.id).collect()
+}
+
 /// Make it all. Returns what the EVE launcher needs: the profile name and the accounts.
 #[tauri::command]
 pub async fn group_setup_create(app: AppHandle, setup: NewGroup) -> Result<serde_json::Value, String> {
@@ -226,7 +231,7 @@ pub async fn group_setup_create(app: AppHandle, setup: NewGroup) -> Result<serde
     }
 
     // The launch group in Your accounts (its characters; login screens are this PC's).
-    let group_id = save_seat_group(&app, &name, &setup.character_ids).await?;
+    let group_id = save_seat_group(&app, &name, &setup.character_ids, &login_ids(&seat, &setup)).await?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let marker = Marker { name: name.clone(), group_id: Some(group_id), created: stamp, logins: setup.login_accounts.clone() };
     std::fs::write(building.join(MARKER), serde_json::to_string(&marker).unwrap_or_default()).map_err(|e| e.to_string())?;
@@ -254,7 +259,7 @@ pub async fn group_setup_create(app: AppHandle, setup: NewGroup) -> Result<serde
     Ok(serde_json::json!({ "groupId": group_id, "profile": folder, "accounts": summary(&members), "window": setup.window.is_some() }))
 }
 
-async fn save_seat_group(app: &AppHandle, name: &str, ids: &[u64]) -> Result<u64, String> {
+async fn save_seat_group(app: &AppHandle, name: &str, ids: &[u64], logins: &[u64]) -> Result<u64, String> {
     let (cookies, xsrf) = crate::launch::seat_session(app)?;
     let xsrf = xsrf.ok_or("SeAT's session is missing: open Your accounts once, then try again")?;
     let response = crate::http_client()
@@ -263,7 +268,7 @@ async fn save_seat_group(app: &AppHandle, name: &str, ids: &[u64]) -> Result<u64
         .header("Cookie", cookies)
         .header("X-XSRF-TOKEN", xsrf)
         .header("X-Requested-With", "XMLHttpRequest")
-        .json(&serde_json::json!({ "name": name, "character_ids": ids }))
+        .json(&serde_json::json!({ "name": name, "character_ids": ids, "login_account_ids": logins }))
         .timeout(std::time::Duration::from_secs(20))
         .send()
         .await
@@ -332,7 +337,7 @@ pub async fn group_setup_update(app: AppHandle, profile: String, setup: NewGroup
         write_spot(&dir, spot)?;
     }
 
-    let group_id = save_seat_group(&app, &marker.name, &setup.character_ids).await?;
+    let group_id = save_seat_group(&app, &marker.name, &setup.character_ids, &login_ids(&seat, &setup)).await?;
     marker.group_id = Some(group_id);
     marker.logins = setup.login_accounts.clone();
     std::fs::write(dir.join(MARKER), serde_json::to_string(&marker).unwrap_or_default()).map_err(|e| e.to_string())?;
