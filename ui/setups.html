@@ -99,6 +99,20 @@
       <span class="status" id="cmpStatus"></span>
     </div>
     <div class="scroll" style="margin-top: 8px"><table class="cmp" id="cmp"></table></div>
+    <!-- 28 Nov: fix the differences: copy one character's settings over the others compared. -->
+    <div id="match" hidden style="margin-top: 10px; border-top: 1px solid #2a2a30; padding-top: 10px">
+      <b>Make them match</b>
+      <div class="muted" style="margin: 4px 0 8px">Copies the settings files from one character over the others ticked below. A backup of every profile touched is made first (Client settings → Backups puts it back). Close the EVE clients first: a running client writes its settings back when it closes.</div>
+      <div class="row" style="flex-wrap: wrap; gap: 10px; align-items: center">
+        From <select id="matchFrom"></select>
+        <label><input type="checkbox" id="partChar" checked> Windows, overview layout &amp; character options</label>
+        <label><input type="checkbox" id="partAcct"> Keys, overview settings, effects &amp; audio (every account file in their profiles)</label>
+        <label title="The profile's core_public__.yaml: every client in that profile shares it"><input type="checkbox" id="partGfx"> Graphics &amp; window (whole profile)</label>
+      </div>
+      <div class="row" id="matchTo" style="flex-wrap: wrap; gap: 10px; margin: 8px 0"></div>
+      <button class="btn red" id="matchGo">Copy</button>
+      <span class="status" id="matchStatus"></span>
+    </div>
   </div>
 </main>
 
@@ -477,6 +491,52 @@
       if (shown.length > 400) { const r = el("tr"); const c = el("td", "muted", `…and ${shown.length - 400} more`); c.colSpan = chosen.length + 1; r.append(c); t.append(r); }
     });
     say(`${differ} settings differ, ${same} are the same.`);
+    showMatch(chosen);
+  });
+
+  // 28 Nov: Make them match: copy the chosen character's files over the others compared.
+  let matchChosen = [];
+  function showMatch(chosen) {
+    matchChosen = chosen;
+    $("match").hidden = chosen.length < 2;
+    const from = $("matchFrom"); from.innerHTML = "";
+    chosen.forEach((c, i) => from.append(new Option(`${who(c.id)} (settings_${c.folder})`, String(i))));
+    renderMatchTo();
+  }
+  function renderMatchTo() {
+    const host = $("matchTo"); host.innerHTML = "";
+    const fromIndex = Number($("matchFrom").value || 0);
+    matchChosen.forEach((c, i) => {
+      if (i === fromIndex) return;
+      const l = el("label");
+      const box = el("input"); box.type = "checkbox"; box.checked = true; box.dataset.index = String(i);
+      l.append(box, document.createTextNode(" to " + who(c.id)));
+      host.append(l);
+    });
+    $("matchGo").textContent = `Copy from ${who(matchChosen[fromIndex]?.id)}`;
+  }
+  $("matchFrom").addEventListener("change", renderMatchTo);
+  $("matchGo").addEventListener("click", async () => {
+    const say = (t, c) => { $("matchStatus").textContent = t; $("matchStatus").className = "status" + (c ? " " + c : ""); };
+    const base = matchChosen[Number($("matchFrom").value || 0)];
+    const targets = [...$("matchTo").querySelectorAll("input:checked")].map(b => matchChosen[Number(b.dataset.index)]).map(c => ({ profile: c.folder, character_id: Number(c.id) }));
+    const parts = { character: $("partChar").checked, account: $("partAcct").checked, graphics: $("partGfx").checked };
+    if (!targets.length) { say("Tick at least one to copy to.", "bad"); return; }
+    if (!parts.character && !parts.account && !parts.graphics) { say("Tick what to copy.", "bad"); return; }
+    const what = [parts.character && "windows & character options", parts.account && "keys, overview settings, effects & audio", parts.graphics && "graphics & window"].filter(Boolean).join(", ");
+    if (!confirm(`Copy ${what} from ${who(base.id)} to ${targets.length} character${targets.length === 1 ? "" : "s"}? A backup is made first.`)) return;
+    say("Backing up, then copying…");
+    const run = (force) => invoke("profiles_apply_group", { baselineProfile: base.folder, baselineCharacter: Number(base.id), targets, parts, force });
+    try {
+      let msg;
+      try { msg = await run(false); }
+      catch (e) {
+        if (!String(e).includes("close them first") || !confirm(String(e) + "\n\nGo ahead anyway?")) throw e;
+        msg = await run(true);
+      }
+      say(msg, "ok");
+      setTimeout(() => $("compare").click(), 500);
+    } catch (e) { say(String(e), "bad"); }
   });
 
   function render() {
