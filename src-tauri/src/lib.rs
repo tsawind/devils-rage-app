@@ -14,6 +14,7 @@ mod blueraw;
 mod arrange;
 mod audiodetect;
 mod bar;
+mod camrec;
 mod capture;
 mod chatlog;
 mod clientbar;
@@ -500,6 +501,9 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
             devrec::dev_video_start,
             devrec::dev_video_stop,
             devrec::dev_video_status,
+            camrec::camrec_start,
+            camrec::camrec_stop,
+            camrec::camrec_status,
             previews::preview_clients,
             previews::preview_frame,
             previews::preview_focus,
@@ -829,10 +833,15 @@ pub fn run(context: tauri::Context<tauri::Wry>) {
         .run(move |_app, event| {
             // Client Tools has no main window: closing the last preview mustn't end it (Quit in
             // its tray icon does).
-            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
-                if tools {
-                    api.prevent_exit();
+            match event {
+                tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+                    if tools {
+                        api.prevent_exit();
+                    }
                 }
+                // 27 Nov: camera recordings get their files finished (index written).
+                tauri::RunEvent::Exit => camrec::stop_all(),
+                _ => {}
             }
         });
 }

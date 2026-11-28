@@ -21,7 +21,9 @@
   .b.drag.off { cursor: not-allowed; opacity: .35; }
   .b.lock.on { color: #ffcf5a; }
   .b.cam { color: var(--purple); }
-  .b.cam.rec { color: #ff4d4d; }
+  .b.cam.rec { color: #ff4d4d; animation: recblink 1.6s infinite; }
+  @keyframes recblink { 50% { opacity: .45; } }
+  .menu select { background: #0d0d10; color: var(--text); border: 1px solid #3a3a44; border-radius: 6px; font: inherit; padding: 2px 4px; margin-left: 6px; }
   .b.x:hover { background: var(--red); color: #fff; }
   .b.x.sure { background: var(--red-hi); color: #fff; width: 58px; font-size: 11px; font-weight: 600; }
   .gap { flex: 1; }
@@ -136,15 +138,16 @@
 
 <div class="menu" id="camMenu">
   <h4 id="camTitle">Camera</h4>
+  <div class="m">Record this client to a video file on this PC (the app's Videos folder), with its own sound. Nothing leaves the PC.</div>
+  <button class="it" id="rec">⏺ Record this client</button>
+  <div class="row" id="recSpeed"><span class="m" style="margin:0">Pictures a second</span>
+    <select id="recFps"><option value="2">2 (long watches)</option><option value="5" selected>5</option><option value="10">10</option><option value="15">15 (smooth)</option></select></div>
+  <button class="it" id="vidFolder">📁 Open the Videos folder</button>
+  <button class="it" id="snap">📷 Snapshot of this client</button>
+  <hr>
   <div class="m">Surveillance on the mapper (Share a camera): every camera and watch area set up for this client.</div>
   <div class="row"><button id="camOn">Camera on</button><button id="camOff">Camera off</button></div>
   <button class="it" id="camShare">Open Share a camera</button>
-  <hr>
-  <div class="m">Dev recordings (this PC)</div>
-  <button class="it" id="snap">📷 Snapshot of this client</button>
-  <button class="it" id="vid">⏺ Record video of this client (2/s)</button>
-  <button class="it" id="vid10">⏺ Record video, fast (10/s)</button>
-  <button class="it" id="folder">📁 Open the recordings folder</button>
   <div class="say" id="camSay"></div>
 </div>
 
@@ -334,16 +337,17 @@
     invoke("clientbar_close", { name: NAME }).catch(() => {});
   });
 
-  // 📹 Camera (mapper surveillance) and dev recordings of this client.
+  // 📹 Camera: record this client to a video file here (27 Nov), and the mapper's surveillance.
   const target = { kind: "client", name: NAME };
-  let videoTimer = null;
+  const mmss = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
   async function videoState() {
-    const s = await invoke("dev_video_status").catch(() => null);
-    const on = !!s?.on;
-    $("cam").classList.toggle("rec", on);
-    $("vid").textContent = on ? `⏹ Stop video (${s.secs}s, ${s.frames} pictures, ${s.mb.toFixed(0)} MB)` : "⏺ Record video of this client (2/s)";
-    $("vid10").style.display = on ? "none" : "";
-    return on;
+    const all = await invoke("camrec_status").catch(() => []);
+    const me = all.find(r => r.name === NAME);
+    $("cam").classList.toggle("rec", !!me);
+    $("cam").title = me ? `Recording ${mmss(me.secs)} · ${me.mb} MB${me.sound ? "" : " · no sound"}` : "Camera: record this client to a video, and the mapper's surveillance";
+    $("rec").textContent = me ? `⏹ Stop recording (${mmss(me.secs)}, ${me.mb} MB${me.sound ? ", with sound" : ", pictures only"})` : "⏺ Record this client";
+    $("recSpeed").style.display = me ? "none" : "";
+    return me;
   }
   async function openCamera() {
     if (menu === "camMenu") { closeMenus(); back(); return; }
@@ -357,24 +361,20 @@
     say("camSay", "Taking it…");
     try { say("camSay", "Saved " + await invoke("dev_snapshot_take", { target }), "ok"); } catch (e) { say("camSay", String(e), "bad"); }
   });
-  async function video(fps) {
+  $("rec").addEventListener("click", async () => {
     if (await videoState()) {
-      await invoke("dev_video_stop").catch(() => {});
-      clearInterval(videoTimer); videoTimer = null;
-      setTimeout(videoState, 300);
-      say("camSay", "Stopped.", "ok");
+      say("camSay", await invoke("camrec_stop", { name: NAME }).catch(e => String(e)), "ok");
+      setTimeout(videoState, 800);
       return;
     }
     try {
-      await invoke("dev_video_start", { spec: { target, boxes: [], fps, quality: 80, half: false } });
-      say("camSay", `Recording at ${fps}/s…`, "ok");
-      clearInterval(videoTimer); videoTimer = setInterval(videoState, 1000);
-      setTimeout(videoState, 300);
+      say("camSay", await invoke("camrec_start", { name: NAME, fps: Number($("recFps").value) }), "ok");
+      setTimeout(videoState, 600);
     } catch (e) { say("camSay", String(e), "bad"); }
-  }
-  $("vid").addEventListener("click", () => video(2));
-  $("vid10").addEventListener("click", () => video(10));
-  $("folder").addEventListener("click", () => invoke("dev_open_recordings").then(m => say("camSay", m)).catch(e => say("camSay", String(e), "bad")));
+  });
+  $("vidFolder").addEventListener("click", () => invoke("dev_open_kind", { kind: "videos" }).then(m => say("camSay", "Opened " + m)).catch(e => say("camSay", String(e), "bad")));
+  let camTick = 0;
+  setInterval(() => { camTick++; if (menu === "camMenu" || camTick % 3 === 0) videoState(); }, 1000);
   for (const [id, on] of [["camOn", true], ["camOff", false]]) {
     $(id).addEventListener("click", async () => {
       say("camSay", "…");
@@ -384,7 +384,6 @@
   $("camShare").addEventListener("click", async () => {
     try { say("camSay", await invoke("clientbar_camera", { name: NAME, on: true }).then(() => "Share a camera is open.")); } catch (e) { say("camSay", String(e), "bad"); }
   });
-  setInterval(() => { if (menu !== "camMenu") videoState(); }, 3000);
 
   // ⚙ This client.
   $("gear").addEventListener("click", async () => {

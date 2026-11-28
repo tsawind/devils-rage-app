@@ -24,6 +24,10 @@
 
 use tauri::{AppHandle, Manager, Url};
 
+/// 27 Nov: also for the camera recordings' sound (camrec.rs).
+#[cfg(windows)]
+pub(crate) use listen::eve_pid;
+
 /// Tells the page `me` something (a window event).
 fn tell(app: &AppHandle, me: &str, event: &str, detail: serde_json::Value) {
     // Called from the listening thread several times a second: the page is looked up on the
@@ -110,7 +114,7 @@ mod listen {
     static LISTENERS: LazyLock<Mutex<HashMap<String, Listener>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
     /// The process id of "EVE - <character>"'s window.
-    fn eve_pid(character: &str) -> Option<u32> {
+    pub(crate) fn eve_pid(character: &str) -> Option<u32> {
         use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
         use windows_sys::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible};
 
